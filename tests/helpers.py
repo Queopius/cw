@@ -7,6 +7,7 @@ from pathlib import Path
 
 from cw.adapters.codex import CodexResult
 from cw.core.initialize import initialize
+from cw.core.gates import artifact_hashes
 from cw.core.models import WorkflowState
 from cw.core.state import bind_plan, load_state, transition
 from cw.core.workflow import load_workflow, set_plan_status, write_workflow, workflow_hash
@@ -62,12 +63,43 @@ class TempRepo:
         path.write_text(content, encoding="utf-8")
         return path
 
-    def ready(self, phase: int = 1, artifacts: list[str] | None = None, checks=None) -> None:
+    def ready(self, phase: int = 1, artifacts: list[str] | None = None, checks=None, session_id: str | None = None) -> None:
+        from cw.core.session import create_session
+
         path = self.root / ".cw" / "runtime" / "READY_FOR_REVIEW.json"
-        path.write_text(json.dumps({
+        session = self.root / ".cw" / "runtime" / "implementer-session.json"
+        if not session.exists():
+            create_session(self.root, self.workflow, self.workflow.phases[phase - 1])
+        if session_id is None and session.is_file():
+            session_id = json.loads(session.read_text(encoding="utf-8"))["session_id"]
+        payload = {
+            "schema_version": 1,
             "phase": f"{phase:02d}-phase-{phase}", "status": "READY_FOR_REVIEW",
             "artifacts": artifacts or [f"docs/phase-{phase}.md"], "checks_executed": checks or [],
-        }), encoding="utf-8")
+            "session_id": session_id,
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def approved_review(self, phase: int = 1, *, decision: str = "APPROVE") -> str:
+        phase_model = self.workflow.phases[phase - 1]
+        path = self.root / ".cw" / "reviews" / f"{phase_model.id}-fixture.json"
+        path.write_text(json.dumps({
+            "schema_version": 1,
+            "workflow": self.workflow.id,
+            "phase": phase_model.id,
+            "attempt": 1,
+            "kind": "semantic_review",
+            "decision": decision,
+            "criteria": [{
+                "id": phase_model.acceptance_criteria[0].id,
+                "status": "PASS",
+                "evidence": ["fixture evidence"],
+            }],
+            "blocking_issues": [],
+            "artifact_hashes": artifact_hashes(self.root, phase_model.artifacts),
+            "created_at": "2026-08-12T00:00:00Z",
+        }, indent=2), encoding="utf-8")
+        return path.relative_to(self.root).as_posix()
 
 
 class FakeAdapter:
