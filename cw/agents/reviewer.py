@@ -9,13 +9,13 @@ from cw.adapters.codex import CodexAdapter
 from cw.checks.deterministic import validate_phase
 from cw.core.diagnostics import redact, state_error
 from cw.core.errors import CwError, ErrorCode, HumanActionRequired
-from cw.core.gates import artifact_hashes, create_gate
+from cw.core.gates import artifact_hashes, create_gate, validate_approval_review
 from cw.core.models import Phase, ReviewDecision, Workflow, WorkflowState
 from cw.core.reviews import validate_reviewer_result
 from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import finish_session, readiness_path
 from cw.core.state import save_state, transition
-from cw.core.utils import atomic_json_new, load_json, utc_now
+from cw.core.utils import atomic_json_new, utc_now
 
 
 def reviewer_prompt(workflow: Workflow, phase: Phase) -> str:
@@ -129,9 +129,8 @@ def human_approve(root: Path, workflow: Workflow, phase: Phase, state: dict[str,
         raise CwError("No human approval is pending", ErrorCode.INVALID_STATE)
     if not state.get("last_review"):
         raise CwError("Human approval has no review reference", ErrorCode.INVALID_STATE)
-    review_path = root / str(state["last_review"])
-    review = load_json(review_path)
-    expected = review.get("artifact_hashes") if isinstance(review, dict) else None
+    review = validate_approval_review(root, workflow, phase, str(state["last_review"]))
+    expected = review["artifact_hashes"]
     current = artifact_hashes(root, phase.artifacts)
     if not isinstance(expected, dict) or expected != current:
         raise CwError("Artifacts changed after semantic review", ErrorCode.INVALID_GATE, "Reopen and review the phase again.")

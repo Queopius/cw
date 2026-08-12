@@ -9,7 +9,7 @@ from .errors import CwError, ErrorCode
 from .models import Phase, Workflow
 from .reviews import validate_reviewer_result
 from .schema import SCHEMA_VERSION, schema_version
-from .utils import atomic_json, load_json, safe_project_path, sha256_file, utc_now
+from .utils import atomic_json_new, load_json, safe_project_path, sha256_file, utc_now
 
 
 def gate_path(root: Path, phase_id: str) -> Path:
@@ -24,6 +24,38 @@ def artifact_hashes(root: Path, artifacts: tuple[str, ...] | list[str]) -> dict[
             raise CwError(f"Artifact is not a regular file: {value}", ErrorCode.INVALID_GATE)
         hashes[value] = sha256_file(path)
     return hashes
+
+
+def validate_approval_review(root: Path, workflow: Workflow, phase: Phase, reference: str) -> dict[str, Any]:
+    if not reference.startswith(".cw/reviews/"):
+        raise CwError(f"Gate has an invalid review reference: {phase.id}", ErrorCode.INVALID_GATE)
+    review_path = safe_project_path(root, reference, must_exist=True)
+    if review_path.parent != root / ".cw" / "reviews" or not review_path.is_file() or review_path.is_symlink():
+        raise CwError(f"Gate has an invalid review reference: {phase.id}", ErrorCode.INVALID_GATE)
+    review = load_json(review_path)
+    schema_version(review, f"Review evidence for {phase.id}")
+    if (
+        not isinstance(review, dict)
+        or review.get("workflow") != workflow.id
+        or review.get("phase") != phase.id
+        or review.get("kind") != "semantic_review"
+        or review.get("decision") not in {"APPROVE", "HUMAN_REVIEW_REQUIRED"}
+    ):
+        raise CwError(f"Gate review evidence is invalid: {phase.id}", ErrorCode.INVALID_GATE)
+    try:
+        decision, criteria, issues = validate_reviewer_result(phase, review)
+    except CwError as exc:
+        raise CwError(f"Gate review evidence is invalid: {phase.id}", ErrorCode.INVALID_GATE) from exc
+    hashes = review.get("artifact_hashes")
+    if (
+        decision.value != review.get("decision")
+        or criteria != review.get("criteria")
+        or issues != review.get("blocking_issues")
+        or not isinstance(hashes, dict)
+        or set(hashes) != set(phase.artifacts)
+    ):
+        raise CwError(f"Gate review evidence is inconsistent: {phase.id}", ErrorCode.INVALID_GATE)
+    return review
 
 
 def create_gate(
@@ -45,7 +77,10 @@ def create_gate(
     path = gate_path(root, phase.id)
     if path.exists():
         raise CwError(f"Approval gate already exists: {phase.id}", ErrorCode.INVALID_GATE, "Reopen the phase explicitly before reviewing it again.")
-    atomic_json(path, payload)
+    try:
+        atomic_json_new(path, payload)
+    except FileExistsError as exc:
+        raise CwError(f"Approval gate already exists: {phase.id}", ErrorCode.INVALID_GATE, "Reopen the phase explicitly before reviewing it again.") from exc
     return path
 
 
@@ -72,28 +107,11 @@ def validate_gate(root: Path, workflow: Workflow, phase_id: str) -> dict[str, An
     if not isinstance(expected, dict) or set(expected) != set(phase.artifacts):
         raise CwError(f"Gate has no artifact hashes: {phase_id}", ErrorCode.INVALID_GATE)
     reference = data.get("review_reference")
-    if not isinstance(reference, str) or not reference.startswith(".cw/reviews/"):
+    if not isinstance(reference, str):
         raise CwError(f"Gate has an invalid review reference: {phase_id}", ErrorCode.INVALID_GATE)
-    review_path = safe_project_path(root, reference, must_exist=True)
-    if review_path.parent != root / ".cw" / "reviews" or not review_path.is_file() or review_path.is_symlink():
-        raise CwError(f"Gate has an invalid review reference: {phase_id}", ErrorCode.INVALID_GATE)
-    review = load_json(review_path)
-    schema_version(review, f"Review evidence for {phase_id}")
-    if (
-        not isinstance(review, dict)
-        or review.get("workflow") != workflow.id
-        or review.get("phase") != phase_id
-        or review.get("kind") != "semantic_review"
-        or review.get("decision") not in {"APPROVE", "HUMAN_REVIEW_REQUIRED"}
-        or review.get("artifact_hashes") != expected
-    ):
+    review = validate_approval_review(root, workflow, phase, reference)
+    if review.get("artifact_hashes") != expected:
         raise CwError(f"Gate review evidence is invalid: {phase_id}", ErrorCode.INVALID_GATE)
-    try:
-        decision, criteria, issues = validate_reviewer_result(phase, review)
-    except CwError as exc:
-        raise CwError(f"Gate review evidence is invalid: {phase_id}", ErrorCode.INVALID_GATE) from exc
-    if decision.value != review.get("decision") or criteria != review.get("criteria") or issues != review.get("blocking_issues"):
-        raise CwError(f"Gate review evidence is inconsistent: {phase_id}", ErrorCode.INVALID_GATE)
     approval = data.get("approval")
     kind = approval.get("kind") if isinstance(approval, dict) else "semantic" if approval is None else None
     if kind not in {"semantic", "human"}:

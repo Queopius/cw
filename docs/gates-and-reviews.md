@@ -37,4 +37,6 @@ a consistent decision, the complete declared artifact set, and the required
 human-approval marker. Changed approved artifacts or review evidence invalidate
 the gate; CW never recreates it silently.
 After semantic approval of a human-gated phase, `cw review --human-approve` is
-the explicit local action that creates its gate.
+the explicit local action that creates its gate. CW revalidates the review
+identity, decision, complete criterion set, blocking issues, and artifact hashes
+before accepting that human approval; invalid evidence creates no gate.

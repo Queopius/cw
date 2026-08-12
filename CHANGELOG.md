@@ -6,6 +6,8 @@ All notable changes to CW are documented here.
 
 - Preserve review evidence as append-only records with exclusive atomic creation,
   including when an explicit phase reopen restarts semantic attempt numbering.
+- Validate complete semantic review evidence before accepting human approval, and
+  create approval gates atomically without replacing an existing gate.
 
 ## 0.1.2 — 2026-08-12
 

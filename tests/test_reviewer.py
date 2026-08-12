@@ -84,6 +84,23 @@ class ReviewerTests(unittest.TestCase):
         with self.assertRaises(CwError):
             human_approve(self.repo.root, workflow, phase, self.repo.state())
 
+    def test_human_approval_rejects_tampered_review_without_creating_gate(self):
+        import json
+
+        phase = replace(self.repo.workflow.phases[0], requires_human_approval=True)
+        workflow = replace(self.repo.workflow, phases=(phase, *self.repo.workflow.phases[1:]))
+        run_review(self.repo.root, workflow, phase, self.repo.state(), FakeAdapter(result()))
+        review_path = self.repo.root / self.repo.state()["last_review"]
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+        review["criteria"] = []
+        review_path.write_text(json.dumps(review), encoding="utf-8")
+
+        with self.assertRaises(CwError):
+            human_approve(self.repo.root, workflow, phase, self.repo.state())
+
+        self.assertFalse((self.repo.root / ".cw/gates/01-phase-1.approved.json").exists())
+        self.assertEqual("HUMAN_REVIEW_REQUIRED", self.repo.state()["status"])
+
     def test_human_approval_gate_records_and_validates_approval_type(self):
         phase = replace(self.repo.workflow.phases[0], requires_human_approval=True)
         workflow = replace(self.repo.workflow, phases=(phase, *self.repo.workflow.phases[1:]))
