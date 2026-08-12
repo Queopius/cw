@@ -31,15 +31,47 @@ class StateAndGateTests(unittest.TestCase):
             validate_gate(self.repo.root, self.repo.workflow, "01-phase-1")
 
     def test_gate_contains_valid_sha256(self):
-        artifact = self.repo.artifact()
-        gate = create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], ".cw/reviews/review.json")
+        self.repo.artifact()
+        review = self.repo.approved_review()
+        gate = create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], review)
         self.assertIn("sha256:", gate.read_text())
         self.assertEqual(64, len(__import__("json").loads(gate.read_text())["artifact_hashes"]["docs/phase-1.md"].split(":")[1]))
+        validate_gate(self.repo.root, self.repo.workflow, "01-phase-1")
 
     def test_modified_artifact_invalidates_gate(self):
         artifact = self.repo.artifact()
-        create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], "review")
+        review = self.repo.approved_review()
+        create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], review)
         artifact.write_text("changed", encoding="utf-8")
+        with self.assertRaises(CwError):
+            validate_gate(self.repo.root, self.repo.workflow, "01-phase-1")
+
+    def test_gate_rejects_missing_review_evidence(self):
+        self.repo.artifact()
+        create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], ".cw/reviews/missing.json")
+        with self.assertRaises(CwError):
+            validate_gate(self.repo.root, self.repo.workflow, "01-phase-1")
+
+    def test_gate_rejects_omitted_artifact_hash(self):
+        import json
+        self.repo.artifact()
+        review = self.repo.approved_review()
+        gate = create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], review)
+        payload = json.loads(gate.read_text(encoding="utf-8"))
+        payload["artifact_hashes"] = {}
+        gate.write_text(json.dumps(payload), encoding="utf-8")
+        with self.assertRaises(CwError):
+            validate_gate(self.repo.root, self.repo.workflow, "01-phase-1")
+
+    def test_gate_rejects_tampered_review_criteria(self):
+        import json
+        self.repo.artifact()
+        review = self.repo.approved_review()
+        create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], review)
+        review_path = self.repo.root / review
+        payload = json.loads(review_path.read_text(encoding="utf-8"))
+        payload["criteria"] = []
+        review_path.write_text(json.dumps(payload), encoding="utf-8")
         with self.assertRaises(CwError):
             validate_gate(self.repo.root, self.repo.workflow, "01-phase-1")
 

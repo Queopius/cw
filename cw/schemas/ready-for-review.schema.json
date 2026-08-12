@@ -2,9 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["phase", "status", "artifacts", "checks_executed"],
+  "required": ["session_id", "phase", "status", "artifacts", "checks_executed"],
   "properties": {
     "schema_version": {"const": 1},
+    "session_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "phase": {"type": "string"},
     "status": {"const": "READY_FOR_REVIEW"},
     "artifacts": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},

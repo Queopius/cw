@@ -5,7 +5,9 @@ from typing import Any
 
 from cw import __version__
 from .errors import CwError, ErrorCode
+from .layout import safe_file
 from .models import Workflow, WorkflowState
+from .schema import SCHEMA_VERSION, schema_version
 from .utils import atomic_json, load_json, utc_now
 from .workflow import workflow_hash
 
@@ -29,18 +31,19 @@ TRANSITIONS: dict[WorkflowState, set[WorkflowState]] = {
 
 def initial_state(project_id: str) -> dict[str, Any]:
     return {
-        "schema_version": 1, "cw_version": __version__, "workflow_id": project_id,
+        "schema_version": SCHEMA_VERSION, "cw_version": __version__, "workflow_id": project_id,
         "workflow_version": None, "workflow_sha256": None, "current_phase": None,
         "status": WorkflowState.UNINITIALIZED.value, "attempt": 0,
         "last_review": None, "last_gate": None, "last_error": None,
+        "pending_goal": None,
         "history": [], "updated_at": utc_now(),
     }
 
 
 def load_state(root: Path) -> dict[str, Any]:
-    data = load_json(root / ".cw" / "state.json")
-    if not isinstance(data, dict) or data.get("schema_version") != 1:
-        raise CwError("Workflow state schema is incompatible", ErrorCode.INVALID_STATE, "Run: cw repair")
+    path = safe_file(root / ".cw" / "state.json", ".cw/state.json", required=True)
+    data = load_json(path)
+    schema_version(data, "Workflow state")
     try:
         WorkflowState(str(data.get("status")))
     except ValueError as exc:
@@ -68,6 +71,7 @@ def bind_plan(root: Path, state: dict[str, Any], workflow: Workflow) -> None:
         "workflow_sha256": workflow_hash(path),
         "current_phase": workflow.phases[0].id if workflow.phases else None,
         "attempt": 0, "last_review": None, "last_gate": None, "last_error": None,
+        "pending_goal": None,
     })
     save_state(root, state)
 

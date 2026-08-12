@@ -33,7 +33,7 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(1, (home / ".profile").read_text().count('export PATH="$HOME/.local/bin:$PATH"'))
             shutil.rmtree(source)
             completed = subprocess.run([str(launcher), "version", "--json"], env=environment, text=True, capture_output=True, check=True)
-            self.assertEqual("0.1.1", json.loads(completed.stdout)["version"])
+            self.assertEqual("0.1.2", json.loads(completed.stdout)["version"])
 
 
 if __name__ == "__main__":

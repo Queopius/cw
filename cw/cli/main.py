@@ -1,25 +1,33 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import shutil
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import Any, Sequence
 
 from cw import __version__
 from cw.adapters.codex import CodexAdapter
 from cw.agents.reviewer import human_approve, run_review
-from cw.checks.deterministic import validate_phase
+from cw.checks.deterministic import load_readiness, validate_phase
 from cw.core.config import apply_policy, load_config, load_policy
+from cw.core.audit import audit_history
+from cw.core.diagnostics import legacy_diagnostic, load_diagnostic, raw_diagnostic, record_diagnostic, state_error
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_dependencies, validate_gate
 from cw.core.initialize import backup_metadata, initialize, repair
+from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
 from cw.core.locking import operation_lock
+from cw.core.layout import validate_project_layout
 from cw.core.models import WorkflowState
 from cw.core.project import load_project, repository_root
+from cw.core.schema import SCHEMA_VERSION
+from cw.core.session import create_session, finish_session, load_session, process_is_alive, readiness_path
 from cw.core.state import bind_plan, initial_state, load_state, save_state, transition, validate_state
 from cw.core.utils import atomic_json, load_json, utc_now
 from cw.core.workflow import load_workflow, set_plan_status, write_workflow, workflow_hash
@@ -72,6 +80,7 @@ def _root() -> Path:
 
 
 def _context(root: Path) -> tuple[Any, dict[str, Any], Any]:
+    validate_project_layout(root)
     project = load_project(root)
     workflow = load_workflow(root)
     if workflow.id != project.project_id or workflow.repository != project.project_id:
@@ -94,6 +103,8 @@ def _status_payload(root: Path) -> dict[str, Any]:
     index = workflow.index(current) if current and workflow.phases else None
     gates: dict[str, bool] = {}
     gate_error = None
+    gate_error_code = None
+    gate_error_details = None
     for phase in workflow.phases:
         exists = gate_path(root, phase.id).is_file()
         gates[phase.id] = exists
@@ -103,13 +114,16 @@ def _status_payload(root: Path) -> dict[str, Any]:
             except CwError as exc:
                 gates[phase.id] = False
                 gate_error = str(exc)
+                gate_error_code = exc.code.value
+                gate_error_details = exc.details
     return {
-        "schema_version": 1, "project": project.project_id, "repository_root": str(root),
+        "schema_version": SCHEMA_VERSION, "project": project.project_id, "repository_root": str(root),
         "branch": _git_branch(root), "workflow": "INITIALIZED" if not workflow.phases else "ACTIVE",
         "plan": workflow.status, "state": state["status"], "phase": current,
         "phase_index": index, "phase_count": len(workflow.phases), "attempt": state.get("attempt", 0),
         "max_attempts": workflow.max_review_attempts, "ready": (root / ".cw" / "runtime" / "READY_FOR_REVIEW.json").is_file(),
         "gate": gates.get(current, False) if current else False, "gates": gates, "gate_error": gate_error,
+        "gate_error_code": gate_error_code, "gate_error_details": gate_error_details,
         "phases": [{"id": p.id, "name": p.name, "depends_on": list(p.depends_on)} for p in workflow.phases],
         "last_error": state.get("last_error"),
     }
@@ -231,7 +245,23 @@ def command_plan(args: argparse.Namespace, console: Console) -> int:
                 raise CwError("Existing workflow must be rebuilt explicitly", ErrorCode.INVALID_STATE, "Run: cw plan rebuild --goal \"...\"")
         else:
             transition(root, state, WorkflowState.PLANNING)
-        payload = Planner().propose_plan(root, project.project_id, args.goal)
+        state["pending_goal"] = args.goal
+        save_state(root, state)
+        planner = Planner(
+            workflow.human_gate_categories,
+            backend=CodexAdapter(),
+            timeout=workflow.review_timeout,
+        )
+        try:
+            payload = planner.propose_plan(root, project.project_id, args.goal)
+        except CwError as exc:
+            if exc.code in {
+                ErrorCode.CODEX_NOT_FOUND, ErrorCode.PLAN_TIMEOUT,
+                ErrorCode.PLANNER_NETWORK_ERROR, ErrorCode.PLANNER_PROCESS_ERROR,
+            }:
+                state["last_error"] = state_error(exc)
+                transition(root, state, WorkflowState.ERROR, force_error=True)
+            raise
         write_workflow(root / ".codex" / "workflow" / "phases.yaml", payload)
         workflow = load_workflow(root)
         bind_plan(root, state, workflow)
@@ -259,10 +289,17 @@ def _current(workflow: Any, state: dict[str, Any]) -> Any:
 
 
 def command_start(args: argparse.Namespace, console: Console) -> int:
+    if args.json:
+        raise CwError(
+            "JSON mode is not supported for cw start", ErrorCode.USAGE_ERROR,
+            "Run: cw start", exit_code=2,
+        )
     root = _root()
     _, state, workflow = _context(root)
     phase = _current(workflow, state)
     with operation_lock(root, "start"):
+        if not args.json and readiness_path(root).exists():
+            raise CwError("A readiness manifest already exists", ErrorCode.INVALID_STATE, "Run: cw review")
         status = WorkflowState(state["status"])
         if status is WorkflowState.APPROVED:
             validate_gate(root, workflow, phase.id)
@@ -280,22 +317,79 @@ def command_start(args: argparse.Namespace, console: Console) -> int:
         elif status is not WorkflowState.IN_PROGRESS:
             raise CwError(f"Cannot start while workflow is {status.value}", ErrorCode.INVALID_STATE, "Run: cw status")
         validate_dependencies(root, workflow, phase)
+        protected_before = snapshot_protected_paths(root, workflow.protected_paths)
+        session = create_session(root, workflow, phase)
     prompt = f"""Work only on CW phase {phase.id}: {phase.name}.
 Objective: {phase.objective}
 Read AGENTS.md and .codex/workflow/phases.yaml. Do not change workflow state, criteria, reviews, or gates.
-When complete, create .cw/runtime/READY_FOR_REVIEW.json matching the installed schema and stop normally.
+Active implementation session: {session['session_id']}
+When complete, create .cw/runtime/READY_FOR_REVIEW.json matching the installed schema,
+including this exact session_id, and stop normally.
 """
-    if args.json:
-        emit_json({"phase": phase.id, "state": "IN_PROGRESS", "sandbox": "workspace-write"})
-        return 0
     console.header("Start")
     console.item("→", f"{phase.id} · {phase.name}")
     console.field("Sandbox", "workspace-write")
-    return CodexAdapter().run_implementer(root, prompt)
+    failure: CwError | None = None
+    result = 0
+    try:
+        result = CodexAdapter().run_implementer(
+            root,
+            prompt,
+            allow_network=workflow.allow_network,
+            session_id=session["session_id"],
+        )
+    except CwError as exc:
+        failure = exc
+    try:
+        verify_protected_paths(root, workflow, phase, protected_before)
+    except CwError as exc:
+        failure = exc
+    if failure is not None:
+        if failure.code is ErrorCode.PROTECTED_PATH_MODIFIED and protected_before.state is not None:
+            state = copy.deepcopy(protected_before.state)
+            state.setdefault("history", []).append({
+                "timestamp": utc_now(), "phase": phase.id, "action": "protected_path_violation",
+            })
+        else:
+            state = load_state(root)
+        state["last_error"] = state_error(failure)
+        transition(root, state, WorkflowState.ERROR, force_error=True)
+        if not readiness_path(root).exists() or failure.code is ErrorCode.PROTECTED_PATH_MODIFIED:
+            finish_session(root)
+        if failure.code is ErrorCode.PROTECTED_PATH_MODIFIED:
+            readiness_path(root).unlink(missing_ok=True)
+        raise failure
+    state = load_state(root)
+    status = WorkflowState(state["status"])
+    if status is WorkflowState.ERROR:
+        raw_error = str(state.get("last_error") or "")
+        code_value = raw_error.split(":", 1)[0]
+        code = ErrorCode(code_value) if code_value in {item.value for item in ErrorCode} else ErrorCode.WORKFLOW_ERROR
+        raise CwError("Phase review failed", code, "Run: cw retry", details=raw_error)
+    if status is WorkflowState.IN_PROGRESS and not readiness_path(root).exists():
+        failure = CwError(
+            "Codex implementer stopped without readiness", ErrorCode.IMPLEMENTER_PROCESS_ERROR,
+            "Run: cw retry",
+        )
+        state["last_error"] = state_error(failure)
+        transition(root, state, WorkflowState.ERROR, force_error=True)
+        finish_session(root)
+        raise failure
+    if status is WorkflowState.IN_PROGRESS and readiness_path(root).exists():
+        console.item("!", "Phase is ready; automatic review did not run")
+        console.run("cw review")
+    return result
 
 
 def command_status(args: argparse.Namespace, console: Console) -> int:
-    data = _status_payload(_root())
+    root = _root()
+    data = _status_payload(root)
+    if data.get("gate_error"):
+        code = ErrorCode(data.get("gate_error_code") or ErrorCode.INVALID_GATE.value)
+        _record_error(
+            CwError(data["gate_error"], code, "Run: cw repair --reopen <phase>", data.get("gate_error_details")),
+            source="status",
+        )
     if args.json:
         emit_json(data)
     else:
@@ -319,6 +413,14 @@ def command_validate(args: argparse.Namespace, console: Console) -> int:
             console.item("✓" if check.get("status") != "failed" and check.get("exit_code", 0) == 0 else "✕", check["name"])
         console.line()
         console.line("Validation passed." if result.passed else "Validation failed.")
+    if not result.passed:
+        _record_error(
+            CwError(
+                "Deterministic validation failed", ErrorCode.WORKFLOW_ERROR,
+                "Run: cw validate", details="\n".join(result.errors),
+            ),
+            source="validate",
+        )
     return 0 if result.passed else 1
 
 
@@ -346,10 +448,19 @@ def command_review(args: argparse.Namespace, console: Console) -> int:
     root = _root()
     _, state, workflow = _context(root)
     phase = _current(workflow, state)
-    ready = root / ".cw" / "runtime" / "READY_FOR_REVIEW.json"
+    ready = readiness_path(root)
     if args.hook and not ready.exists():
         print("{}")
         return 0
+    if args.hook:
+        session = load_session(root, workflow, phase)
+        if (
+            session is None
+            or os.environ.get("CW_IMPLEMENTER_ACTIVE") != "1"
+            or os.environ.get("CW_IMPLEMENTER_SESSION") != session["session_id"]
+        ):
+            print("{}")
+            return 0
     with operation_lock(root, "review"):
         if args.human_approve:
             gate = human_approve(root, workflow, phase, state)
@@ -359,7 +470,8 @@ def command_review(args: argparse.Namespace, console: Console) -> int:
     if args.hook:
         decision = report.get("decision")
         if decision == "REVISE":
-            print(json.dumps({"decision": "block", "reason": "CW independent review requires revision. Run: cw history"}))
+            reason = "CW independent review requires revision. Run: cw history"
+            print(json.dumps({"continue": False, "stopReason": reason, "systemMessage": reason}))
         else:
             reason = "CW phase review completed. Run: cw status"
             print(json.dumps({"continue": False, "stopReason": reason, "systemMessage": reason}))
@@ -377,7 +489,25 @@ def command_retry(args: argparse.Namespace, console: Console) -> int:
     if WorkflowState(state["status"]) is not WorkflowState.ERROR:
         raise CwError("There is no retryable infrastructure error", ErrorCode.INVALID_STATE)
     error = str(state.get("last_error") or "")
-    if not any(code in error for code in ("REVIEWER_NETWORK_ERROR", "REVIEW_TIMEOUT", "REVIEWER_PROCESS_ERROR", "SCHEMA_VALIDATION_ERROR")):
+    readiness_exists = readiness_path(root).is_file()
+    if "IMPLEMENTER_PROCESS_ERROR" in error and readiness_exists:
+        args.hook = False
+        args.human_approve = False
+        return command_review(args, console)
+    if "IMPLEMENTER_PROCESS_ERROR" in error or (
+        "CODEX_NOT_FOUND" in error and state.get("current_phase") and not readiness_exists
+    ):
+        state["last_error"] = None
+        transition(root, state, WorkflowState.IN_PROGRESS)
+        return command_start(args, console)
+    if any(code in error for code in ("PLANNER_NETWORK_ERROR", "PLANNER_PROCESS_ERROR", "PLAN_TIMEOUT", "CODEX_NOT_FOUND")) and not state.get("current_phase"):
+        goal = state.get("pending_goal")
+        state["last_error"] = None
+        transition(root, state, WorkflowState.PLANNING)
+        args.action = None
+        args.goal = goal
+        return command_plan(args, console)
+    if not any(code in error for code in ("REVIEWER_NETWORK_ERROR", "REVIEW_TIMEOUT", "REVIEWER_PROCESS_ERROR", "SCHEMA_VALIDATION_ERROR", "CODEX_NOT_FOUND")):
         raise CwError("The last error is not safely retryable", ErrorCode.INVALID_STATE, "Run: cw error")
     args.hook = False
     args.human_approve = False
@@ -387,6 +517,7 @@ def command_retry(args: argparse.Namespace, console: Console) -> int:
 def command_history(args: argparse.Namespace, console: Console) -> int:
     root = _root()
     _, state, workflow = _context(root)
+    audit_history(root, workflow, state)
     events = [event for event in state.get("history", []) if not args.phase or event.get("phase") == args.phase]
     payload = {"workflow": workflow.id, "events": events}
     if args.json:
@@ -420,8 +551,36 @@ def _doctor(root: Path | None, reviewer: bool) -> list[dict[str, Any]]:
             {"section": "Workflow", "name": "phases.yaml", "status": "pass", "detail": workflow.status},
             {"section": "Workflow", "name": "State", "status": "pass", "detail": state["status"]},
         ])
+        history = audit_history(root, workflow, state)
+        checks.append({
+            "section": "Workflow", "name": "History integrity", "status": "pass",
+            "detail": f"{history['reviews']} reviews, {history['gates']} gates, {history['events']} events",
+        })
         writable = os.access(root / ".cw", os.W_OK)
         checks.append({"section": "Security", "name": ".cw writable", "status": "pass" if writable else "error", "detail": "required"})
+        snapshot_protected_paths(root, workflow.protected_paths)
+        checks.append({"section": "Security", "name": "Protected paths", "status": "pass", "detail": f"{len(workflow.protected_paths)} enforced"})
+        phase = _current(workflow, state) if workflow.phases and state.get("current_phase") else None
+        session = load_session(root, workflow, phase) if phase else None
+        readiness = readiness_path(root)
+        owner = session.get("owner_pid") if session else None
+        owner_active = isinstance(owner, int) and process_is_alive(owner)
+        if session and not owner_active and not readiness.exists():
+            raise CwError("A stale implementer session exists", ErrorCode.INVALID_STATE, "Run: cw repair")
+        checks.append({
+            "section": "Security", "name": "Implementer session",
+            "status": "pass" if owner_active else "warning" if session else "neutral",
+            "detail": f"active for {session['phase']}" if owner_active else f"detached; review ready for {session['phase']}" if session else "none",
+        })
+        if readiness.exists():
+            if phase is None or session is None:
+                raise CwError("Readiness manifest has no active implementer session", ErrorCode.INVALID_STATE, "Run: cw repair")
+            manifest = load_readiness(root, phase)
+            if manifest["session_id"] != session["session_id"]:
+                raise CwError("Readiness manifest does not belong to the active implementer session", ErrorCode.INVALID_STATE, "Run: cw repair")
+            checks.append({"section": "Security", "name": "Readiness session", "status": "pass", "detail": phase.id})
+        else:
+            checks.append({"section": "Security", "name": "Readiness session", "status": "neutral", "detail": "none"})
         checks.append({"section": "Security", "name": ".codex writable", "status": "neutral", "detail": "not required at runtime"})
         checks.append({"section": "Security", "name": "Hook trust", "status": "neutral", "detail": "managed by Codex; run /hooks if prompted"})
         if reviewer:
@@ -468,18 +627,39 @@ def command_doctor(args: argparse.Namespace, console: Console) -> int:
 
 def command_error(args: argparse.Namespace, console: Console) -> int:
     root = _root()
-    _, state, _ = _context(root)
-    value = state.get("last_error")
-    payload = {"error": value}
+    record = load_diagnostic(root)
+    if record is None:
+        try:
+            state = load_json(root / ".cw/state.json")
+            record = legacy_diagnostic(state.get("last_error") if isinstance(state, dict) else None)
+        except CwError:
+            record = None
+    payload = {"error": record}
     if args.json:
         emit_json(payload)
     else:
         console.header("Error")
-        if value:
-            console.line(value if args.raw else value)
+        if record and args.raw:
+            console.line(raw_diagnostic(record))
+        elif record:
+            title, detail = error_summary(record["code"], record["message"])
+            console.item("✕", title)
+            console.field("Code", record["code"])
+            console.field("When", record["timestamp"])
+            console.wrapped(detail)
+            if record.get("details"):
+                console.line()
+                console.line("Details")
+                console.wrapped(str(record["details"]))
+            if args.verbose and record.get("traceback"):
+                console.line()
+                console.line("Traceback")
+                console.line(str(record["traceback"]))
+            if record.get("hint"):
+                console.run(str(record["hint"]).removeprefix("Run: "))
         else:
             console.item("✓", "No stored workflow error")
-    return 1 if value else 0
+    return 1 if record else 0
 
 
 def command_repair(args: argparse.Namespace, console: Console) -> int:
@@ -555,13 +735,10 @@ COMMANDS = {
 }
 
 
-def _record_error(exc: CwError) -> None:
+def _record_error(exc: CwError, *, source: str | None = None, traceback_text: str | None = None) -> None:
     try:
         root = repository_root(Path.cwd())
-        log = root / ".cw" / "logs" / "errors.jsonl"
-        if log.parent.is_dir():
-            with log.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps({"timestamp": utc_now(), "code": exc.code.value, "message": exc.message, "details": exc.details}) + "\n")
+        record_diagnostic(root, exc, source=source, traceback_text=traceback_text)
     except Exception:
         pass
 
@@ -584,7 +761,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return COMMANDS[command](args, console)
     except CwError as exc:
-        _record_error(exc)
+        _record_error(exc, source=command)
         if getattr(args, "hook", False):
             reason = f"{exc.message}. {exc.hint or 'Run: cw error'}"
             print(json.dumps({"continue": False, "stopReason": reason, "systemMessage": reason}))
@@ -602,6 +779,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             if exc.hint:
                 console.run(exc.hint.removeprefix("Run: "))
         return exc.exit_code
+    except Exception as exc:
+        internal = CwError(
+            "Unexpected internal failure", ErrorCode.INTERNAL_ERROR,
+            "Run: cw error", details=f"{type(exc).__name__}: {exc}",
+        )
+        _record_error(internal, source=command, traceback_text=traceback.format_exc())
+        if args.json:
+            emit_json({"error": {"code": internal.code.value, "message": internal.message, "hint": internal.hint}})
+        elif not args.quiet:
+            title, detail = error_summary(internal.code.value, internal.message)
+            console.item("✕", title)
+            console.wrapped(detail)
+            if args.verbose:
+                console.line()
+                console.wrapped(internal.details or "")
+            console.run("cw error")
+        return 1
     except KeyboardInterrupt:
         return 130
 

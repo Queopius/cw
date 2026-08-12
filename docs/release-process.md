@@ -33,3 +33,14 @@ long-lived branches.
 The Release Check workflow rejects tags whose commit is not reachable from
 `origin/release` or whose name does not match the repository `VERSION`. It builds
 artifacts for inspection but does not publish them to PyPI.
+Before promotion, run the offline installation/isolation demonstration:
+
+```bash
+make demo
+```
+
+It installs CW by copy into a temporary HOME, runs `cw init` in two independent
+Git repositories, generates repository-specific plans without network access,
+approves a phase in repository A through a simulated independent reviewer, and
+asserts that repository B's identity, plan, state, and gates are byte-for-byte
+unchanged. The underlying reproducible runner is `scripts/demo_isolation.py`.
