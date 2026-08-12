@@ -131,7 +131,12 @@ def initialize(root: Path) -> tuple[Project, bool]:
         atomic_json(state, data)
     config = cw / "config.toml"
     if not config.exists():
-        atomic_write(config, "# Project settings override global settings.\nmax_review_attempts = 3\ncommand_timeout = 1200\nreview_timeout = 1200\nallow_network = false\n")
+        atomic_write(config, """# Project settings override ~/.config/cw/config.toml when uncommented.
+# max_review_attempts = 3
+# command_timeout = 1200
+# review_timeout = 1200
+# allow_network = false
+""")
     return project, created
 
 

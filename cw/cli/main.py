@@ -13,7 +13,7 @@ from cw import __version__
 from cw.adapters.codex import CodexAdapter
 from cw.agents.reviewer import human_approve, run_review
 from cw.checks.deterministic import validate_phase
-from cw.core.config import load_config
+from cw.core.config import apply_policy, load_config, load_policy
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_dependencies, validate_gate
 from cw.core.initialize import backup_metadata, initialize, repair
@@ -76,6 +76,7 @@ def _context(root: Path) -> tuple[Any, dict[str, Any], Any]:
     workflow = load_workflow(root)
     if workflow.id != project.project_id or workflow.repository != project.project_id:
         raise CwError("Project workflow mismatch", ErrorCode.WORKFLOW_PROJECT_MISMATCH, "Run: cw repair", details=f"Workflow: {workflow.repository or workflow.id}\nRepository: {project.project_id}")
+    workflow = apply_policy(workflow, load_policy(root, workflow=workflow))
     state = load_state(root)
     if workflow.phases:
         validate_state(root, state, workflow)
@@ -523,7 +524,8 @@ def command_repair(args: argparse.Namespace, console: Console) -> int:
 def command_config(args: argparse.Namespace, console: Console) -> int:
     root = _root()
     load_project(root)
-    config = load_config(root)
+    workflow = load_workflow(root)
+    config = load_config(root, workflow=workflow)
     if args.json:
         emit_json(config)
     else:

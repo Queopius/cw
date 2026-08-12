@@ -1,0 +1,43 @@
+name: Release Check
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify release provenance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Require tag commit on release branch
+        run: |
+          git fetch origin release
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/release
+      - name: Require tag to match VERSION
+        run: |
+          release_version=${GITHUB_REF_NAME#v}
+          test "$release_version" = "$(tr -d '\n' < VERSION)"
+      - name: Test release
+        run: make check
+      - name: Build release distributions
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+      - name: Upload release distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cw-${{ github.ref_name }}
+          path: dist/*
+          if-no-files-found: error
