@@ -18,10 +18,62 @@ The shell installer and generated launcher contain no workflow business logic.
 The installed package owns runtime code; a project receives only static Codex
 integration. Runtime operations do not need `.codex` to be writable.
 
-The core uses dependency-injected reviewer adapters, dataclasses, enums, pathlib,
-typed errors, and explicit transitions. This keeps normal tests offline and
-allows future planner backends, presets, goal-scoped subworkflows, a dashboard,
-and a gated autopilot without weakening the existing gate invariant.
+`cw.core.layout` defines the trusted project filesystem topology. Validation is
+performed before init writes, lock acquisition, normal context loading, repair,
+and backup. Individual critical loaders retain their own regular-file checks as
+defense in depth.
+
+The release demo executes against the copied installation under
+`~/.local/share/cw`, not through an editable checkout. It uses dependency
+injection for the offline reviewer while retaining real state transitions,
+readiness validation, artifact hashing, and gate creation.
+
+The core uses dependency-injected planner and reviewer adapters, dataclasses,
+enums, pathlib, typed errors, and explicit transitions. Codex planning and review
+both use ephemeral structured-output calls, while normal tests inject offline
+fakes. This allows future providers, presets, goal-scoped subworkflows, a
+dashboard, and a gated autopilot without weakening the existing gate invariant.
 
 No third-party CLI/UI framework is used in v0.1. This minimizes installation
 cost, enables a self-contained global copy, and keeps behavior auditable.
+
+## Schema compatibility and historical audit
+
+Critical JSON/YAML documents carry `schema_version`. CW centralizes the
+compatibility rule: schema 1 is accepted, schema-less prototype documents are a
+known legacy input for `cw repair`, invalid versions are rejected, and a version
+newer than the installed binary always fails closed with an upgrade instruction.
+Repair performs a complete compatibility pass before its first metadata write.
+
+Migration is backup-first and atomic. CW never rewrites a future schema as an
+older one. Project identity, state, workflow plans, reviews, gates, and runtime
+manifests participate in this check.
+
+Repair uses the non-secret Git-local repository fingerprint as its identity
+boundary. Matching fingerprints permit a normal directory rename and retain the
+plan. A differing fingerprint means the metadata was copied from another repo:
+CW backs it up, then clears active plan, state, policy overrides, runtime,
+reviews, gates, logs, and legacy mutable paths instead of adopting them.
+For a matching fingerprint, repository rename migration atomically rebinds the
+workflow ID in retained reviews, gates, and an optional session after backup;
+criteria, decisions, artifact hashes, and approval history are unchanged and
+must still pass the full historical audit.
+
+`cw doctor` audits all retained review and gate files, not only the current
+phase. It validates review criteria and decisions, gate-to-review references,
+gate artifact integrity, state references, and the known event vocabulary in
+the append-only history. Unknown evidence is an error rather than approval.
+
+## Diagnostics
+
+Diagnostics are separate from workflow state. The latest structured record is
+written atomically to `.cw/logs/last-error.json`; distinct failures are appended
+to `.cw/logs/errors.jsonl`. This lets `cw error` remain usable when project state
+or a workflow schema cannot be loaded. An informational log cannot approve a
+phase or influence the state machine.
+
+Known credential forms are redacted before details reach either diagnostics or
+`state.json`. Normal commands show a compact classified message, `cw error`
+shows the stored detail, and `cw error --raw` additionally exposes the redacted
+internal traceback when one exists. Unexpected Python exceptions are converted
+to `INTERNAL_ERROR` instead of printing a traceback during daily use.

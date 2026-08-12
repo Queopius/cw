@@ -89,6 +89,9 @@ class Workflow:
     max_review_attempts: int = 3
     command_timeout: int = 1200
     review_timeout: int = 1200
+    allow_network: bool = False
+    protected_paths: tuple[str, ...] = ()
+    human_gate_categories: tuple[str, ...] = ()
 
     def phase(self, phase_id: str) -> Phase:
         for phase in self.phases:

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 from cw.checks.deterministic import load_readiness
-from cw.core.errors import CwError
+from cw.core.errors import CwError, ErrorCode
 from cw.core.initialize import initialize, repair
 from cw.core.project import load_project
 from cw.core.utils import safe_project_path
@@ -105,6 +106,102 @@ class InitAndSecurityTests(unittest.TestCase):
         finally:
             repo.close()
 
+    def test_repair_preserves_plan_after_same_repository_rename(self):
+        from tests.helpers import TempRepo
+        from cw.core.state import load_state, validate_state
+        from cw.core.workflow import load_workflow
+
+        repo = TempRepo()
+        try:
+            moved = repo.root.with_name("renamed-app")
+            repo.root.rename(moved)
+            repo.root = moved
+            backup = repair(moved)
+            workflow = load_workflow(moved)
+            state = load_state(moved)
+            self.assertEqual("renamed-app", workflow.id)
+            self.assertEqual(2, len(workflow.phases))
+            self.assertEqual("renamed-app", state["workflow_id"])
+            validate_state(moved, state, workflow)
+            self.assertTrue((backup / "phases.yaml").is_file())
+        finally:
+            repo.close()
+
+    def test_repair_preserves_approved_evidence_after_same_repository_rename(self):
+        from tests.helpers import FakeAdapter, TempRepo, result
+        from cw.agents.reviewer import run_review
+        from cw.core.audit import audit_history
+        from cw.core.gates import validate_gate
+        from cw.core.state import load_state, validate_state
+        from cw.core.workflow import load_workflow
+
+        repo = TempRepo()
+        try:
+            repo.artifact(); repo.ready()
+            run_review(repo.root, repo.workflow, repo.workflow.phases[0], repo.state(), FakeAdapter(result()))
+            moved = repo.root.with_name("renamed-approved-app")
+            repo.root.rename(moved); repo.root = moved
+
+            repair(moved)
+
+            workflow = load_workflow(moved)
+            state = load_state(moved)
+            validate_state(moved, state, workflow)
+            validate_gate(moved, workflow, workflow.phases[0].id)
+            self.assertEqual({"reviews": 1, "gates": 1, "events": 1}, audit_history(moved, workflow, state))
+            review = json.loads((moved / state["last_review"]).read_text(encoding="utf-8"))
+            gate = json.loads((moved / state["last_gate"]).read_text(encoding="utf-8"))
+            self.assertEqual("renamed-approved-app", review["workflow"])
+            self.assertEqual("renamed-approved-app", gate["workflow"])
+        finally:
+            repo.close()
+
+    def test_repair_never_adopts_foreign_repository_workflow(self):
+        from tests.helpers import TempRepo
+        from cw.core.gates import create_gate
+        from cw.core.state import load_state
+        from cw.core.workflow import load_workflow
+
+        source = TempRepo(name="same-name")
+        target = TempRepo(name="same-name")
+        try:
+            source.artifact()
+            review = source.approved_review()
+            gate = create_gate(source.root, source.workflow, source.workflow.phases[0], review)
+            (source.root / ".cw/config.toml").write_text("allow_network = true\n", encoding="utf-8")
+            (source.root / ".cw/logs/source.log").write_text("foreign", encoding="utf-8")
+            for relative in ("project.json", "state.json", "config.toml"):
+                shutil.copy2(source.root / ".cw" / relative, target.root / ".cw" / relative)
+            shutil.copy2(
+                source.root / ".codex/workflow/phases.yaml",
+                target.root / ".codex/workflow/phases.yaml",
+            )
+            shutil.copy2(source.root / review, target.root / ".cw/reviews" / Path(review).name)
+            shutil.copy2(gate, target.root / ".cw/gates" / gate.name)
+            shutil.copy2(source.root / ".cw/logs/source.log", target.root / ".cw/logs/source.log")
+
+            backup = repair(target.root)
+
+            workflow = load_workflow(target.root)
+            state = load_state(target.root)
+            self.assertEqual("NOT_CREATED", workflow.status)
+            self.assertEqual((), workflow.phases)
+            self.assertEqual("UNINITIALIZED", state["status"])
+            self.assertEqual([], list((target.root / ".cw/reviews").iterdir()))
+            self.assertEqual([], list((target.root / ".cw/gates").iterdir()))
+            self.assertEqual([], list((target.root / ".cw/logs").iterdir()))
+            self.assertNotIn("allow_network = true", (target.root / ".cw/config.toml").read_text(encoding="utf-8"))
+            self.assertTrue((backup / "reviews" / Path(review).name).is_file())
+            self.assertTrue((backup / "gates" / gate.name).is_file())
+            self.assertTrue((backup / "phases.yaml").is_file())
+            self.assertNotEqual(
+                json.loads((source.root / ".cw/project.json").read_text())["repository_root_fingerprint"],
+                json.loads((target.root / ".cw/project.json").read_text())["repository_root_fingerprint"],
+            )
+        finally:
+            source.close()
+            target.close()
+
     def test_init_rejects_foreign_plan(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = self.repo(Path(temporary), "alpha")
@@ -113,6 +210,27 @@ class InitAndSecurityTests(unittest.TestCase):
             plan.write_text(plan.read_text().replace('"alpha"', '"foreign"'), encoding="utf-8")
             with self.assertRaises(CwError):
                 initialize(root)
+
+    def test_init_rejects_schema_less_foreign_metadata_before_migration(self):
+        from tests.helpers import TempRepo
+
+        source = TempRepo(name="same-name")
+        target = TempRepo(name="same-name")
+        try:
+            tracked = (".cw/project.json", ".cw/state.json", ".codex/workflow/phases.yaml")
+            for relative in tracked:
+                data = json.loads((source.root / relative).read_text(encoding="utf-8"))
+                data.pop("schema_version")
+                (target.root / relative).write_text(json.dumps(data), encoding="utf-8")
+            before = {relative: (target.root / relative).read_bytes() for relative in tracked}
+            with self.assertRaises(CwError) as caught:
+                initialize(target.root)
+            self.assertEqual(ErrorCode.WORKFLOW_PROJECT_MISMATCH, caught.exception.code)
+            self.assertEqual(before, {relative: (target.root / relative).read_bytes() for relative in tracked})
+            self.assertEqual([], list((target.root / ".cw/backups").iterdir()))
+        finally:
+            source.close()
+            target.close()
 
     def test_legacy_state_migrates(self):
         with tempfile.TemporaryDirectory() as temporary:
