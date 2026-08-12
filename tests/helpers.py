@@ -64,16 +64,20 @@ class TempRepo:
         return path
 
     def ready(self, phase: int = 1, artifacts: list[str] | None = None, checks=None, session_id: str | None = None) -> None:
+        from cw.core.session import create_session
+
         path = self.root / ".cw" / "runtime" / "READY_FOR_REVIEW.json"
         session = self.root / ".cw" / "runtime" / "implementer-session.json"
+        if not session.exists():
+            create_session(self.root, self.workflow, self.workflow.phases[phase - 1])
         if session_id is None and session.is_file():
             session_id = json.loads(session.read_text(encoding="utf-8"))["session_id"]
         payload = {
+            "schema_version": 1,
             "phase": f"{phase:02d}-phase-{phase}", "status": "READY_FOR_REVIEW",
             "artifacts": artifacts or [f"docs/phase-{phase}.md"], "checks_executed": checks or [],
+            "session_id": session_id,
         }
-        if session_id is not None:
-            payload["session_id"] = session_id
         path.write_text(json.dumps(payload), encoding="utf-8")
 
     def approved_review(self, phase: int = 1, *, decision: str = "APPROVE") -> str:

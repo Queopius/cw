@@ -7,6 +7,7 @@ from typing import Any
 
 from .errors import CwError, ErrorCode
 from .models import Phase, Workflow
+from .schema import SCHEMA_VERSION, schema_version
 from .utils import atomic_json, load_json, utc_now
 
 
@@ -31,7 +32,7 @@ def create_session(root: Path, workflow: Workflow, phase: Phase) -> dict[str, An
             details=READINESS_FILE,
         )
     payload = {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "session_id": secrets.token_hex(16),
         "workflow": workflow.id,
         "phase": phase.id,
@@ -49,10 +50,10 @@ def load_session(root: Path, workflow: Workflow, phase: Phase) -> dict[str, Any]
     if path.is_symlink():
         raise CwError("Implementer session metadata cannot be a symlink", ErrorCode.INVALID_STATE, "Run: cw repair")
     data = load_json(path)
+    schema_version(data, "Implementer session")
     if (
         not isinstance(data, dict)
         or set(data) != {"schema_version", "session_id", "workflow", "phase", "status", "started_at"}
-        or data.get("schema_version") != 1
         or not isinstance(data.get("session_id"), str)
         or re.fullmatch(r"[0-9a-f]{32}", data["session_id"]) is None
         or data.get("workflow") != workflow.id

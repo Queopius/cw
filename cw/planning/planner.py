@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from cw.core.errors import CwError, ErrorCode
+from cw.core.schema import SCHEMA_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,7 +270,7 @@ paths. Do not invent work unrelated to the stated goal.
         backend: str = "deterministic",
     ) -> dict[str, Any]:
         return {
-            "schema_version": 1,
+            "schema_version": SCHEMA_VERSION,
             "workflow": {"id": project_id, "repository": project_id, "version": 1, "status": "PROPOSED", "goal": objective},
             "settings": {"max_review_attempts": 3, "command_timeout_seconds": 1200},
             "reviewer": {"command": "codex", "timeout_seconds": 1200, "sandbox": "read-only"},

@@ -65,6 +65,7 @@ def error_summary(code: str, message: str) -> tuple[str, str]:
         "PROTECTED_PATH_MODIFIED": ("Protected workflow metadata changed", "CW detected an unauthorized metadata change and stopped safely."),
         "CODEX_NOT_FOUND": ("Codex not found", "The Codex CLI is required for planning and agent operations."),
         "SCHEMA_VALIDATION_ERROR": ("Workflow data invalid", message),
+        "SCHEMA_VERSION_ERROR": ("Workflow schema incompatible", message),
         "PLAN_UNCLEAR": ("Project goal is unclear", message),
         "LOCKED": ("Another CW operation is active", message),
     }

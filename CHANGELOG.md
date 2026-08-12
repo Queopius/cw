@@ -21,6 +21,11 @@ All notable changes to CW are documented here.
 - Bind readiness manifests to atomic implementer sessions, keep the Stop hook
   inert outside CW, consume successful/rejected readiness exactly once, and
   preserve infrastructure-failed readiness for reviewer-only retry.
+- Centralize metadata schema compatibility, migrate schema-less prototype
+  documents through backup-first repair, and reject future schemas without
+  overwriting them.
+- Audit every retained review, gate, state reference, and workflow history event
+  through `cw doctor`, including historical phases.
 
 ## 0.1.1 — 2026-08-12
 

@@ -13,8 +13,9 @@ from typing import Any, Sequence
 from cw import __version__
 from cw.adapters.codex import CodexAdapter
 from cw.agents.reviewer import human_approve, run_review
-from cw.checks.deterministic import validate_phase
+from cw.checks.deterministic import load_readiness, validate_phase
 from cw.core.config import apply_policy, load_config, load_policy
+from cw.core.audit import audit_history
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_dependencies, validate_gate
 from cw.core.initialize import backup_metadata, initialize, repair
@@ -22,6 +23,7 @@ from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
 from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
 from cw.core.project import load_project, repository_root
+from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import create_session, load_session, readiness_path
 from cw.core.state import bind_plan, initial_state, load_state, save_state, transition, validate_state
 from cw.core.utils import atomic_json, load_json, utc_now
@@ -107,7 +109,7 @@ def _status_payload(root: Path) -> dict[str, Any]:
                 gates[phase.id] = False
                 gate_error = str(exc)
     return {
-        "schema_version": 1, "project": project.project_id, "repository_root": str(root),
+        "schema_version": SCHEMA_VERSION, "project": project.project_id, "repository_root": str(root),
         "branch": _git_branch(root), "workflow": "INITIALIZED" if not workflow.phases else "ACTIVE",
         "plan": workflow.status, "state": state["status"], "phase": current,
         "phase_index": index, "phase_count": len(workflow.phases), "attempt": state.get("attempt", 0),
@@ -499,6 +501,11 @@ def _doctor(root: Path | None, reviewer: bool) -> list[dict[str, Any]]:
             {"section": "Workflow", "name": "phases.yaml", "status": "pass", "detail": workflow.status},
             {"section": "Workflow", "name": "State", "status": "pass", "detail": state["status"]},
         ])
+        history = audit_history(root, workflow, state)
+        checks.append({
+            "section": "Workflow", "name": "History integrity", "status": "pass",
+            "detail": f"{history['reviews']} reviews, {history['gates']} gates, {history['events']} events",
+        })
         writable = os.access(root / ".cw", os.W_OK)
         checks.append({"section": "Security", "name": ".cw writable", "status": "pass" if writable else "error", "detail": "required"})
         snapshot_protected_paths(root, workflow.protected_paths)
@@ -510,6 +517,16 @@ def _doctor(root: Path | None, reviewer: bool) -> list[dict[str, Any]]:
             "status": "pass" if session else "neutral",
             "detail": f"active for {session['phase']}" if session else "none",
         })
+        readiness = readiness_path(root)
+        if readiness.exists():
+            if phase is None or session is None:
+                raise CwError("Readiness manifest has no active implementer session", ErrorCode.INVALID_STATE, "Run: cw repair")
+            manifest = load_readiness(root, phase)
+            if manifest["session_id"] != session["session_id"]:
+                raise CwError("Readiness manifest does not belong to the active implementer session", ErrorCode.INVALID_STATE, "Run: cw repair")
+            checks.append({"section": "Security", "name": "Readiness session", "status": "pass", "detail": phase.id})
+        else:
+            checks.append({"section": "Security", "name": "Readiness session", "status": "neutral", "detail": "none"})
         checks.append({"section": "Security", "name": ".codex writable", "status": "neutral", "detail": "not required at runtime"})
         checks.append({"section": "Security", "name": "Hook trust", "status": "neutral", "detail": "managed by Codex; run /hooks if prompted"})
         if reviewer:

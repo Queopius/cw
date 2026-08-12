@@ -11,6 +11,7 @@ from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import artifact_hashes, validate_dependencies
 from cw.core.models import Phase, ValidationResult, Workflow
 from cw.core.session import load_session, readiness_path
+from cw.core.schema import schema_version
 from cw.core.utils import load_json, safe_project_path
 
 
@@ -21,14 +22,11 @@ def load_readiness(root: Path, phase: Phase) -> dict[str, Any]:
     data = load_json(path)
     if not isinstance(data, dict):
         raise CwError("Readiness manifest must be an object", ErrorCode.SCHEMA_VALIDATION_ERROR)
+    schema_version(data, "Readiness manifest")
     allowed = {"schema_version", "session_id", "phase", "status", "artifacts", "checks_executed"}
     if set(data) - allowed:
         raise CwError("Readiness manifest has unknown fields", ErrorCode.SCHEMA_VALIDATION_ERROR)
-    if data.get("schema_version", 1) != 1:
-        raise CwError("Readiness manifest schema is incompatible", ErrorCode.SCHEMA_VALIDATION_ERROR)
-    if "session_id" in data and (
-        not isinstance(data["session_id"], str) or re.fullmatch(r"[0-9a-f]{32}", data["session_id"]) is None
-    ):
+    if not isinstance(data.get("session_id"), str) or re.fullmatch(r"[0-9a-f]{32}", data["session_id"]) is None:
         raise CwError("Readiness session ID is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
     if data.get("phase") != phase.id or data.get("status") != "READY_FOR_REVIEW":
         raise CwError("Readiness manifest phase or status mismatch", ErrorCode.SCHEMA_VALIDATION_ERROR)
@@ -63,7 +61,9 @@ def validate_phase(root: Path, workflow: Workflow, phase: Phase) -> ValidationRe
     try:
         manifest = load_readiness(root, phase)
         session = load_session(root, workflow, phase)
-        if session is not None and manifest.get("session_id") != session["session_id"]:
+        if session is None:
+            raise CwError("Readiness manifest has no active implementer session", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if manifest["session_id"] != session["session_id"]:
             raise CwError("Readiness manifest does not belong to the active implementer session", ErrorCode.SCHEMA_VALIDATION_ERROR)
         result.checks.append({"name": "Manifest", "status": "passed"})
         validate_dependencies(root, workflow, phase)

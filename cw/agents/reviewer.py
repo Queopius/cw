@@ -11,6 +11,7 @@ from cw.core.errors import CwError, ErrorCode, HumanActionRequired
 from cw.core.gates import artifact_hashes, create_gate
 from cw.core.models import Phase, ReviewDecision, Workflow, WorkflowState
 from cw.core.reviews import validate_reviewer_result
+from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import finish_session, readiness_path
 from cw.core.state import save_state, transition
 from cw.core.utils import atomic_json, load_json, utc_now
@@ -62,7 +63,7 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
         state["last_error"] = f"{exc.code.value}: {exc.message}\n{exc.details or ''}".rstrip()
         transition(root, state, WorkflowState.ERROR, force_error=True)
         report = {
-            "schema_version": 1, "workflow": workflow.id, "phase": phase.id,
+            "schema_version": SCHEMA_VERSION, "workflow": workflow.id, "phase": phase.id,
             "attempt": attempt, "kind": "infrastructure_error", "error_code": exc.code.value,
             "error": exc.message, "details": exc.details, "created_at": utc_now(),
         }
@@ -74,7 +75,7 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
 
     state["attempt"] = attempt
     report = {
-        "schema_version": 1, "workflow": workflow.id, "phase": phase.id, "attempt": attempt,
+        "schema_version": SCHEMA_VERSION, "workflow": workflow.id, "phase": phase.id, "attempt": attempt,
         "kind": "semantic_review", "decision": decision.value, "criteria": criteria,
         "blocking_issues": issues, "artifact_hashes": validation.artifact_hashes, "created_at": utc_now(),
     }

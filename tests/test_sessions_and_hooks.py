@@ -57,6 +57,25 @@ class SessionAndHookTests(unittest.TestCase):
         self.assertFalse(validation.passed)
         self.assertIn("active implementer session", validation.errors[0])
 
+    def test_readiness_without_active_session_fails_closed(self):
+        self.repo.artifact()
+        self.repo.ready()
+        session_path(self.repo.root).unlink()
+        validation = validate_phase(self.repo.root, self.repo.workflow, self.phase)
+        self.assertFalse(validation.passed)
+        self.assertIn("no active implementer session", validation.errors[0])
+
+    def test_readiness_requires_schema_version(self):
+        self.repo.artifact()
+        self.repo.ready()
+        readiness = self.repo.root / ".cw/runtime/READY_FOR_REVIEW.json"
+        payload = json.loads(readiness.read_text(encoding="utf-8"))
+        payload.pop("schema_version")
+        readiness.write_text(json.dumps(payload), encoding="utf-8")
+        validation = validate_phase(self.repo.root, self.repo.workflow, self.phase)
+        self.assertFalse(validation.passed)
+        self.assertIn("schema version is invalid", validation.errors[0])
+
     def test_semantic_review_consumes_readiness_and_session(self):
         self.repo.artifact()
         create_session(self.repo.root, self.repo.workflow, self.phase)

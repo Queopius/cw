@@ -11,6 +11,14 @@ Normal status output shows a short classified error. Use `cw error` for stored
 details and `cw error --raw` for scripts expecting the original diagnostic.
 
 - **Project workflow mismatch:** run `cw repair`; CW backs up metadata first.
+- **Schema requires migration:** run `cw repair`. CW creates a metadata backup,
+  upgrades known schema-less prototype records atomically, and leaves application
+  source files untouched.
+- **Metadata created by a newer CW schema:** upgrade CW before continuing. Do not
+  use repair to downgrade it; CW deliberately leaves the newer document intact.
+- **History integrity failure:** inspect `cw doctor --json` and the referenced
+  file under `.cw/reviews/`, `.cw/gates/`, or `.cw/state.json`. CW will not delete
+  or regenerate historical approval evidence automatically.
 - **Reviewer unavailable or timed out:** preserve readiness and run `cw retry`.
 - **Planner unavailable, invalid, or timed out:** CW preserves the pending goal,
   writes no partial plan, and `cw retry` reruns planning.

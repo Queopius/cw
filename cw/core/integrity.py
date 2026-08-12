@@ -8,6 +8,7 @@ from .errors import CwError, ErrorCode
 from .gates import artifact_hashes, validate_gate
 from .models import Phase, ReviewDecision, Workflow, WorkflowState
 from .reviews import validate_reviewer_result
+from .schema import schema_version
 from .state import load_state
 from .utils import load_json, safe_project_path, sha256_file
 
@@ -83,9 +84,9 @@ def _validate_review(
     if reference != state.get("last_review"):
         raise CwError("Protected review was not recorded in workflow state", ErrorCode.PROTECTED_PATH_MODIFIED)
     report = load_json(safe_project_path(root, reference, must_exist=True))
+    schema_version(report, "Protected review")
     if (
         not isinstance(report, dict)
-        or report.get("schema_version") != 1
         or report.get("workflow") != workflow.id
         or report.get("phase") != phase.id
         or not isinstance(report.get("attempt"), int)

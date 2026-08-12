@@ -34,3 +34,8 @@ selecting the next phase. The last approved phase transitions to `COMPLETED`.
 
 Only one mutating operation can hold `.cw/locks/operation.lock`. A dead process
 lock is recognized as stale and safely replaced.
+
+Every retained review, gate, and history event remains part of the workflow's
+audit surface. `cw doctor` checks the entire surface, including records from
+earlier phases, so tampering with old evidence cannot remain hidden behind a
+healthy current state.

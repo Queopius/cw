@@ -8,6 +8,7 @@ from cw import __version__
 from .errors import CwError, ErrorCode
 from .models import Phase, Workflow
 from .reviews import validate_reviewer_result
+from .schema import SCHEMA_VERSION, schema_version
 from .utils import atomic_json, load_json, safe_project_path, sha256_file, utc_now
 
 
@@ -35,7 +36,7 @@ def create_gate(
 ) -> Path:
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, text=True, capture_output=True, check=False)
     payload = {
-        "schema_version": 1, "cw_version": __version__, "workflow": workflow.id,
+        "schema_version": SCHEMA_VERSION, "cw_version": __version__, "workflow": workflow.id,
         "workflow_version": workflow.version, "phase": phase.id, "approved_at": utc_now(),
         "review_reference": review_reference, "artifact_hashes": artifact_hashes(root, phase.artifacts),
         "approval": {"kind": "human" if human_approved else "semantic"},
@@ -53,7 +54,15 @@ def validate_gate(root: Path, workflow: Workflow, phase_id: str) -> dict[str, An
     if not path.is_file() or path.is_symlink():
         raise CwError(f"Missing dependency gate: {phase_id}", ErrorCode.INVALID_GATE)
     data = load_json(path)
-    if not isinstance(data, dict) or data.get("schema_version") != 1 or data.get("workflow") != workflow.id or data.get("phase") != phase_id:
+    schema_version(data, f"Approval gate {phase_id}")
+    if (
+        data.get("workflow") != workflow.id
+        or data.get("workflow_version") != workflow.version
+        or data.get("phase") != phase_id
+        or not isinstance(data.get("cw_version"), str)
+        or not isinstance(data.get("approved_at"), str)
+        or not isinstance(data.get("git"), dict)
+    ):
         raise CwError(f"Invalid approval gate: {phase_id}", ErrorCode.INVALID_GATE)
     try:
         phase = workflow.phase(phase_id)
@@ -69,9 +78,9 @@ def validate_gate(root: Path, workflow: Workflow, phase_id: str) -> dict[str, An
     if review_path.parent != root / ".cw" / "reviews" or not review_path.is_file() or review_path.is_symlink():
         raise CwError(f"Gate has an invalid review reference: {phase_id}", ErrorCode.INVALID_GATE)
     review = load_json(review_path)
+    schema_version(review, f"Review evidence for {phase_id}")
     if (
         not isinstance(review, dict)
-        or review.get("schema_version") != 1
         or review.get("workflow") != workflow.id
         or review.get("phase") != phase_id
         or review.get("kind") != "semantic_review"

@@ -7,6 +7,7 @@ from pathlib import Path
 from cw import __version__
 from .errors import CwError, ErrorCode
 from .project import Project, create_identity, load_project, project_id
+from .schema import SCHEMA_VERSION, migrate_legacy_document, schema_version
 from .state import initial_state
 from .utils import atomic_json, atomic_write, load_json, utc_now
 from .workflow import write_workflow
@@ -49,7 +50,7 @@ def _agents(root: Path) -> None:
 
 def _empty_plan(project: Project) -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "workflow": {"id": project.project_id, "repository": project.project_id, "version": 1, "status": "NOT_CREATED", "goal": None},
         "settings": {"max_review_attempts": 3, "command_timeout_seconds": 1200},
         "reviewer": {"command": "codex", "timeout_seconds": 1200, "sandbox": "read-only"},
@@ -64,7 +65,8 @@ def _migrate_legacy(root: Path) -> None:
     if legacy_state.is_file() and not (cw / "state.json").exists():
         data = load_json(legacy_state)
         if isinstance(data, dict):
-            data.update({"schema_version": 1, "cw_version": __version__, "history": data.get("history", [])})
+            data, _ = migrate_legacy_document(data, "Legacy workflow state")
+            data.update({"cw_version": __version__, "history": data.get("history", [])})
             for key in ("last_review", "last_gate"):
                 if isinstance(data.get(key), str):
                     data[key] = data[key].replace(".codex/reviews/", ".cw/reviews/").replace(".codex/gates/", ".cw/gates/")
@@ -80,12 +82,100 @@ def _migrate_legacy(root: Path) -> None:
                     shutil.copy2(item, destination)
 
 
+def _preflight_identity(root: Path) -> None:
+    """Reject foreign metadata before migration or static integration writes."""
+    from .workflow import _read_document
+
+    current = project_id(root)
+    candidates = (
+        (root / ".cw" / "project.json", "project_id", False),
+        (root / ".cw" / "state.json", "workflow_id", False),
+        (root / ".codex" / "workflow" / "state.json", "workflow_id", False),
+    )
+    for path, key, is_workflow in candidates:
+        if not path.exists():
+            continue
+        if path.is_symlink() or not path.is_file():
+            raise CwError("Project workflow metadata path is unsafe", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        try:
+            data = _read_document(path) if is_workflow else load_json(path)
+        except CwError:
+            continue
+        configured = data.get(key) if isinstance(data, dict) else None
+        if configured and configured != current:
+            raise CwError(
+                "Project workflow mismatch", ErrorCode.WORKFLOW_PROJECT_MISMATCH,
+                "Run: cw repair", details=f"Workflow: {configured}\nRepository: {current}",
+            )
+    plan_path = root / ".codex" / "workflow" / "phases.yaml"
+    if plan_path.exists():
+        if plan_path.is_symlink() or not plan_path.is_file():
+            raise CwError("Workflow plan path is unsafe", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        try:
+            plan = _read_document(plan_path)
+        except CwError:
+            return
+        metadata = plan.get("workflow")
+        if isinstance(metadata, dict):
+            configured = metadata.get("repository") or metadata.get("id")
+            if configured and configured != current:
+                raise CwError(
+                    "Project workflow mismatch", ErrorCode.WORKFLOW_PROJECT_MISMATCH,
+                    "Run: cw repair", details=f"Workflow: {configured}\nRepository: {current}",
+                )
+
+
+def _schema_documents(root: Path) -> list[tuple[Path, str, bool]]:
+    documents = [
+        (root / ".cw" / "project.json", "Project identity", False),
+        (root / ".cw" / "state.json", "Workflow state", False),
+        (root / ".codex" / "workflow" / "phases.yaml", "Workflow plan", True),
+    ]
+    for directory, kind in (("reviews", "Review"), ("gates", "Approval gate"), ("runtime", "Runtime manifest")):
+        parent = root / ".cw" / directory
+        if parent.is_dir() and not parent.is_symlink():
+            documents.extend((path, kind, False) for path in sorted(parent.glob("*.json")))
+    return documents
+
+
+def _migrate_metadata_schemas(root: Path, *, create_backup: bool) -> Path | None:
+    """Migrate schema-less v0 prototype documents after a complete compatibility pass."""
+    from .workflow import _read_document
+
+    staged: list[tuple[Path, dict, bool]] = []
+    for path, kind, is_workflow in _schema_documents(root):
+        if not path.exists():
+            continue
+        if path.is_symlink() or not path.is_file():
+            raise CwError(f"{kind} path is unsafe", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        try:
+            data = _read_document(path) if is_workflow else load_json(path)
+        except CwError:
+            # Repair has dedicated recovery for corrupt core documents. Historical
+            # records remain untouched so doctor can report their corruption.
+            continue
+        migrated, changed = migrate_legacy_document(data, kind)
+        if changed:
+            staged.append((path, migrated, is_workflow))
+    if not staged:
+        return None
+    backup = backup_metadata(root) if create_backup else None
+    for path, data, is_workflow in staged:
+        if is_workflow:
+            write_workflow(path, data)
+        else:
+            atomic_json(path, data)
+    return backup
+
+
 def initialize(root: Path) -> tuple[Project, bool]:
     cw = root / ".cw"
     cw.mkdir(parents=True, exist_ok=True)
     for name in MUTABLE_DIRS:
         (cw / name).mkdir(parents=True, exist_ok=True)
+    _preflight_identity(root)
     _migrate_legacy(root)
+    _migrate_metadata_schemas(root, create_backup=True)
     identity = cw / "project.json"
     if identity.exists():
         project = load_project(root)
@@ -115,7 +205,7 @@ def initialize(root: Path) -> tuple[Project, bool]:
         data = load_json(state)
         if not isinstance(data, dict):
             raise CwError("Workflow state is invalid", ErrorCode.INVALID_STATE, "Run: cw repair")
-        data.setdefault("schema_version", 1)
+        schema_version(data, "Workflow state")
         data.setdefault("cw_version", __version__)
         data.setdefault("attempt", 0)
         data.setdefault("last_review", None)
@@ -167,12 +257,17 @@ def backup_metadata(root: Path) -> Path:
 def repair(root: Path) -> Path:
     (root / ".cw" / "backups").mkdir(parents=True, exist_ok=True)
     backup = backup_metadata(root)
+    _migrate_metadata_schemas(root, create_backup=False)
     current_id = project_id(root)
     identity_path = root / ".cw" / "project.json"
     prior_initialized = utc_now()
     if identity_path.is_file():
-        data = load_json(identity_path)
-        prior_initialized = data.get("initialized_at", prior_initialized)
+        try:
+            data = load_json(identity_path)
+            if isinstance(data, dict):
+                prior_initialized = data.get("initialized_at", prior_initialized)
+        except CwError:
+            pass
     project = create_identity(root)
     data = load_json(identity_path)
     data["initialized_at"] = prior_initialized
@@ -195,12 +290,14 @@ def repair(root: Path) -> Path:
     if state_path.is_file():
         try:
             state = load_json(state_path)
+            if not isinstance(state, dict):
+                raise CwError("Workflow state is invalid", ErrorCode.INVALID_STATE)
             state.update({
-                "schema_version": 1, "cw_version": __version__, "workflow_id": current_id,
+                "schema_version": SCHEMA_VERSION, "cw_version": __version__, "workflow_id": current_id,
                 "pending_goal": state.get("pending_goal"), "history": state.get("history", []),
             })
             atomic_json(state_path, state)
-        except CwError:
+        except (CwError, AttributeError, TypeError):
             atomic_json(state_path, initial_state(current_id))
     else:
         atomic_json(state_path, initial_state(current_id))
@@ -224,5 +321,7 @@ def repair(root: Path) -> Path:
             readiness_path(root).unlink(missing_ok=True)
     elif session_path(root).exists():
         session_path(root).unlink(missing_ok=True)
+        readiness_path(root).unlink(missing_ok=True)
+    elif readiness_path(root).exists():
         readiness_path(root).unlink(missing_ok=True)
     return backup

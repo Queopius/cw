@@ -9,6 +9,7 @@ from pathlib import Path
 
 from cw import __version__
 from .errors import CwError, ErrorCode
+from .schema import SCHEMA_VERSION, schema_version
 from .utils import atomic_json, load_json, utc_now
 
 
@@ -54,7 +55,7 @@ def repository_fingerprint(root: Path) -> str:
 def create_identity(root: Path) -> Project:
     project = Project(root, project_id(root), repository_fingerprint(root))
     atomic_json(root / ".cw" / "project.json", {
-        "schema_version": 1, "project_id": project.project_id,
+        "schema_version": SCHEMA_VERSION, "project_id": project.project_id,
         "repository_root_fingerprint": project.fingerprint,
         "initialized_at": utc_now(), "cw_version": __version__,
     })
@@ -66,6 +67,7 @@ def load_project(root: Path, *, allow_moved: bool = True) -> Project:
     if not path.is_file():
         raise CwError("CW is not initialized in this repository.", ErrorCode.INVALID_STATE, "Run: cw init")
     data = load_json(path)
+    schema_version(data, "Project identity")
     configured = str(data.get("project_id", ""))
     current = project_id(root)
     if configured != current:
