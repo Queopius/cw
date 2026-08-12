@@ -78,7 +78,8 @@ class CliTests(unittest.TestCase):
         self.assertIn("full diagnostic", output)
 
     def test_doctor_healthy(self):
-        code, output = self.invoke("doctor")
+        with patch("cw.cli.main.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"):
+            code, output = self.invoke("doctor")
         self.assertEqual(0, code)
         self.assertIn("checks passed", output)
 
