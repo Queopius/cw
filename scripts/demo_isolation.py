@@ -88,13 +88,18 @@ def main() -> int:
 
     class Approver:
         def run_reviewer(self, *_args, **_kwargs):
+            evidence = f"{phase_a.artifacts[0]}:1 verified offline demo artifact"
             return CodexResult({
                 "decision": "APPROVE",
                 "summary": "Offline demo approval",
                 "blocking_issues": [],
                 "criteria": [
-                    {"id": criterion.id, "status": "PASS", "evidence": ["demo artifact"]}
+                    {"id": criterion.id, "status": "PASS", "evidence": [evidence]}
                     for criterion in phase_a.acceptance_criteria
+                ],
+                "blocking_criteria": [
+                    {"description": description, "status": "PASS", "evidence": [evidence]}
+                    for description in phase_a.blocking_criteria
                 ],
             }, "")
 

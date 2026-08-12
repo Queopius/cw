@@ -26,8 +26,13 @@ Objective: {phase.objective}
 Allowed review paths: {json.dumps(phase.review_paths)}
 Artifacts: {json.dumps(phase.artifacts)}
 Acceptance criteria: {json.dumps(criteria)}
+Blocking criteria: {json.dumps(phase.blocking_criteria)}
 
-Evaluate every listed criterion exactly once. Cite concrete repository evidence.
+Evidence entries must begin with an allowed project-relative file path and may
+include a line suffix, for example `src/service.py:42 concrete observation`.
+Evaluate every acceptance and blocking criterion exactly once. A blocking
+criterion passes only when concrete evidence proves that condition is absent.
+Cite concrete repository evidence.
 Ambiguous or missing evidence is not a pass. Do not invent criteria and do not review future phases.
 Return only the JSON object required by the supplied schema.
 """
@@ -72,7 +77,9 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
     schema = Path(__file__).resolve().parents[1] / "schemas" / "phase-review.schema.json"
     try:
         response = reviewer.run_reviewer(root, reviewer_prompt(workflow, phase), schema, workflow.review_timeout)
-        decision, criteria, issues = validate_reviewer_result(phase, response.payload)
+        decision, criteria, blocking_criteria, issues = validate_reviewer_result(
+            phase, response.payload, require_blocking_criteria=True, strict=True, root=root,
+        )
     except CwError as exc:
         state["last_error"] = state_error(exc)
         transition(root, state, WorkflowState.ERROR, force_error=True)
@@ -89,7 +96,8 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
     state["attempt"] = attempt
     report = {
         "schema_version": SCHEMA_VERSION, "workflow": workflow.id, "phase": phase.id, "attempt": attempt,
-        "kind": "semantic_review", "decision": decision.value, "criteria": criteria,
+        "kind": "semantic_review", "decision": decision.value, "summary": response.payload["summary"],
+        "criteria": criteria, "blocking_criteria": blocking_criteria,
         "blocking_issues": issues, "artifact_hashes": validation.artifact_hashes, "created_at": utc_now(),
     }
     path = _persist_review(root, phase, report, f"attempt-{attempt:02d}")

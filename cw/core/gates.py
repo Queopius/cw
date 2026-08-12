@@ -43,13 +43,14 @@ def validate_approval_review(root: Path, workflow: Workflow, phase: Phase, refer
     ):
         raise CwError(f"Gate review evidence is invalid: {phase.id}", ErrorCode.INVALID_GATE)
     try:
-        decision, criteria, issues = validate_reviewer_result(phase, review)
+        decision, criteria, blocking_criteria, issues = validate_reviewer_result(phase, review, root=root)
     except CwError as exc:
         raise CwError(f"Gate review evidence is invalid: {phase.id}", ErrorCode.INVALID_GATE) from exc
     hashes = review.get("artifact_hashes")
     if (
         decision.value != review.get("decision")
         or criteria != review.get("criteria")
+        or ("blocking_criteria" in review and blocking_criteria != review.get("blocking_criteria"))
         or issues != review.get("blocking_issues")
         or not isinstance(hashes, dict)
         or set(hashes) != set(phase.artifacts)

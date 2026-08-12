@@ -14,7 +14,9 @@ from cw.cli.main import _context
 from cw.core.commands import command_arguments
 from cw.core.config import load_policy
 from cw.core.errors import CwError, ErrorCode
+from cw.core.gates import create_gate
 from cw.core.models import RequiredCommand
+from cw.core.utils import sha256_file
 from cw.planning.planner import Planner
 from tests.helpers import TempRepo
 
@@ -79,6 +81,50 @@ class CommandSecurityTests(unittest.TestCase):
             phase = replace(repo.workflow.phases[0], required_commands=(command,))
             workflow = replace(repo.workflow, phases=(phase,))
             self.assertTrue(validate_phase(repo.root, workflow, phase).passed)
+        finally:
+            repo.close()
+
+    def test_validation_hashes_artifact_after_required_command(self):
+        repo = TempRepo(phases=1)
+        try:
+            artifact = repo.artifact(content="before\n")
+            command_text = (
+                f"{shlex.quote(sys.executable)} -c "
+                '"__import__(\'pathlib\').Path(\'docs/phase-1.md\').write_text(\'after\\n\')"'
+            )
+            repo.ready(checks=[{"command": command_text, "exit_code": 0}])
+            command = RequiredCommand(command_text)
+            phase = replace(repo.workflow.phases[0], required_commands=(command,))
+            workflow = replace(repo.workflow, phases=(phase,))
+
+            validation = validate_phase(repo.root, workflow, phase)
+
+            self.assertTrue(validation.passed)
+            self.assertEqual("after\n", artifact.read_text(encoding="utf-8"))
+            self.assertEqual(sha256_file(artifact), validation.artifact_hashes["docs/phase-1.md"])
+        finally:
+            repo.close()
+
+    def test_required_command_cannot_invalidate_dependency_gate(self):
+        repo = TempRepo(phases=2)
+        try:
+            repo.artifact(1)
+            review = repo.approved_review(1)
+            create_gate(repo.root, repo.workflow, repo.workflow.phases[0], review)
+            repo.artifact(2)
+            command_text = (
+                f"{shlex.quote(sys.executable)} -c "
+                '"__import__(\'pathlib\').Path(\'docs/phase-1.md\').write_text(\'tampered\')"'
+            )
+            repo.ready(2, checks=[{"command": command_text, "exit_code": 0}])
+            command = RequiredCommand(command_text)
+            phase = replace(repo.workflow.phases[1], required_commands=(command,))
+            workflow = replace(repo.workflow, phases=(repo.workflow.phases[0], phase))
+
+            validation = validate_phase(repo.root, workflow, phase)
+
+            self.assertFalse(validation.passed)
+            self.assertIn("Approval gate invalidated", validation.errors[0])
         finally:
             repo.close()
 

@@ -12,13 +12,19 @@ Validation order is fixed:
 3. artifact declaration and existence;
 4. repository containment and symlink safety;
 5. approved workflow commands;
-6. SHA-256 artifact capture;
-7. independent semantic review.
+6. dependency gate revalidation;
+7. final SHA-256 artifact capture;
+8. independent semantic review.
+
+Commands run before the authoritative artifact hashes are captured. CW then
+revalidates dependency gates, preventing a test or formatter from silently
+changing current artifacts or previously approved dependency evidence.
 
 The reviewer uses a separate ephemeral `codex exec` process with `read-only`,
 approval policy `never`, hooks disabled, and a JSON output schema. It reviews
-only current-phase paths and must evaluate every configured criterion exactly
-once with evidence.
+only current-phase paths and must evaluate every acceptance criterion and every
+configured blocking criterion exactly once. Each evidence entry begins with an
+existing project-relative file inside the phase's artifacts or `review_paths`.
 
 Approval fails closed for missing, duplicated, or invented criteria; unknown or
 ambiguous evidence; any failed blocking criterion; or remaining blocking issues.

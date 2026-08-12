@@ -47,6 +47,53 @@ class ReviewerTests(unittest.TestCase):
     def test_unknown_evidence_fails_closed(self):
         self.assertEqual("REVISE", self.review(result(status="UNKNOWN"))["decision"])
 
+    def test_configured_blocking_criterion_must_pass(self):
+        phase = replace(self.repo.workflow.phases[0], blocking_criteria=("No unresolved security regression",))
+        workflow = replace(self.repo.workflow, phases=(phase, *self.repo.workflow.phases[1:]))
+        payload = result()
+        payload["blocking_criteria"] = [{
+            "description": "No unresolved security regression",
+            "status": "FAIL",
+            "evidence": ["docs/phase-1.md:1"],
+        }]
+
+        report = run_review(self.repo.root, workflow, phase, self.repo.state(), FakeAdapter(payload))
+
+        self.assertEqual("REVISE", report["decision"])
+        self.assertIn("No unresolved security regression", report["blocking_issues"])
+
+    def test_missing_configured_blocking_criterion_fails_closed(self):
+        phase = replace(self.repo.workflow.phases[0], blocking_criteria=("No unresolved security regression",))
+        workflow = replace(self.repo.workflow, phases=(phase, *self.repo.workflow.phases[1:]))
+
+        report = run_review(self.repo.root, workflow, phase, self.repo.state(), FakeAdapter(result()))
+
+        self.assertEqual("REVISE", report["decision"])
+        self.assertIn("Missing blocking criterion", " ".join(report["blocking_issues"]))
+
+    def test_reviewer_transport_rejects_extra_fields(self):
+        payload = result()
+        payload["unexpected"] = True
+        with self.assertRaises(CwError):
+            self.review(payload)
+        self.assertEqual(0, self.repo.state()["attempt"])
+
+    def test_reviewer_transport_rejects_empty_summary(self):
+        payload = result()
+        payload["summary"] = ""
+        with self.assertRaises(CwError):
+            self.review(payload)
+        self.assertEqual(0, self.repo.state()["attempt"])
+
+    def test_reviewer_evidence_must_reference_existing_allowed_file(self):
+        payload = result()
+        payload["criteria"][0]["evidence"] = ["README.md:1 unrelated evidence"]
+
+        report = self.review(payload)
+
+        self.assertEqual("REVISE", report["decision"])
+        self.assertIn("outside review scope", " ".join(report["blocking_issues"]))
+
     def test_infrastructure_timeout_does_not_consume_attempt(self):
         error = CwError("timed out", ErrorCode.REVIEW_TIMEOUT)
         with self.assertRaises(CwError):
