@@ -104,8 +104,13 @@ def _validate_review(
         return report
     if kind != "semantic_review" or report["attempt"] != state.get("attempt"):
         raise CwError("Semantic review state is inconsistent", ErrorCode.PROTECTED_PATH_MODIFIED)
-    decision, criteria, issues = validate_reviewer_result(phase, report)
-    if decision.value != report.get("decision") or criteria != report.get("criteria") or issues != report.get("blocking_issues"):
+    decision, criteria, blocking_criteria, issues = validate_reviewer_result(phase, report, root=root)
+    if (
+        decision.value != report.get("decision")
+        or criteria != report.get("criteria")
+        or ("blocking_criteria" in report and blocking_criteria != report.get("blocking_criteria"))
+        or issues != report.get("blocking_issues")
+    ):
         raise CwError("Semantic review decision is inconsistent", ErrorCode.PROTECTED_PATH_MODIFIED)
     expected_status = {
         ReviewDecision.APPROVE: WorkflowState.HUMAN_REVIEW_REQUIRED if phase.requires_human_approval else WorkflowState.APPROVED,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -9,6 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseHygieneTests(unittest.TestCase):
+    def test_installed_reviewer_schema_matches_runtime_schema(self) -> None:
+        self.assertEqual(
+            json.loads((ROOT / "cw/schemas/phase-review.schema.json").read_text(encoding="utf-8")),
+            json.loads((ROOT / "cw/templates/.codex/schemas/phase-review.schema.json").read_text(encoding="utf-8")),
+        )
+
     def test_ci_covers_supported_python_versions(self) -> None:
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         for version in ("3.10", "3.11", "3.12", "3.13", "3.14"):

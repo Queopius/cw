@@ -93,7 +93,7 @@ class TempRepo:
             "criteria": [{
                 "id": phase_model.acceptance_criteria[0].id,
                 "status": "PASS",
-                "evidence": ["fixture evidence"],
+                "evidence": [f"docs/phase-{phase}.md:1 fixture evidence"],
             }],
             "blocking_issues": [],
             "artifact_hashes": artifact_hashes(self.root, phase_model.artifacts),
@@ -116,5 +116,6 @@ class FakeAdapter:
 def result(phase: int = 1, decision: str = "APPROVE", status: str = "PASS", *, criterion: str | None = None):
     return {
         "decision": decision, "summary": "reviewed", "blocking_issues": [] if status == "PASS" else ["needs work"],
-        "criteria": [{"id": criterion or f"P{phase}-001", "status": status, "evidence": ["docs evidence"]}],
+        "criteria": [{"id": criterion or f"P{phase}-001", "status": status, "evidence": [f"docs/phase-{phase}.md:1 evidence"]}],
+        "blocking_criteria": [],
     }

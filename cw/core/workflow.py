@@ -94,6 +94,8 @@ def validate_workflow(root: Path, workflow: Workflow) -> None:
             criteria.add(criterion.id)
         if not phase.acceptance_criteria:
             raise CwError(f"Phase {phase.id} has no acceptance criteria", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if any(not value.strip() for value in phase.blocking_criteria) or len(phase.blocking_criteria) != len(set(phase.blocking_criteria)):
+            raise CwError(f"Phase {phase.id} has invalid blocking criteria", ErrorCode.SCHEMA_VALIDATION_ERROR)
         for command in phase.required_commands:
             command_arguments(command.command)
             if command.timeout_seconds is not None and command.timeout_seconds <= 0:

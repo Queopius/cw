@@ -4,6 +4,22 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.1.3 — 2026-08-13
+
+- Preserve review evidence as append-only records with exclusive atomic creation,
+  including when an explicit phase reopen restarts semantic attempt numbering.
+- Validate complete semantic review evidence before accepting human approval, and
+  create approval gates atomically without replacing an existing gate.
+- Capture artifact hashes after deterministic commands and revalidate dependency
+  gates so command-side file changes cannot invalidate approved evidence silently.
+- Require structured evaluation of every configured blocking criterion and
+  repository-scoped file evidence from the independent reviewer.
+- Unify the installed and internal reviewer schemas with strict summaries,
+  fields, evidence types, and blocking-criterion results.
+- Give planning bounded manifest content and a paths-only repository structure,
+  while suggesting validation commands only when project configuration supports
+  them.
+
 ## 0.1.2 — 2026-08-12
 
 - Add bounded, read-only Codex planning with strict structured output, local
