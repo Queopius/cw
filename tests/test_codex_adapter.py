@@ -36,6 +36,16 @@ class CodexAdapterTests(unittest.TestCase):
             self.assertIn("sandbox_workspace_write.network_access=true", command)
             self.assertNotIn('web_search="disabled"', command)
 
+    def test_implementer_exports_session_to_hook_environment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.subprocess.call", return_value=0
+            ) as call:
+                CodexAdapter().run_implementer(root, "implement", session_id="a" * 32)
+        self.assertEqual("1", call.call_args.kwargs["env"]["CW_IMPLEMENTER_ACTIVE"])
+        self.assertEqual("a" * 32, call.call_args.kwargs["env"]["CW_IMPLEMENTER_SESSION"])
+
     def test_implementer_nonzero_exit_is_classified(self):
         with tempfile.TemporaryDirectory() as temporary:
             with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(

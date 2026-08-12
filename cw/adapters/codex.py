@@ -29,10 +29,19 @@ class CodexAdapter:
         if not self.check_availability():
             raise CwError("Codex CLI was not found", ErrorCode.CODEX_NOT_FOUND, "Install Codex and run: cw doctor")
 
-    def run_implementer(self, root: Path, prompt: str, *, allow_network: bool = False) -> int:
+    def run_implementer(
+        self,
+        root: Path,
+        prompt: str,
+        *,
+        allow_network: bool = False,
+        session_id: str | None = None,
+    ) -> int:
         self._require()
         environment = os.environ.copy()
         environment["CW_IMPLEMENTER_ACTIVE"] = "1"
+        if session_id:
+            environment["CW_IMPLEMENTER_SESSION"] = session_id
         command = [
             self.command, "--strict-config",
             "--config", f"sandbox_workspace_write.network_access={str(allow_network).lower()}",

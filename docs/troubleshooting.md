@@ -21,6 +21,10 @@ details and `cw error --raw` for scripts expecting the original diagnostic.
   `cw repair --reopen <phase>`. CW backs up metadata and invalidates dependent
   gates before returning that phase to implementation.
 - **Hook trust required:** review the hook in Codex with `/hooks`.
+- **Readiness session mismatch:** the manifest belongs to an earlier implementer
+  invocation. Inspect it, then restart the phase; do not copy runtime manifests
+  between sessions or repositories. `cw repair` backs up and removes corrupt
+  session/readiness pairs.
 - **Another operation is active:** wait; if its process died, the next operation
   automatically recognizes the stale lock.
 - **Plan goal unclear:** improve local documentation or pass `cw plan --goal`.

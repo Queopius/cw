@@ -16,6 +16,18 @@ CW snapshots protected workflow metadata around that session and admits only the
 precise state, history, review, and gate delta produced by a valid current-phase
 review. Any other protected mutation stops the workflow in `ERROR`.
 
+Each `cw start` creates an atomic `.cw/runtime/implementer-session.json` and
+passes its random session ID to the implementer and Stop hook. Readiness must
+contain that exact ID, so a manifest from an older invocation cannot be replayed.
+The hook is inert in unrelated Codex sessions and reviewer sessions. A semantic
+decision consumes both runtime files; an infrastructure failure preserves them
+so `cw retry` can rerun only the reviewer.
+
+CW follows the official [Codex Stop hook contract](https://learn.chatgpt.com/docs/hooks):
+terminal review outcomes return `continue: false`, while `decision: block` is
+avoided because it asks Codex to create a continuation turn. A repeated event
+with `stop_hook_active` is stopped explicitly.
+
 `APPROVED` does not by itself erase evidence or silently rebuild anything. The
 next `cw start` validates the gate and its dependency artifact hashes before
 selecting the next phase. The last approved phase transitions to `COMPLETED`.

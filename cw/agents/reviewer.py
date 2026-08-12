@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from cw.core.errors import CwError, ErrorCode, HumanActionRequired
 from cw.core.gates import artifact_hashes, create_gate
 from cw.core.models import Phase, ReviewDecision, Workflow, WorkflowState
 from cw.core.reviews import validate_reviewer_result
+from cw.core.session import finish_session, readiness_path
 from cw.core.state import save_state, transition
 from cw.core.utils import atomic_json, load_json, utc_now
 
@@ -64,7 +66,7 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
             "attempt": attempt, "kind": "infrastructure_error", "error_code": exc.code.value,
             "error": exc.message, "details": exc.details, "created_at": utc_now(),
         }
-        path = root / ".cw" / "reviews" / f"{phase.id}-infrastructure-{utc_now().replace(':', '')}.json"
+        path = root / ".cw" / "reviews" / f"{phase.id}-infrastructure-{utc_now().replace(':', '')}-{secrets.token_hex(4)}.json"
         atomic_json(path, report)
         state["last_review"] = path.relative_to(root).as_posix()
         save_state(root, state)
@@ -85,19 +87,25 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
         if phase.requires_human_approval:
             _event(state, phase.id, "human_review_required", attempt=attempt)
             transition(root, state, WorkflowState.HUMAN_REVIEW_REQUIRED)
+            readiness_path(root).unlink(missing_ok=True)
+            finish_session(root)
             return report
         gate = create_gate(root, workflow, phase, state["last_review"])
         state["last_gate"] = gate.relative_to(root).as_posix()
         _event(state, phase.id, "approved", attempt=attempt, gate=state["last_gate"])
         transition(root, state, WorkflowState.APPROVED)
-        (root / ".cw" / "runtime" / "READY_FOR_REVIEW.json").unlink(missing_ok=True)
+        readiness_path(root).unlink(missing_ok=True)
+        finish_session(root)
     elif decision is ReviewDecision.HUMAN_REVIEW_REQUIRED:
         _event(state, phase.id, "human_review_required", attempt=attempt)
         transition(root, state, WorkflowState.HUMAN_REVIEW_REQUIRED)
+        readiness_path(root).unlink(missing_ok=True)
+        finish_session(root)
     else:
         _event(state, phase.id, "revision_required", attempt=attempt, issues=issues)
         transition(root, state, WorkflowState.REVISION_REQUIRED)
-        (root / ".cw" / "runtime" / "READY_FOR_REVIEW.json").unlink(missing_ok=True)
+        readiness_path(root).unlink(missing_ok=True)
+        finish_session(root)
         if attempt >= workflow.max_review_attempts:
             raise HumanActionRequired("Maximum semantic review attempts reached", hint="Inspect cw history and revise the plan or implementation.")
     return report
@@ -118,5 +126,6 @@ def human_approve(root: Path, workflow: Workflow, phase: Phase, state: dict[str,
     state["last_gate"] = gate.relative_to(root).as_posix()
     _event(state, phase.id, "human_approved", gate=state["last_gate"])
     transition(root, state, WorkflowState.APPROVED)
-    (root / ".cw" / "runtime" / "READY_FOR_REVIEW.json").unlink(missing_ok=True)
+    readiness_path(root).unlink(missing_ok=True)
+    finish_session(root)
     return gate

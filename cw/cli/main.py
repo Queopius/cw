@@ -22,6 +22,7 @@ from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
 from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
 from cw.core.project import load_project, repository_root
+from cw.core.session import create_session, load_session, readiness_path
 from cw.core.state import bind_plan, initial_state, load_state, save_state, transition, validate_state
 from cw.core.utils import atomic_json, load_json, utc_now
 from cw.core.workflow import load_workflow, set_plan_status, write_workflow, workflow_hash
@@ -281,6 +282,8 @@ def command_start(args: argparse.Namespace, console: Console) -> int:
     _, state, workflow = _context(root)
     phase = _current(workflow, state)
     with operation_lock(root, "start"):
+        if not args.json and readiness_path(root).exists():
+            raise CwError("A readiness manifest already exists", ErrorCode.INVALID_STATE, "Run: cw review")
         status = WorkflowState(state["status"])
         if status is WorkflowState.APPROVED:
             validate_gate(root, workflow, phase.id)
@@ -299,10 +302,13 @@ def command_start(args: argparse.Namespace, console: Console) -> int:
             raise CwError(f"Cannot start while workflow is {status.value}", ErrorCode.INVALID_STATE, "Run: cw status")
         validate_dependencies(root, workflow, phase)
         protected_before = snapshot_protected_paths(root, workflow.protected_paths)
+        session = create_session(root, workflow, phase) if not args.json else None
     prompt = f"""Work only on CW phase {phase.id}: {phase.name}.
 Objective: {phase.objective}
 Read AGENTS.md and .codex/workflow/phases.yaml. Do not change workflow state, criteria, reviews, or gates.
-When complete, create .cw/runtime/READY_FOR_REVIEW.json matching the installed schema and stop normally.
+Active implementation session: {session['session_id'] if session else ''}
+When complete, create .cw/runtime/READY_FOR_REVIEW.json matching the installed schema,
+including this exact session_id, and stop normally.
 """
     if args.json:
         emit_json({"phase": phase.id, "state": "IN_PROGRESS", "sandbox": "workspace-write"})
@@ -313,7 +319,12 @@ When complete, create .cw/runtime/READY_FOR_REVIEW.json matching the installed s
     failure: CwError | None = None
     result = 0
     try:
-        result = CodexAdapter().run_implementer(root, prompt, allow_network=workflow.allow_network)
+        result = CodexAdapter().run_implementer(
+            root,
+            prompt,
+            allow_network=workflow.allow_network,
+            session_id=session["session_id"] if session else None,
+        )
     except CwError as exc:
         failure = exc
     try:
@@ -386,10 +397,19 @@ def command_review(args: argparse.Namespace, console: Console) -> int:
     root = _root()
     _, state, workflow = _context(root)
     phase = _current(workflow, state)
-    ready = root / ".cw" / "runtime" / "READY_FOR_REVIEW.json"
+    ready = readiness_path(root)
     if args.hook and not ready.exists():
         print("{}")
         return 0
+    if args.hook:
+        session = load_session(root, workflow, phase)
+        if (
+            session is None
+            or os.environ.get("CW_IMPLEMENTER_ACTIVE") != "1"
+            or os.environ.get("CW_IMPLEMENTER_SESSION") != session["session_id"]
+        ):
+            print("{}")
+            return 0
     with operation_lock(root, "review"):
         if args.human_approve:
             gate = human_approve(root, workflow, phase, state)
@@ -399,7 +419,8 @@ def command_review(args: argparse.Namespace, console: Console) -> int:
     if args.hook:
         decision = report.get("decision")
         if decision == "REVISE":
-            print(json.dumps({"decision": "block", "reason": "CW independent review requires revision. Run: cw history"}))
+            reason = "CW independent review requires revision. Run: cw history"
+            print(json.dumps({"continue": False, "stopReason": reason, "systemMessage": reason}))
         else:
             reason = "CW phase review completed. Run: cw status"
             print(json.dumps({"continue": False, "stopReason": reason, "systemMessage": reason}))
@@ -417,7 +438,11 @@ def command_retry(args: argparse.Namespace, console: Console) -> int:
     if WorkflowState(state["status"]) is not WorkflowState.ERROR:
         raise CwError("There is no retryable infrastructure error", ErrorCode.INVALID_STATE)
     error = str(state.get("last_error") or "")
-    readiness_exists = (root / ".cw" / "runtime" / "READY_FOR_REVIEW.json").is_file()
+    readiness_exists = readiness_path(root).is_file()
+    if "IMPLEMENTER_PROCESS_ERROR" in error and readiness_exists:
+        args.hook = False
+        args.human_approve = False
+        return command_review(args, console)
     if "IMPLEMENTER_PROCESS_ERROR" in error or (
         "CODEX_NOT_FOUND" in error and state.get("current_phase") and not readiness_exists
     ):
@@ -478,6 +503,13 @@ def _doctor(root: Path | None, reviewer: bool) -> list[dict[str, Any]]:
         checks.append({"section": "Security", "name": ".cw writable", "status": "pass" if writable else "error", "detail": "required"})
         snapshot_protected_paths(root, workflow.protected_paths)
         checks.append({"section": "Security", "name": "Protected paths", "status": "pass", "detail": f"{len(workflow.protected_paths)} enforced"})
+        phase = _current(workflow, state) if workflow.phases and state.get("current_phase") else None
+        session = load_session(root, workflow, phase) if phase else None
+        checks.append({
+            "section": "Security", "name": "Implementer session",
+            "status": "pass" if session else "neutral",
+            "detail": f"active for {session['phase']}" if session else "none",
+        })
         checks.append({"section": "Security", "name": ".codex writable", "status": "neutral", "detail": "not required at runtime"})
         checks.append({"section": "Security", "name": "Hook trust", "status": "neutral", "detail": "managed by Codex; run /hooks if prompted"})
         if reviewer:

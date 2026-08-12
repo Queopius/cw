@@ -21,7 +21,9 @@ ambiguous evidence; any failed blocking criterion; or remaining blocking issues.
 Semantic `REVISE` results increment the phase attempt. Timeouts, network errors,
 transport errors, process crashes, and invalid reviewer transport output set
 `ERROR` without consuming a semantic attempt. `cw retry` reuses the existing
-readiness manifest and does not restart implementation.
+session-bound readiness manifest and does not restart implementation. If the
+implementer itself exits after writing readiness but before the Stop hook
+finishes, retry also proceeds directly to review.
 
 Approval writes `.cw/gates/<phase>.approved.json` with workflow/version, review
 reference, timestamp, optional Git commit, CW version, and artifact hashes.

@@ -18,7 +18,7 @@ from cw.core.models import WorkflowState
 from cw.core.state import save_state, transition
 from cw.ui.console import Console
 from cw.planning.planner import Planner
-from tests.helpers import TempRepo
+from tests.helpers import TempRepo, result
 
 
 class Tty(io.StringIO):
@@ -124,6 +124,53 @@ class CliTests(unittest.TestCase):
         implementer.assert_called_once()
         self.assertEqual("IN_PROGRESS", self.repo.state()["status"])
 
+    def test_retry_reviews_existing_readiness_after_implementer_exit(self):
+        failure = CwError("exited after readiness", ErrorCode.IMPLEMENTER_PROCESS_ERROR, "Run: cw retry")
+
+        def implement(root, prompt, **kwargs):
+            self.repo.artifact()
+            self.repo.ready()
+            raise failure
+
+        with patch("cw.cli.main.CodexAdapter.run_implementer", side_effect=implement):
+            code, _ = self.invoke("start")
+        self.assertEqual(1, code)
+        with patch("cw.cli.main.CodexAdapter.run_implementer") as implementer, patch(
+            "cw.agents.reviewer.CodexAdapter.run_reviewer", return_value=CodexResult(result(), "")
+        ):
+            code, _ = self.invoke("retry")
+        self.assertEqual(0, code)
+        implementer.assert_not_called()
+        self.assertEqual("APPROVED", self.repo.state()["status"])
+
+    def test_hook_review_rejects_wrong_session_environment(self):
+        from cw.core.session import create_session
+        session = create_session(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0])
+        self.repo.artifact()
+        self.repo.ready()
+        with patch.dict(os.environ, {
+            "CW_IMPLEMENTER_ACTIVE": "1", "CW_IMPLEMENTER_SESSION": "f" * 32,
+        }), patch("cw.cli.main.run_review") as reviewer:
+            code, output = self.invoke("review", "--hook")
+        self.assertEqual(0, code)
+        self.assertEqual({}, json.loads(output))
+        reviewer.assert_not_called()
+        self.assertNotEqual("f" * 32, session["session_id"])
+
+    def test_hook_revision_stops_instead_of_requesting_continuation(self):
+        from cw.core.session import create_session
+        session = create_session(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0])
+        self.repo.artifact()
+        self.repo.ready()
+        with patch.dict(os.environ, {
+            "CW_IMPLEMENTER_ACTIVE": "1", "CW_IMPLEMENTER_SESSION": session["session_id"],
+        }), patch("cw.cli.main.run_review", return_value={"decision": "REVISE", "blocking_issues": ["fix"]}):
+            code, output = self.invoke("review", "--hook")
+        self.assertEqual(0, code)
+        payload = json.loads(output)
+        self.assertFalse(payload["continue"])
+        self.assertNotIn("decision", payload)
+
     def test_help_flag_uses_public_help(self):
         code, output = self.invoke("--help")
         self.assertEqual(0, code)
@@ -155,6 +202,7 @@ class CliTests(unittest.TestCase):
             code, output = self.invoke("doctor")
         self.assertEqual(0, code)
         self.assertIn("checks passed", output)
+        self.assertIn("Implementer session", output)
 
     def test_doctor_json(self):
         code, output = self.invoke("doctor", "--json")
@@ -268,6 +316,17 @@ class CliTests(unittest.TestCase):
         self.assertFalse((self.repo.root / ".cw/gates/02-phase-2.approved.json").exists())
         self.assertEqual("01-phase-1", self.repo.state()["current_phase"])
         self.assertTrue(list((self.repo.root / ".cw/backups").glob("*/gates/01-phase-1.approved.json")))
+
+    def test_repair_backs_up_then_removes_corrupt_session(self):
+        session = self.repo.root / ".cw/runtime/implementer-session.json"
+        ready = self.repo.root / ".cw/runtime/READY_FOR_REVIEW.json"
+        session.write_text("{}\n", encoding="utf-8")
+        ready.write_text("{}\n", encoding="utf-8")
+        code, _ = self.invoke("repair")
+        self.assertEqual(0, code)
+        self.assertFalse(session.exists())
+        self.assertFalse(ready.exists())
+        self.assertTrue(list((self.repo.root / ".cw/backups").glob("*/runtime/implementer-session.json")))
 
 
 if __name__ == "__main__":

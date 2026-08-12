@@ -18,6 +18,9 @@ All notable changes to CW are documented here.
   tampering.
 - Cross-validate approval gates against their independent review, complete
   criterion result, human-approval type, and exact artifact hash set.
+- Bind readiness manifests to atomic implementer sessions, keep the Stop hook
+  inert outside CW, consume successful/rejected readiness exactly once, and
+  preserve infrastructure-failed readiness for reviewer-only retry.
 
 ## 0.1.1 — 2026-08-12
 

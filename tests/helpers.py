@@ -63,12 +63,18 @@ class TempRepo:
         path.write_text(content, encoding="utf-8")
         return path
 
-    def ready(self, phase: int = 1, artifacts: list[str] | None = None, checks=None) -> None:
+    def ready(self, phase: int = 1, artifacts: list[str] | None = None, checks=None, session_id: str | None = None) -> None:
         path = self.root / ".cw" / "runtime" / "READY_FOR_REVIEW.json"
-        path.write_text(json.dumps({
+        session = self.root / ".cw" / "runtime" / "implementer-session.json"
+        if session_id is None and session.is_file():
+            session_id = json.loads(session.read_text(encoding="utf-8"))["session_id"]
+        payload = {
             "phase": f"{phase:02d}-phase-{phase}", "status": "READY_FOR_REVIEW",
             "artifacts": artifacts or [f"docs/phase-{phase}.md"], "checks_executed": checks or [],
-        }), encoding="utf-8")
+        }
+        if session_id is not None:
+            payload["session_id"] = session_id
+        path.write_text(json.dumps(payload), encoding="utf-8")
 
     def approved_review(self, phase: int = 1, *, decision: str = "APPROVE") -> str:
         phase_model = self.workflow.phases[phase - 1]

@@ -31,6 +31,11 @@ the state/history delta, every configured criterion, the gate-to-review link,
 the required human-approval type, and the complete artifact hash set. A mismatch
 sets `PROTECTED_PATH_MODIFIED` and fails closed; it is not automatically retryable.
 
+Readiness manifests are bound to the random ID of the current `cw start`
+invocation. This prevents accidental reuse or replay across sessions. The Stop
+hook checks the implementer and session environment before invoking review, so
+ordinary Codex sessions in an initialized repository do not trigger CW.
+
 CW sends no telemetry. Repository content can be sent to Codex when a planner,
 implementer, or reviewer runs. Planning sends a bounded evidence selection over
 stdin, and review prompts scope the phase and review paths. Do not place secrets
