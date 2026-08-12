@@ -18,6 +18,11 @@ The shell installer and generated launcher contain no workflow business logic.
 The installed package owns runtime code; a project receives only static Codex
 integration. Runtime operations do not need `.codex` to be writable.
 
+`cw.core.layout` defines the trusted project filesystem topology. Validation is
+performed before init writes, lock acquisition, normal context loading, repair,
+and backup. Individual critical loaders retain their own regular-file checks as
+defense in depth.
+
 The core uses dependency-injected planner and reviewer adapters, dataclasses,
 enums, pathlib, typed errors, and explicit transitions. Codex planning and review
 both use ephemeral structured-output calls, while normal tests inject offline

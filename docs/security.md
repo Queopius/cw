@@ -23,6 +23,14 @@ redirections, command substitution, and other shell control syntax are rejected
 when the workflow loads. State, reviews, gates, and project identity use atomic
 temp-write, fsync, and replace.
 
+Before acquiring a project lock or installing integration files, CW validates
+the repository topology. `.cw`, `.codex`, their managed subdirectories,
+`AGENTS.md`, project identity/state/config, runtime manifests, hooks, schemas,
+and the workflow plan cannot be symlinks or special files. This prevents a
+hostile or accidental repository layout from redirecting CW writes outside the
+Git worktree. Repair backups preflight every included metadata tree and refuse
+nested symlinks before creating the backup destination.
+
 Before each implementer session, CW snapshots mandatory workflow metadata and
 all configured `protected_paths`. After Codex exits, existing protected content
 must be unchanged. The only accepted additions are one current-phase review and,

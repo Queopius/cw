@@ -23,6 +23,7 @@ from cw.core.gates import gate_path, validate_dependencies, validate_gate
 from cw.core.initialize import backup_metadata, initialize, repair
 from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
 from cw.core.locking import operation_lock
+from cw.core.layout import validate_project_layout
 from cw.core.models import WorkflowState
 from cw.core.project import load_project, repository_root
 from cw.core.schema import SCHEMA_VERSION
@@ -79,6 +80,7 @@ def _root() -> Path:
 
 
 def _context(root: Path) -> tuple[Any, dict[str, Any], Any]:
+    validate_project_layout(root)
     project = load_project(root)
     workflow = load_workflow(root)
     if workflow.id != project.project_id or workflow.repository != project.project_id:

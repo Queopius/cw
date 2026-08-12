@@ -43,6 +43,9 @@ the independent diagnostic store and can still work if workflow state is corrupt
   session without consuming a semantic review attempt.
 - **Another operation is active:** wait; if its process died, the next operation
   automatically recognizes the stale lock.
+- **Managed path cannot be a symlink:** replace the reported `.cw`, `.codex`, or
+  managed file with a real repository-local directory/file. CW will not follow
+  it or repair through it because doing so could modify data outside the repo.
 - **Plan goal unclear:** improve local documentation or pass `cw plan --goal`.
 
 Detailed local diagnostics live under `.cw/logs/`. CW never prints Python stack

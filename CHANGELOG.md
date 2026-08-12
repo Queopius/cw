@@ -34,6 +34,9 @@ All notable changes to CW are documented here.
   as a retryable infrastructure failure.
 - Reject `cw start --json` before state mutation instead of reporting a start
   that never launched an implementer.
+- Validate the managed `.cw`/`.codex` filesystem topology before locks, init,
+  context loading, repair, and backups; reject symlinks and special files that
+  could redirect CW outside the current repository.
 
 ## 0.1.1 — 2026-08-12
 

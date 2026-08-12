@@ -6,6 +6,7 @@ from pathlib import Path
 
 from cw import __version__
 from .errors import CwError, ErrorCode
+from .layout import MUTABLE_DIRECTORIES, safe_file, validate_project_layout, validate_tree
 from .project import Project, create_identity, load_project, project_id
 from .schema import SCHEMA_VERSION, migrate_legacy_document, schema_version
 from .state import initial_state
@@ -13,7 +14,7 @@ from .utils import atomic_json, atomic_write, load_json, utc_now
 from .workflow import write_workflow
 
 
-MUTABLE_DIRS = ("runtime", "reviews", "gates", "logs", "locks", "backups")
+MUTABLE_DIRS = MUTABLE_DIRECTORIES
 BEGIN = "<!-- CW:BEGIN -->"
 END = "<!-- CW:END -->"
 
@@ -30,13 +31,16 @@ def _copy_static(root: Path) -> None:
         target.mkdir(parents=True, exist_ok=True)
         for source in (template / ".codex" / directory).iterdir():
             if source.is_file():
+                safe_file(target / source.name, f".codex/{directory}/{source.name}")
                 shutil.copy2(source, target / source.name)
+    safe_file(codex / "hooks.json", ".codex/hooks.json")
     shutil.copy2(template / ".codex" / "hooks.json", codex / "hooks.json")
     (codex / "workflow").mkdir(parents=True, exist_ok=True)
 
 
 def _agents(root: Path) -> None:
     path = root / "AGENTS.md"
+    safe_file(path, "AGENTS.md")
     section = (template_root() / "AGENTS_SECTION.md").read_text(encoding="utf-8").strip()
     content = path.read_text(encoding="utf-8") if path.exists() else "# Repository Instructions\n"
     if BEGIN in content and END in content:
@@ -74,7 +78,10 @@ def _migrate_legacy(root: Path) -> None:
     for name in ("runtime", "reviews", "gates"):
         source = codex / name
         target = cw / name
+        if source.is_symlink():
+            raise CwError(f"Legacy .codex/{name} cannot be a symlink", ErrorCode.SCHEMA_VALIDATION_ERROR)
         if source.is_dir():
+            validate_tree(source, f"Legacy .codex/{name}")
             target.mkdir(parents=True, exist_ok=True)
             for item in source.iterdir():
                 destination = target / item.name
@@ -169,6 +176,7 @@ def _migrate_metadata_schemas(root: Path, *, create_backup: bool) -> Path | None
 
 
 def initialize(root: Path) -> tuple[Project, bool]:
+    validate_project_layout(root, create=True)
     cw = root / ".cw"
     cw.mkdir(parents=True, exist_ok=True)
     for name in MUTABLE_DIRS:
@@ -234,14 +242,20 @@ def initialize(root: Path) -> tuple[Project, bool]:
 
 
 def backup_metadata(root: Path) -> Path:
+    validate_project_layout(root)
+    relatives = ("project.json", "state.json", "config.toml", "runtime", "reviews", "gates", "logs", "locks")
+    for relative in relatives:
+        source = root / ".cw" / relative
+        if source.is_dir():
+            validate_tree(source, f".cw/{relative}")
     stamp = utc_now().replace("-", "").replace(":", "")
     destination = root / ".cw" / "backups" / stamp
     counter = 0
-    while destination.exists():
+    while destination.exists() or destination.is_symlink():
         counter += 1
         destination = destination.with_name(f"{stamp}-{counter:02d}")
     destination.mkdir(parents=True)
-    for relative in ("project.json", "state.json", "config.toml", "runtime", "reviews", "gates", "logs", "locks"):
+    for relative in relatives:
         source = root / ".cw" / relative
         target = destination / relative
         if source.is_dir():
@@ -255,6 +269,7 @@ def backup_metadata(root: Path) -> Path:
 
 
 def repair(root: Path) -> Path:
+    validate_project_layout(root, create=True)
     (root / ".cw" / "backups").mkdir(parents=True, exist_ok=True)
     backup = backup_metadata(root)
     _migrate_metadata_schemas(root, create_backup=False)

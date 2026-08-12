@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import CwError, ErrorCode
+from .layout import safe_file
 from .models import Workflow
 from .utils import safe_project_path
 
@@ -117,6 +118,7 @@ def load_config(root: Path, *, workflow: Workflow | None = None) -> dict[str, An
         })
     global_path = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cw" / "config.toml"
     project_path = root / ".cw" / "config.toml"
+    safe_file(project_path, ".cw/config.toml")
     for path in (global_path, project_path):
         source = _toml(path)
         _validate(source, path)

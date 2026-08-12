@@ -5,6 +5,7 @@ from typing import Any
 
 from cw import __version__
 from .errors import CwError, ErrorCode
+from .layout import safe_file
 from .models import Workflow, WorkflowState
 from .schema import SCHEMA_VERSION, schema_version
 from .utils import atomic_json, load_json, utc_now
@@ -40,7 +41,8 @@ def initial_state(project_id: str) -> dict[str, Any]:
 
 
 def load_state(root: Path) -> dict[str, Any]:
-    data = load_json(root / ".cw" / "state.json")
+    path = safe_file(root / ".cw" / "state.json", ".cw/state.json", required=True)
+    data = load_json(path)
     schema_version(data, "Workflow state")
     try:
         WorkflowState(str(data.get("status")))

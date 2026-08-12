@@ -7,6 +7,7 @@ from typing import Any
 
 from .commands import command_arguments
 from .errors import CwError, ErrorCode
+from .layout import safe_file
 from .models import Workflow
 from .schema import schema_version
 from .utils import atomic_write, safe_project_path, sha256_bytes
@@ -33,6 +34,7 @@ def workflow_hash(path: Path) -> str:
 
 def load_workflow(root: Path, *, allow_empty: bool = True) -> Workflow:
     path = root / ".codex" / "workflow" / "phases.yaml"
+    safe_file(path, ".codex/workflow/phases.yaml")
     if not path.is_file():
         if allow_empty:
             raise CwError("Plan has not been created.", ErrorCode.INVALID_STATE, "Run: cw plan")
