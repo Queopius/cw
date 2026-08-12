@@ -37,6 +37,9 @@ All notable changes to CW are documented here.
 - Validate the managed `.cw`/`.codex` filesystem topology before locks, init,
   context loading, repair, and backups; reject symlinks and special files that
   could redirect CW outside the current repository.
+- Make repair fingerprint-aware: preserve workflows across legitimate repository
+  renames, but back up and reset active project-specific metadata copied from a
+  different Git repository, even when both directories share a basename.
 
 ## 0.1.1 — 2026-08-12
 

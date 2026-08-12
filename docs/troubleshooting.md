@@ -13,6 +13,10 @@ diagnostic, including an internal traceback when available. This command reads
 the independent diagnostic store and can still work if workflow state is corrupt.
 
 - **Project workflow mismatch:** run `cw repair`; CW backs up metadata first.
+  If the fingerprint proves this is the same Git repository under a new name,
+  repair rebinds identity and preserves its plan. If the fingerprint belongs to
+  another repository, repair quarantines that metadata in the backup and resets
+  the active project to `NOT_CREATED` / `UNINITIALIZED`; run `cw plan` next.
 - **Schema requires migration:** run `cw repair`. CW creates a metadata backup,
   upgrades known schema-less prototype records atomically, and leaves application
   source files untouched.

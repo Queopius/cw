@@ -47,6 +47,11 @@ The session carries an owner-process lease to prevent concurrent implementers
 from replacing each other's identity; no unrestricted sandbox is used to
 enforce this coordination.
 
+Repository repair never treats a matching basename as proof of identity. A
+foreign repository fingerprint causes project-specific metadata to be retained
+only in the repair backup and removed from the active workflow. This prevents
+`cw repair` from becoming a cross-project plan or approval import mechanism.
+
 CW applies best-effort redaction for common credential forms before persisting
 workflow errors or diagnostic records. Diagnostic files remain local under
 `.cw/logs/`, are never approval evidence, and should still be treated as

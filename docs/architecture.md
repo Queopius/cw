@@ -44,6 +44,12 @@ Migration is backup-first and atomic. CW never rewrites a future schema as an
 older one. Project identity, state, workflow plans, reviews, gates, and runtime
 manifests participate in this check.
 
+Repair uses the non-secret Git-local repository fingerprint as its identity
+boundary. Matching fingerprints permit a normal directory rename and retain the
+plan. A differing fingerprint means the metadata was copied from another repo:
+CW backs it up, then clears active plan, state, policy overrides, runtime,
+reviews, gates, logs, and legacy mutable paths instead of adopting them.
+
 `cw doctor` audits all retained review and gate files, not only the current
 phase. It validates review criteria and decisions, gate-to-review references,
 gate artifact integrity, state references, and the known event vocabulary in

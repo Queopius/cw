@@ -7,7 +7,7 @@ from pathlib import Path
 from cw import __version__
 from .errors import CwError, ErrorCode
 from .layout import MUTABLE_DIRECTORIES, safe_file, validate_project_layout, validate_tree
-from .project import Project, create_identity, load_project, project_id
+from .project import Project, create_identity, load_project, project_id, repository_fingerprint
 from .schema import SCHEMA_VERSION, migrate_legacy_document, schema_version
 from .state import initial_state
 from .utils import atomic_json, atomic_write, load_json, utc_now
@@ -17,6 +17,14 @@ from .workflow import write_workflow
 MUTABLE_DIRS = MUTABLE_DIRECTORIES
 BEGIN = "<!-- CW:BEGIN -->"
 END = "<!-- CW:END -->"
+DEFAULT_CONFIG = """# Project settings override ~/.config/cw/config.toml when uncommented.
+# max_review_attempts = 3
+# command_timeout = 1200
+# review_timeout = 1200
+# allow_network = false
+# protected_paths = ["docs/security-policy.md"] # Adds to CW's mandatory metadata protections.
+# human_gate_categories = ["payments", "cryptography", "destructive-migration", "production"]
+"""
 
 
 def template_root() -> Path:
@@ -175,6 +183,74 @@ def _migrate_metadata_schemas(root: Path, *, create_backup: bool) -> Path | None
     return backup
 
 
+def _metadata_matches_repository(root: Path, current_id: str, current_fingerprint: str) -> bool:
+    """Distinguish a same-Git-repository rename from copied foreign metadata."""
+    from .workflow import _read_document
+
+    identity_path = root / ".cw" / "project.json"
+    identity: dict = {}
+    if identity_path.is_file():
+        try:
+            loaded = load_json(identity_path)
+            identity = loaded if isinstance(loaded, dict) else {}
+        except CwError:
+            identity = {}
+    saved_fingerprint = identity.get("repository_root_fingerprint")
+    if isinstance(saved_fingerprint, str) and saved_fingerprint:
+        return saved_fingerprint == current_fingerprint
+
+    configured: list[str] = []
+    if isinstance(identity.get("project_id"), str):
+        configured.append(identity["project_id"])
+    state_path = root / ".cw" / "state.json"
+    if state_path.is_file():
+        try:
+            state = load_json(state_path)
+            if isinstance(state, dict) and isinstance(state.get("workflow_id"), str):
+                configured.append(state["workflow_id"])
+        except CwError:
+            pass
+    plan_path = root / ".codex" / "workflow" / "phases.yaml"
+    if plan_path.is_file():
+        try:
+            plan = _read_document(plan_path)
+            workflow = plan.get("workflow")
+            if isinstance(workflow, dict):
+                configured.extend(
+                    value for value in (workflow.get("id"), workflow.get("repository"))
+                    if isinstance(value, str) and value
+                )
+        except CwError:
+            pass
+    return all(value == current_id for value in configured)
+
+
+def _clear_directory(path: Path, label: str) -> None:
+    validate_tree(path, label)
+    for entry in path.iterdir():
+        if entry.is_dir():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
+
+
+def _reset_foreign_metadata(root: Path, project: Project) -> None:
+    for name in ("runtime", "reviews", "gates", "logs"):
+        _clear_directory(root / ".cw" / name, f".cw/{name}")
+    for name in ("runtime", "reviews", "gates"):
+        legacy = root / ".codex" / name
+        if legacy.exists():
+            validate_tree(legacy, f"Legacy .codex/{name}")
+            shutil.rmtree(legacy)
+    legacy_state = root / ".codex" / "workflow" / "state.json"
+    if legacy_state.exists():
+        safe_file(legacy_state, ".codex/workflow/state.json")
+        legacy_state.unlink()
+    write_workflow(root / ".codex" / "workflow" / "phases.yaml", _empty_plan(project))
+    atomic_json(root / ".cw" / "state.json", initial_state(project.project_id))
+    atomic_write(root / ".cw" / "config.toml", DEFAULT_CONFIG)
+
+
 def initialize(root: Path) -> tuple[Project, bool]:
     validate_project_layout(root, create=True)
     cw = root / ".cw"
@@ -230,14 +306,7 @@ def initialize(root: Path) -> tuple[Project, bool]:
         atomic_json(state, data)
     config = cw / "config.toml"
     if not config.exists():
-        atomic_write(config, """# Project settings override ~/.config/cw/config.toml when uncommented.
-# max_review_attempts = 3
-# command_timeout = 1200
-# review_timeout = 1200
-# allow_network = false
-# protected_paths = ["docs/security-policy.md"] # Adds to CW's mandatory metadata protections.
-# human_gate_categories = ["payments", "cryptography", "destructive-migration", "production"]
-""")
+        atomic_write(config, DEFAULT_CONFIG)
     return project, created
 
 
@@ -248,6 +317,13 @@ def backup_metadata(root: Path) -> Path:
         source = root / ".cw" / relative
         if source.is_dir():
             validate_tree(source, f".cw/{relative}")
+    legacy_paths = [root / ".codex" / "workflow" / "state.json"]
+    legacy_paths.extend(root / ".codex" / name for name in ("runtime", "reviews", "gates"))
+    for source in legacy_paths:
+        if source.is_symlink():
+            raise CwError(f"Legacy metadata cannot be a symlink: {source.name}", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if source.is_dir():
+            validate_tree(source, f"Legacy {source.relative_to(root).as_posix()}")
     stamp = utc_now().replace("-", "").replace(":", "")
     destination = root / ".cw" / "backups" / stamp
     counter = 0
@@ -265,6 +341,14 @@ def backup_metadata(root: Path) -> Path:
     plan = root / ".codex" / "workflow" / "phases.yaml"
     if plan.is_file():
         shutil.copy2(plan, destination / "phases.yaml")
+    legacy_destination = destination / "legacy-codex"
+    for source in legacy_paths:
+        if source.is_dir():
+            legacy_destination.mkdir(exist_ok=True)
+            shutil.copytree(source, legacy_destination / source.name)
+        elif source.is_file():
+            legacy_destination.mkdir(exist_ok=True)
+            shutil.copy2(source, legacy_destination / "state.json")
     return destination
 
 
@@ -274,9 +358,11 @@ def repair(root: Path) -> Path:
     backup = backup_metadata(root)
     _migrate_metadata_schemas(root, create_backup=False)
     current_id = project_id(root)
+    current_fingerprint = repository_fingerprint(root)
+    same_repository = _metadata_matches_repository(root, current_id, current_fingerprint)
     identity_path = root / ".cw" / "project.json"
     prior_initialized = utc_now()
-    if identity_path.is_file():
+    if same_repository and identity_path.is_file():
         try:
             data = load_json(identity_path)
             if isinstance(data, dict):
@@ -291,6 +377,9 @@ def repair(root: Path) -> Path:
     _agents(root)
     for name in MUTABLE_DIRS:
         (root / ".cw" / name).mkdir(parents=True, exist_ok=True)
+    if not same_repository:
+        _reset_foreign_metadata(root, project)
+        return backup
     # Repair identity in a same-repository plan/state without discarding phase history.
     plan_path = root / ".codex" / "workflow" / "phases.yaml"
     if plan_path.is_file():
