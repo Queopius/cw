@@ -121,6 +121,8 @@ Read [Getting started](docs/getting-started.md), [Workflow](docs/workflow.md),
 [Planning](docs/planning.md), [Gates and reviews](docs/gates-and-reviews.md),
 [Configuration](docs/configuration.md), [Security](docs/security.md), and
 [Architecture](docs/architecture.md) for details.
+The promotion and tagging policy is documented in
+[Release process](docs/release-process.md).
 
 ## License
 
