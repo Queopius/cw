@@ -20,6 +20,10 @@ approval. `protected_paths` remains a validated foundation for stronger custom
 path enforcement. Unknown keys and invalid TOML fail closed with a configuration
 error.
 
+`review_timeout` also bounds the structured, read-only planner call. Planner
+transport failures and timeouts preserve the requested goal and can be retried
+with `cw retry` without writing a partial plan.
+
 Plans also carry phase-specific required commands and reviewer timeouts. Commands
 are never taken from the readiness manifest. A command-specific timeout takes
 precedence over the effective default. JSON-formatted `phases.yaml` is intentional:

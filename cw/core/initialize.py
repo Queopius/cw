@@ -121,6 +121,7 @@ def initialize(root: Path) -> tuple[Project, bool]:
         data.setdefault("last_review", None)
         data.setdefault("last_gate", None)
         data.setdefault("last_error", None)
+        data.setdefault("pending_goal", None)
         data.setdefault("history", [])
         data.setdefault("updated_at", utc_now())
         if data.get("workflow_id") != project.project_id:
@@ -193,7 +194,10 @@ def repair(root: Path) -> Path:
     if state_path.is_file():
         try:
             state = load_json(state_path)
-            state.update({"schema_version": 1, "cw_version": __version__, "workflow_id": current_id, "history": state.get("history", [])})
+            state.update({
+                "schema_version": 1, "cw_version": __version__, "workflow_id": current_id,
+                "pending_goal": state.get("pending_goal"), "history": state.get("history", []),
+            })
             atomic_json(state_path, state)
         except CwError:
             atomic_json(state_path, initial_state(current_id))

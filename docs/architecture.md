@@ -18,10 +18,11 @@ The shell installer and generated launcher contain no workflow business logic.
 The installed package owns runtime code; a project receives only static Codex
 integration. Runtime operations do not need `.codex` to be writable.
 
-The core uses dependency-injected reviewer adapters, dataclasses, enums, pathlib,
-typed errors, and explicit transitions. This keeps normal tests offline and
-allows future planner backends, presets, goal-scoped subworkflows, a dashboard,
-and a gated autopilot without weakening the existing gate invariant.
+The core uses dependency-injected planner and reviewer adapters, dataclasses,
+enums, pathlib, typed errors, and explicit transitions. Codex planning and review
+both use ephemeral structured-output calls, while normal tests inject offline
+fakes. This allows future providers, presets, goal-scoped subworkflows, a
+dashboard, and a gated autopilot without weakening the existing gate invariant.
 
 No third-party CLI/UI framework is used in v0.1. This minimizes installation
 cost, enables a self-contained global copy, and keeps behavior auditable.

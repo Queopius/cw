@@ -54,12 +54,59 @@ class CodexAdapterTests(unittest.TestCase):
                 self.assertIn("--ephemeral", command)
                 self.assertEqual(command[command.index("--disable") + 1], "hooks")
                 self.assertIn('web_search="disabled"', command)
+                self.assertIn("project_doc_max_bytes=0", command)
+                self.assertEqual("review", command[-1])
+                self.assertIsNone(kwargs["input"])
                 output = Path(command[command.index("--output-last-message") + 1])
                 output.write_text(json.dumps({"decision": "APPROVE"}))
                 return subprocess.CompletedProcess(command, 0, "", "")
             with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch("cw.adapters.codex.subprocess.run", side_effect=fake_run):
                 result = CodexAdapter().run_reviewer(root, "review", schema, 10)
             self.assertEqual("APPROVE", result.payload["decision"])
+
+    def test_planner_is_structured_read_only_ephemeral_and_rules_disabled(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            schema = root / "schema.json"; schema.write_text("{}")
+            def fake_run(command, **kwargs):
+                self.assertIn("read-only", command)
+                self.assertIn("--ephemeral", command)
+                self.assertIn("--ignore-rules", command)
+                self.assertEqual(command[command.index("--disable") + 1], "hooks")
+                self.assertIn('web_search="disabled"', command)
+                self.assertIn("project_doc_max_bytes=0", command)
+                self.assertEqual("-", command[-1])
+                self.assertEqual("plan", kwargs["input"])
+                output = Path(command[command.index("--output-last-message") + 1])
+                output.write_text(json.dumps({"phases": []}))
+                return subprocess.CompletedProcess(command, 0, "", "")
+            with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.subprocess.run", side_effect=fake_run
+            ):
+                result = CodexAdapter().run_planner(root, "plan", schema, 10)
+            self.assertEqual([], result.payload["phases"])
+
+    def test_planner_network_failure_is_classified_separately(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            schema = root / "schema.json"; schema.write_text("{}")
+            failure = subprocess.CompletedProcess([], 1, "", "WebSocket connection failed")
+            with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.subprocess.run", return_value=failure
+            ), self.assertRaises(CwError) as raised:
+                CodexAdapter().run_planner(root, "plan", schema, 10)
+            self.assertEqual(ErrorCode.PLANNER_NETWORK_ERROR, raised.exception.code)
+
+    def test_planner_timeout_is_classified_separately(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            schema = root / "schema.json"; schema.write_text("{}")
+            timeout = subprocess.TimeoutExpired(["codex"], 10)
+            with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.subprocess.run", side_effect=timeout
+            ), self.assertRaises(CwError) as raised:
+                CodexAdapter().run_planner(root, "plan", schema, 10)
+            self.assertEqual(ErrorCode.PLAN_TIMEOUT, raised.exception.code)
 
 
 if __name__ == "__main__":

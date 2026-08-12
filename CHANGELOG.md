@@ -4,6 +4,10 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+- Add bounded, read-only Codex planning with strict structured output, local
+  safety validation, and retryable infrastructure failures.
+- Prevent generated plans from targeting CW metadata or supplying project
+  identity, settings, and workflow state.
 - Enforce the implementer network policy through the Codex workspace-write
   sandbox and disable web search when network access is denied.
 - Apply configured human-gate categories during plan generation.

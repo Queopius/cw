@@ -231,7 +231,23 @@ def command_plan(args: argparse.Namespace, console: Console) -> int:
                 raise CwError("Existing workflow must be rebuilt explicitly", ErrorCode.INVALID_STATE, "Run: cw plan rebuild --goal \"...\"")
         else:
             transition(root, state, WorkflowState.PLANNING)
-        payload = Planner(workflow.human_gate_categories).propose_plan(root, project.project_id, args.goal)
+        state["pending_goal"] = args.goal
+        save_state(root, state)
+        planner = Planner(
+            workflow.human_gate_categories,
+            backend=CodexAdapter(),
+            timeout=workflow.review_timeout,
+        )
+        try:
+            payload = planner.propose_plan(root, project.project_id, args.goal)
+        except CwError as exc:
+            if exc.code in {
+                ErrorCode.CODEX_NOT_FOUND, ErrorCode.PLAN_TIMEOUT,
+                ErrorCode.PLANNER_NETWORK_ERROR, ErrorCode.PLANNER_PROCESS_ERROR,
+            }:
+                state["last_error"] = f"{exc.code.value}: {exc.message}\n{exc.details or ''}".rstrip()
+                transition(root, state, WorkflowState.ERROR, force_error=True)
+            raise
         write_workflow(root / ".codex" / "workflow" / "phases.yaml", payload)
         workflow = load_workflow(root)
         bind_plan(root, state, workflow)
@@ -383,11 +399,21 @@ def command_retry(args: argparse.Namespace, console: Console) -> int:
     if WorkflowState(state["status"]) is not WorkflowState.ERROR:
         raise CwError("There is no retryable infrastructure error", ErrorCode.INVALID_STATE)
     error = str(state.get("last_error") or "")
-    if "IMPLEMENTER_PROCESS_ERROR" in error:
+    readiness_exists = (root / ".cw" / "runtime" / "READY_FOR_REVIEW.json").is_file()
+    if "IMPLEMENTER_PROCESS_ERROR" in error or (
+        "CODEX_NOT_FOUND" in error and state.get("current_phase") and not readiness_exists
+    ):
         state["last_error"] = None
         transition(root, state, WorkflowState.IN_PROGRESS)
         return command_start(args, console)
-    if not any(code in error for code in ("REVIEWER_NETWORK_ERROR", "REVIEW_TIMEOUT", "REVIEWER_PROCESS_ERROR", "SCHEMA_VALIDATION_ERROR")):
+    if any(code in error for code in ("PLANNER_NETWORK_ERROR", "PLANNER_PROCESS_ERROR", "PLAN_TIMEOUT", "CODEX_NOT_FOUND")) and not state.get("current_phase"):
+        goal = state.get("pending_goal")
+        state["last_error"] = None
+        transition(root, state, WorkflowState.PLANNING)
+        args.action = None
+        args.goal = goal
+        return command_plan(args, console)
+    if not any(code in error for code in ("REVIEWER_NETWORK_ERROR", "REVIEW_TIMEOUT", "REVIEWER_PROCESS_ERROR", "SCHEMA_VALIDATION_ERROR", "CODEX_NOT_FOUND")):
         raise CwError("The last error is not safely retryable", ErrorCode.INVALID_STATE, "Run: cw error")
     args.hook = False
     args.human_approve = False

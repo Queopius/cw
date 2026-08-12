@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -42,15 +43,18 @@ def load_workflow(root: Path, *, allow_empty: bool = True) -> Workflow:
     phases_data = data.get("phases", [])
     if not isinstance(meta, dict) or not isinstance(phases_data, list):
         raise CwError("Invalid workflow structure", ErrorCode.SCHEMA_VALIDATION_ERROR)
-    phases = tuple(__import__("cw.core.models", fromlist=["Phase"]).Phase.from_dict(item) for item in phases_data)
-    workflow = Workflow(
-        id=str(meta.get("id", "")), repository=str(meta.get("repository", "")),
-        version=int(meta.get("version", 1)), status=str(meta.get("status", "PROPOSED")),
-        goal=str(meta["goal"]) if meta.get("goal") else None, phases=phases,
-        max_review_attempts=int(settings.get("max_review_attempts", 3)),
-        command_timeout=int(settings.get("command_timeout_seconds", 1200)),
-        review_timeout=int(reviewer.get("timeout_seconds", 1200)),
-    )
+    try:
+        phases = tuple(__import__("cw.core.models", fromlist=["Phase"]).Phase.from_dict(item) for item in phases_data)
+        workflow = Workflow(
+            id=str(meta.get("id", "")), repository=str(meta.get("repository", "")),
+            version=int(meta.get("version", 1)), status=str(meta.get("status", "PROPOSED")),
+            goal=str(meta["goal"]) if meta.get("goal") else None, phases=phases,
+            max_review_attempts=int(settings.get("max_review_attempts", 3)),
+            command_timeout=int(settings.get("command_timeout_seconds", 1200)),
+            review_timeout=int(reviewer.get("timeout_seconds", 1200)),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CwError("phases.yaml has invalid field types", ErrorCode.SCHEMA_VALIDATION_ERROR, details=str(exc)) from exc
     validate_workflow(root, workflow)
     return workflow
 
@@ -66,12 +70,21 @@ def validate_workflow(root: Path, workflow: Workflow) -> None:
     for phase in workflow.phases:
         if not phase.id or not phase.name or not phase.objective:
             raise CwError("Every phase needs id, name, and objective", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if not re.fullmatch(r"[0-9]{2}-[a-z0-9][a-z0-9-]*", phase.id):
+            raise CwError(f"Phase ID is invalid: {phase.id}", ErrorCode.SCHEMA_VALIDATION_ERROR)
         if any(dep not in known for dep in phase.depends_on):
             raise CwError(f"Phase {phase.id} has a missing or future dependency", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        for artifact in phase.artifacts:
+            if any(char in artifact for char in "*?["):
+                raise CwError(f"Phase {phase.id} artifact cannot be a glob", ErrorCode.SCHEMA_VALIDATION_ERROR)
         for value in (*phase.artifacts, *phase.review_paths):
-            if not any(char in value for char in "*?["):
-                safe_project_path(root, value)
+            normalized = value.replace("\\", "/").removeprefix("./")
+            if normalized.split("/", 1)[0] in {".cw", ".codex", ".git"}:
+                raise CwError(f"Phase {phase.id} targets protected workflow metadata", ErrorCode.SCHEMA_VALIDATION_ERROR)
+            safe_project_path(root, value)
         for criterion in phase.acceptance_criteria:
+            if criterion.severity not in {"blocking", "advisory"}:
+                raise CwError(f"Criterion severity is invalid: {criterion.id}", ErrorCode.SCHEMA_VALIDATION_ERROR)
             if criterion.id in criteria:
                 raise CwError(f"Duplicate criterion: {criterion.id}", ErrorCode.SCHEMA_VALIDATION_ERROR)
             criteria.add(criterion.id)

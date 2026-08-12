@@ -33,6 +33,7 @@ def initial_state(project_id: str) -> dict[str, Any]:
         "workflow_version": None, "workflow_sha256": None, "current_phase": None,
         "status": WorkflowState.UNINITIALIZED.value, "attempt": 0,
         "last_review": None, "last_gate": None, "last_error": None,
+        "pending_goal": None,
         "history": [], "updated_at": utc_now(),
     }
 
@@ -68,6 +69,7 @@ def bind_plan(root: Path, state: dict[str, Any], workflow: Workflow) -> None:
         "workflow_sha256": workflow_hash(path),
         "current_phase": workflow.phases[0].id if workflow.phases else None,
         "attempt": 0, "last_review": None, "last_gate": None, "last_error": None,
+        "pending_goal": None,
     })
     save_state(root, state)
 

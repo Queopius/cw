@@ -12,6 +12,8 @@ details and `cw error --raw` for scripts expecting the original diagnostic.
 
 - **Project workflow mismatch:** run `cw repair`; CW backs up metadata first.
 - **Reviewer unavailable or timed out:** preserve readiness and run `cw retry`.
+- **Planner unavailable, invalid, or timed out:** CW preserves the pending goal,
+  writes no partial plan, and `cw retry` reruns planning.
 - **Implementer stopped unexpectedly:** CW preserves the current phase, records
   the process failure without consuming a semantic review attempt, and `cw retry`
   restarts the implementer rather than the reviewer.

@@ -69,7 +69,8 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
                                   └─ APPROVE → GATE → NEXT PHASE
 ```
 
-- Plans are repository-specific and remain proposed until explicitly approved.
+- Plans are proposed by an ephemeral read-only Codex invocation from bounded
+  repository evidence, then validated locally and held for explicit approval.
 - Implementers receive only the current phase and use `workspace-write`.
 - Required commands run before AI review and come only from `phases.yaml`.
 - Reviewers run independently with `read-only`, ephemeral sessions, and hooks disabled.

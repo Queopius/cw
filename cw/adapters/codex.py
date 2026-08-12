@@ -53,32 +53,49 @@ class CodexAdapter:
             )
         return 0
 
-    def run_reviewer(self, root: Path, prompt: str, schema: Path, timeout: int) -> CodexResult:
+    def _run_structured(
+        self, root: Path, prompt: str, schema: Path, timeout: int, *, role: str
+    ) -> CodexResult:
         self._require()
-        with tempfile.TemporaryDirectory(prefix="cw-review-") as temporary:
+        with tempfile.TemporaryDirectory(prefix=f"cw-{role}-") as temporary:
             output = Path(temporary) / "result.json"
             environment = os.environ.copy()
-            environment["CW_REVIEWER_ACTIVE"] = "1"
+            environment[f"CW_{role.upper()}_ACTIVE"] = "1"
             command = [
                 self.command, "--strict-config", "--config", 'web_search="disabled"',
+                "--config", "project_doc_max_bytes=0",
                 "--ask-for-approval", "never", "exec", "--ephemeral", "--disable", "hooks", "--sandbox", "read-only",
-                "--color", "never", "--output-schema", str(schema),
-                "--output-last-message", str(output), "--cd", str(root), prompt,
+                "--ignore-rules", "--color", "never", "--output-schema", str(schema),
+                "--output-last-message", str(output), "--cd", str(root), "-" if role == "planner" else prompt,
             ]
             try:
-                completed = subprocess.run(command, cwd=root, env=environment, text=True, capture_output=True, timeout=timeout, check=False)
+                completed = subprocess.run(
+                    command, cwd=root, env=environment, text=True, capture_output=True,
+                    input=prompt if role == "planner" else None, timeout=timeout, check=False,
+                )
             except subprocess.TimeoutExpired as exc:
-                raise CwError("Independent reviewer timed out", ErrorCode.REVIEW_TIMEOUT, "Run: cw retry", details=str(exc)) from exc
+                code = ErrorCode.REVIEW_TIMEOUT if role == "reviewer" else ErrorCode.PLAN_TIMEOUT
+                label = "Independent reviewer" if role == "reviewer" else "Codex planner"
+                raise CwError(f"{label} timed out", code, "Run: cw retry", details=str(exc)) from exc
             if completed.returncode:
-                code = self.classify_transport_error(completed.stderr + completed.stdout)
-                raise CwError("Independent reviewer unavailable", code, "Run: cw retry", details=(completed.stderr + completed.stdout)[-12000:])
+                code = self.classify_transport_error(completed.stderr + completed.stdout, role=role)
+                label = "Independent reviewer" if role == "reviewer" else "Codex planner"
+                raise CwError(f"{label} unavailable", code, "Run: cw retry", details=(completed.stderr + completed.stdout)[-12000:])
             try:
                 payload = json.loads(output.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
-                raise CwError("Reviewer returned invalid JSON", ErrorCode.REVIEWER_PROCESS_ERROR, "Run: cw retry", details=str(exc)) from exc
+                code = ErrorCode.REVIEWER_PROCESS_ERROR if role == "reviewer" else ErrorCode.PLANNER_PROCESS_ERROR
+                raise CwError(f"{role.title()} returned invalid JSON", code, "Run: cw retry", details=str(exc)) from exc
             if not isinstance(payload, dict):
-                raise CwError("Reviewer returned an invalid result", ErrorCode.REVIEWER_PROCESS_ERROR, "Run: cw retry")
+                code = ErrorCode.REVIEWER_PROCESS_ERROR if role == "reviewer" else ErrorCode.PLANNER_PROCESS_ERROR
+                raise CwError(f"{role.title()} returned an invalid result", code, "Run: cw retry")
             return CodexResult(payload, completed.stderr)
+
+    def run_reviewer(self, root: Path, prompt: str, schema: Path, timeout: int) -> CodexResult:
+        return self._run_structured(root, prompt, schema, timeout, role="reviewer")
+
+    def run_planner(self, root: Path, prompt: str, schema: Path, timeout: int) -> CodexResult:
+        return self._run_structured(root, prompt, schema, timeout, role="planner")
 
     def smoke_test(self, root: Path, schema: Path, timeout: int = 60) -> CodexResult:
         return self.run_reviewer(
@@ -89,8 +106,8 @@ class CodexAdapter:
         )
 
     @staticmethod
-    def classify_transport_error(text: str) -> ErrorCode:
+    def classify_transport_error(text: str, *, role: str = "reviewer") -> ErrorCode:
         lowered = text.lower()
         if any(term in lowered for term in ("network", "websocket", "wss://", "https://", "connection", "dns", "transport")):
-            return ErrorCode.REVIEWER_NETWORK_ERROR
-        return ErrorCode.REVIEWER_PROCESS_ERROR
+            return ErrorCode.REVIEWER_NETWORK_ERROR if role == "reviewer" else ErrorCode.PLANNER_NETWORK_ERROR
+        return ErrorCode.REVIEWER_PROCESS_ERROR if role == "reviewer" else ErrorCode.PLANNER_PROCESS_ERROR

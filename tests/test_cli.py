@@ -11,11 +11,13 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from cw.adapters.codex import CodexResult
 from cw.cli.main import main
 from cw.core.errors import CwError, ErrorCode
 from cw.core.models import WorkflowState
 from cw.core.state import save_state, transition
 from cw.ui.console import Console
+from cw.planning.planner import Planner
 from tests.helpers import TempRepo
 
 
@@ -176,9 +178,39 @@ class CliTests(unittest.TestCase):
         code, output = self.invoke("plan")
         self.assertEqual(1, code)
         self.assertIn("Project goal is unclear", output)
-        code, output = self.invoke("plan", "--goal", "Build a webhook handler", "--json")
+        proposal = Planner().propose_plan(self.repo.root, project_id, "Build a webhook handler")
+        with patch("cw.cli.main.CodexAdapter.run_planner", return_value=CodexResult({"phases": proposal["phases"]}, "")):
+            code, output = self.invoke("plan", "--goal", "Build a webhook handler", "--json")
         self.assertEqual(0, code)
         self.assertEqual("PROPOSED", json.loads(output)["status"])
+
+    def test_planner_infrastructure_failure_is_retryable_without_losing_goal(self):
+        from cw.core.state import initial_state
+        from cw.core.workflow import write_workflow
+        project_id = "sample-app"
+        write_workflow(self.repo.root / ".codex/workflow/phases.yaml", {
+            "schema_version": 1,
+            "workflow": {"id": project_id, "repository": project_id, "version": 1, "status": "NOT_CREATED", "goal": None},
+            "settings": {}, "reviewer": {}, "phases": [],
+        })
+        save_state(self.repo.root, initial_state(project_id))
+        failure = CwError("planner offline", ErrorCode.PLANNER_NETWORK_ERROR, "Run: cw retry")
+        with patch("cw.cli.main.CodexAdapter.run_planner", side_effect=failure):
+            code, output = self.invoke("plan", "--goal", "Build a webhook handler")
+        self.assertEqual(1, code)
+        self.assertIn("Planner unavailable", output)
+        self.assertEqual("ERROR", self.repo.state()["status"])
+        self.assertEqual(0, self.repo.state()["attempt"])
+        self.assertEqual("Build a webhook handler", self.repo.state()["pending_goal"])
+        from cw.core.workflow import load_workflow
+        self.assertEqual((), load_workflow(self.repo.root).phases)
+
+        proposal = Planner().propose_plan(self.repo.root, project_id, "Build a webhook handler")
+        with patch("cw.cli.main.CodexAdapter.run_planner", return_value=CodexResult({"phases": proposal["phases"]}, "")):
+            code, output = self.invoke("retry", "--json")
+        self.assertEqual(0, code)
+        self.assertEqual("PROPOSED", json.loads(output)["status"])
+        self.assertIsNone(self.repo.state()["pending_goal"])
 
     def test_explicit_reopen_backs_up_and_invalidates_dependent_gates(self):
         from cw.core.gates import create_gate
