@@ -8,6 +8,8 @@ All notable changes to CW are documented here.
   validation, review, retry, status, history, doctor, diagnostics,
   configuration, and version use cases behind injected command services while
   preserving the public parser and compatibility seams.
+- Separate argument normalization and the public grammar from injected command
+  dispatch and its structured top-level error boundary.
 
 ## 0.1.3 — 2026-08-13
 

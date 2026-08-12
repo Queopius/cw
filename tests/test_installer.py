@@ -35,6 +35,11 @@ class InstallerTests(unittest.TestCase):
             completed = subprocess.run([str(launcher), "version", "--json"], env=environment, text=True, capture_output=True, check=True)
             expected = (project / "VERSION").read_text(encoding="utf-8").strip()
             self.assertEqual(expected, json.loads(completed.stdout)["version"])
+            modules = subprocess.run([
+                "python3", "-c",
+                "import cw.cli.commands.execution, cw.cli.commands.lifecycle, cw.cli.commands.read, cw.cli.parser, cw.cli.runner",
+            ], cwd=home, env={**environment, "PYTHONPATH": str(home / ".local/share/cw")}, text=True, capture_output=True)
+            self.assertEqual(0, modules.returncode, modules.stderr)
 
 
 if __name__ == "__main__":

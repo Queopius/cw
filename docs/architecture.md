@@ -19,11 +19,12 @@ The shell installer and generated launcher contain no workflow business logic.
 The installed package owns runtime code; a project receives only static Codex
 integration. Runtime operations do not need `.codex` to be writable.
 
-`cw.cli.main` owns the public parser, command registry, compatibility wrappers,
-and top-level error boundary. Command modules own bounded use cases and receive
-repository/context services explicitly. This keeps public dispatch stable while
-allowing commands to be extracted and tested without turning the entry point
-back into a monolith.
+`cw.cli.parser` owns argument normalization and the public command grammar.
+`cw.cli.runner` owns dispatch and the top-level error boundary. `cw.cli.main`
+is the composition root and retains the command registry and compatibility
+wrappers. Command modules own bounded use cases and receive repository/context
+services explicitly. This keeps public dispatch stable while allowing commands
+to be extracted and tested without turning the entry point back into a monolith.
 
 `cw.core.layout` defines the trusted project filesystem topology. Validation is
 performed before init writes, lock acquisition, normal context loading, repair,
