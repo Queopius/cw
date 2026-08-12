@@ -16,8 +16,11 @@ CW v0.1 enforces `max_review_attempts`, `command_timeout`, `review_timeout`,
 required. Network access is denied by default for implementer shell commands;
 when denied, live web search is disabled for that Codex invocation as well.
 Human-gate categories determine which generated phases require explicit human
-approval. `protected_paths` remains a validated foundation for stronger custom
-path enforcement. Unknown keys and invalid TOML fail closed with a configuration
+approval. `protected_paths` adds project files to the implementation-session
+integrity snapshot. CW's state, identity, project configuration, gates, reviews,
+and phase plan are mandatory protected paths and cannot be removed by an
+override. Protected paths must be repository-relative, non-glob paths and cannot
+be symlinks. Unknown keys and invalid TOML fail closed with a configuration
 error.
 
 `review_timeout` also bounds the structured, read-only planner call. Planner

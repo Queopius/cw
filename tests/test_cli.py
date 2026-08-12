@@ -61,6 +61,48 @@ class CliTests(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertTrue(implementer.call_args.kwargs["allow_network"])
 
+    def test_start_allows_review_and_gate_created_by_hook(self):
+        def implement(root, prompt, **kwargs):
+            from cw.agents.reviewer import run_review
+            from tests.helpers import FakeAdapter, result
+            self.repo.artifact()
+            self.repo.ready()
+            run_review(root, self.repo.workflow, self.repo.workflow.phases[0], self.repo.state(), FakeAdapter(result()))
+            return 0
+
+        with patch("cw.cli.main.CodexAdapter.run_implementer", side_effect=implement):
+            code, _ = self.invoke("start")
+        self.assertEqual(0, code)
+        self.assertEqual("APPROVED", self.repo.state()["status"])
+        self.assertTrue((self.repo.root / ".cw/gates/01-phase-1.approved.json").is_file())
+
+    def test_start_fails_closed_when_implementer_mutates_state(self):
+        def implement(root, prompt, **kwargs):
+            state = self.repo.state()
+            state["status"] = "APPROVED"
+            save_state(root, state)
+            return 0
+
+        with patch("cw.cli.main.CodexAdapter.run_implementer", side_effect=implement):
+            code, output = self.invoke("start")
+        self.assertEqual(1, code)
+        self.assertIn("Protected workflow metadata changed", output)
+        self.assertEqual("ERROR", self.repo.state()["status"])
+        self.assertIn("PROTECTED_PATH_MODIFIED", self.repo.state()["last_error"])
+
+    def test_start_recovers_known_good_state_when_implementer_corrupts_json(self):
+        def implement(root, prompt, **kwargs):
+            (root / ".cw/state.json").write_text("{", encoding="utf-8")
+            return 0
+
+        with patch("cw.cli.main.CodexAdapter.run_implementer", side_effect=implement):
+            code, output = self.invoke("start")
+        self.assertEqual(1, code)
+        self.assertIn("Protected workflow metadata changed", output)
+        state = self.repo.state()
+        self.assertEqual("ERROR", state["status"])
+        self.assertEqual("protected_path_violation", state["history"][-1]["action"])
+
     def test_implementer_failure_enters_retryable_error_state(self):
         failure = CwError("implementer failed", ErrorCode.IMPLEMENTER_PROCESS_ERROR, "Run: cw retry", details="exit 9")
         with patch("cw.cli.main.CodexAdapter.run_implementer", side_effect=failure):
@@ -215,8 +257,10 @@ class CliTests(unittest.TestCase):
     def test_explicit_reopen_backs_up_and_invalidates_dependent_gates(self):
         from cw.core.gates import create_gate
         self.repo.artifact(1); self.repo.artifact(2)
-        create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], "review-1")
-        create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[1], "review-2")
+        review_1 = self.repo.approved_review(1)
+        review_2 = self.repo.approved_review(2)
+        create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], review_1)
+        create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[1], review_2)
         code, output = self.invoke("repair", "--reopen", "01-phase-1")
         self.assertEqual(0, code)
         self.assertIn("Phase reopened", output)

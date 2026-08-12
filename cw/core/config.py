@@ -7,6 +7,7 @@ from typing import Any
 
 from .errors import CwError, ErrorCode
 from .models import Workflow
+from .utils import safe_project_path
 
 try:
     import tomllib  # type: ignore[import-not-found]
@@ -14,10 +15,20 @@ except ImportError:  # Python 3.10 support without a runtime dependency.
     tomllib = None  # type: ignore[assignment]
 
 
+CORE_PROTECTED_PATHS = (
+    ".cw/state.json",
+    ".cw/project.json",
+    ".cw/config.toml",
+    ".cw/gates",
+    ".cw/reviews",
+    ".codex/workflow/phases.yaml",
+)
+
+
 DEFAULTS: dict[str, Any] = {
     "max_review_attempts": 3,
     "allow_network": False,
-    "protected_paths": [".cw/gates", ".cw/reviews", ".codex/workflow/phases.yaml"],
+    "protected_paths": list(CORE_PROTECTED_PATHS),
     "human_gate_categories": [
         "payments", "cryptography", "destructive-migration", "production",
         "authentication-security", "public-api-breaking", "infrastructure-deletion",
@@ -129,10 +140,24 @@ def load_policy(root: Path, *, workflow: Workflow | None = None) -> Policy:
         value = config[key]
         if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
             raise CwError(f"Configuration setting {key} must be a string list", ErrorCode.USAGE_ERROR, exit_code=2)
+    for value in config["protected_paths"]:
+        if any(character in value for character in "*?["):
+            raise CwError("Configuration setting protected_paths cannot contain globs", ErrorCode.USAGE_ERROR, exit_code=2)
+        try:
+            path = safe_project_path(root, value)
+        except CwError as exc:
+            raise CwError(
+                "Configuration setting protected_paths must be repository-relative",
+                ErrorCode.USAGE_ERROR,
+                details=exc.message,
+                exit_code=2,
+            ) from exc
+        if path.is_symlink():
+            raise CwError("Configuration setting protected_paths cannot contain symlinks", ErrorCode.USAGE_ERROR, exit_code=2)
     return Policy(
         max_review_attempts=config["max_review_attempts"],
         allow_network=config["allow_network"],
-        protected_paths=tuple(config["protected_paths"]),
+        protected_paths=tuple(dict.fromkeys((*CORE_PROTECTED_PATHS, *config["protected_paths"]))),
         human_gate_categories=tuple(config["human_gate_categories"]),
         command_timeout=config["command_timeout"],
         review_timeout=config["review_timeout"],

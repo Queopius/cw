@@ -13,6 +13,11 @@ All notable changes to CW are documented here.
 - Apply configured human-gate categories during plan generation.
 - Record unexpected implementer exits as retryable workflow infrastructure
   errors.
+- Enforce mandatory protected-path snapshots around implementer sessions and
+  fail closed on workflow state, identity, configuration, review, gate, or plan
+  tampering.
+- Cross-validate approval gates against their independent review, complete
+  criterion result, human-approval type, and exact artifact hash set.
 
 ## 0.1.1 — 2026-08-12
 

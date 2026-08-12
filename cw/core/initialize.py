@@ -137,6 +137,7 @@ def initialize(root: Path) -> tuple[Project, bool]:
 # command_timeout = 1200
 # review_timeout = 1200
 # allow_network = false
+# protected_paths = ["docs/security-policy.md"] # Adds to CW's mandatory metadata protections.
 # human_gate_categories = ["payments", "cryptography", "destructive-migration", "production"]
 """)
     return project, created

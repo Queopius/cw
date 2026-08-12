@@ -25,6 +25,9 @@ readiness manifest and does not restart implementation.
 
 Approval writes `.cw/gates/<phase>.approved.json` with workflow/version, review
 reference, timestamp, optional Git commit, CW version, and artifact hashes.
-Changed approved artifacts invalidate the gate; CW never recreates it silently.
+Gate validation requires the referenced semantic review, an exact criterion set,
+a consistent decision, the complete declared artifact set, and the required
+human-approval marker. Changed approved artifacts or review evidence invalidate
+the gate; CW never recreates it silently.
 After semantic approval of a human-gated phase, `cw review --human-approve` is
 the explicit local action that creates its gate.

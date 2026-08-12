@@ -23,6 +23,14 @@ redirections, command substitution, and other shell control syntax are rejected
 when the workflow loads. State, reviews, gates, and project identity use atomic
 temp-write, fsync, and replace.
 
+Before each implementer session, CW snapshots mandatory workflow metadata and
+all configured `protected_paths`. After Codex exits, existing protected content
+must be unchanged. The only accepted additions are one current-phase review and,
+when approved, one gate produced through a consistent hook transition. CW checks
+the state/history delta, every configured criterion, the gate-to-review link,
+the required human-approval type, and the complete artifact hash set. A mismatch
+sets `PROTECTED_PATH_MODIFIED` and fails closed; it is not automatically retryable.
+
 CW sends no telemetry. Repository content can be sent to Codex when a planner,
 implementer, or reviewer runs. Planning sends a bounded evidence selection over
 stdin, and review prompts scope the phase and review paths. Do not place secrets

@@ -62,6 +62,7 @@ def error_summary(code: str, message: str) -> tuple[str, str]:
         "RUNTIME_NOT_WRITABLE": ("Runtime path is read-only", ".cw must be writable."),
         "INVALID_STATE": ("Workflow state invalid", message),
         "INVALID_GATE": ("Approval gate invalid", message),
+        "PROTECTED_PATH_MODIFIED": ("Protected workflow metadata changed", "CW detected an unauthorized metadata change and stopped safely."),
         "CODEX_NOT_FOUND": ("Codex not found", "The Codex CLI is required for planning and agent operations."),
         "SCHEMA_VALIDATION_ERROR": ("Workflow data invalid", message),
         "PLAN_UNCLEAR": ("Project goal is unclear", message),

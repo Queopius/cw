@@ -5,6 +5,7 @@ from dataclasses import replace
 
 from cw.agents.reviewer import human_approve, run_review
 from cw.core.errors import CwError, ErrorCode
+from cw.core.gates import validate_gate
 from tests.helpers import FakeAdapter, TempRepo, result
 
 
@@ -65,6 +66,15 @@ class ReviewerTests(unittest.TestCase):
         self.repo.artifact(content="changed after semantic review")
         with self.assertRaises(CwError):
             human_approve(self.repo.root, workflow, phase, self.repo.state())
+
+    def test_human_approval_gate_records_and_validates_approval_type(self):
+        phase = replace(self.repo.workflow.phases[0], requires_human_approval=True)
+        workflow = replace(self.repo.workflow, phases=(phase, *self.repo.workflow.phases[1:]))
+        run_review(self.repo.root, workflow, phase, self.repo.state(), FakeAdapter(result()))
+        gate = human_approve(self.repo.root, workflow, phase, self.repo.state())
+        import json
+        self.assertEqual("human", json.loads(gate.read_text(encoding="utf-8"))["approval"]["kind"])
+        validate_gate(self.repo.root, workflow, phase.id)
 
 
 if __name__ == "__main__":

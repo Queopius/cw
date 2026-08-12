@@ -131,6 +131,26 @@ class EffectivePolicyTests(unittest.TestCase):
         self.assertTrue(workflow.allow_network)
         self.assertEqual(("authentication-security",), workflow.human_gate_categories)
 
+    def test_core_protected_paths_cannot_be_disabled(self):
+        (self.repo.root / ".cw" / "config.toml").write_text(
+            'protected_paths = ["docs/security-policy.md"]\n', encoding="utf-8"
+        )
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": self.xdg.name}):
+            _, _, workflow = _context(self.repo.root)
+        self.assertIn(".cw/state.json", workflow.protected_paths)
+        self.assertIn(".cw/gates", workflow.protected_paths)
+        self.assertIn("docs/security-policy.md", workflow.protected_paths)
+
+    def test_unsafe_protected_path_fails_during_config_load(self):
+        (self.repo.root / ".cw" / "config.toml").write_text(
+            'protected_paths = ["../outside"]\n', encoding="utf-8"
+        )
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": self.xdg.name}):
+            with self.assertRaises(CwError) as raised:
+                _context(self.repo.root)
+        self.assertEqual(ErrorCode.USAGE_ERROR, raised.exception.code)
+        self.assertEqual(2, raised.exception.exit_code)
+
     def test_configured_human_gate_categories_drive_planning(self):
         authentication = Planner(("authentication-security",)).propose_plan(
             self.repo.root, "sample-app", "Strengthen authorization and access control"

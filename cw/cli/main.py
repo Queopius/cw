@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import shutil
@@ -17,6 +18,7 @@ from cw.core.config import apply_policy, load_config, load_policy
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_dependencies, validate_gate
 from cw.core.initialize import backup_metadata, initialize, repair
+from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
 from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
 from cw.core.project import load_project, repository_root
@@ -296,6 +298,7 @@ def command_start(args: argparse.Namespace, console: Console) -> int:
         elif status is not WorkflowState.IN_PROGRESS:
             raise CwError(f"Cannot start while workflow is {status.value}", ErrorCode.INVALID_STATE, "Run: cw status")
         validate_dependencies(root, workflow, phase)
+        protected_before = snapshot_protected_paths(root, workflow.protected_paths)
     prompt = f"""Work only on CW phase {phase.id}: {phase.name}.
 Objective: {phase.objective}
 Read AGENTS.md and .codex/workflow/phases.yaml. Do not change workflow state, criteria, reviews, or gates.
@@ -307,13 +310,28 @@ When complete, create .cw/runtime/READY_FOR_REVIEW.json matching the installed s
     console.header("Start")
     console.item("→", f"{phase.id} · {phase.name}")
     console.field("Sandbox", "workspace-write")
+    failure: CwError | None = None
+    result = 0
     try:
-        return CodexAdapter().run_implementer(root, prompt, allow_network=workflow.allow_network)
+        result = CodexAdapter().run_implementer(root, prompt, allow_network=workflow.allow_network)
     except CwError as exc:
-        state = load_state(root)
-        state["last_error"] = f"{exc.code.value}: {exc.message}\n{exc.details or ''}".rstrip()
+        failure = exc
+    try:
+        verify_protected_paths(root, workflow, phase, protected_before)
+    except CwError as exc:
+        failure = exc
+    if failure is not None:
+        if failure.code is ErrorCode.PROTECTED_PATH_MODIFIED and protected_before.state is not None:
+            state = copy.deepcopy(protected_before.state)
+            state.setdefault("history", []).append({
+                "timestamp": utc_now(), "phase": phase.id, "action": "protected_path_violation",
+            })
+        else:
+            state = load_state(root)
+        state["last_error"] = f"{failure.code.value}: {failure.message}\n{failure.details or ''}".rstrip()
         transition(root, state, WorkflowState.ERROR, force_error=True)
-        raise
+        raise failure
+    return result
 
 
 def command_status(args: argparse.Namespace, console: Console) -> int:
@@ -458,6 +476,8 @@ def _doctor(root: Path | None, reviewer: bool) -> list[dict[str, Any]]:
         ])
         writable = os.access(root / ".cw", os.W_OK)
         checks.append({"section": "Security", "name": ".cw writable", "status": "pass" if writable else "error", "detail": "required"})
+        snapshot_protected_paths(root, workflow.protected_paths)
+        checks.append({"section": "Security", "name": "Protected paths", "status": "pass", "detail": f"{len(workflow.protected_paths)} enforced"})
         checks.append({"section": "Security", "name": ".codex writable", "status": "neutral", "detail": "not required at runtime"})
         checks.append({"section": "Security", "name": "Hook trust", "status": "neutral", "detail": "managed by Codex; run /hooks if prompted"})
         if reviewer:
