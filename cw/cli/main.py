@@ -12,22 +12,21 @@ from typing import Any, Sequence
 from cw.adapters.codex import CodexAdapter
 from cw.agents.reviewer import human_approve, run_review
 from cw.checks.deterministic import validate_phase
+from cw.cli.commands import lifecycle as lifecycle_commands
 from cw.cli.commands import read as read_commands
 from cw.core.config import apply_policy, load_policy
 from cw.core.diagnostics import record_diagnostic, state_error
 from cw.core.errors import CwError, ErrorCode
-from cw.core.gates import gate_path, validate_dependencies, validate_gate
-from cw.core.initialize import backup_metadata, initialize, repair
+from cw.core.gates import validate_dependencies, validate_gate
 from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
 from cw.core.locking import operation_lock
 from cw.core.layout import validate_project_layout
 from cw.core.models import WorkflowState
 from cw.core.project import load_project, repository_root
 from cw.core.session import create_session, finish_session, load_session, readiness_path
-from cw.core.state import bind_plan, initial_state, load_state, save_state, transition, validate_state
+from cw.core.state import load_state, save_state, transition, validate_state
 from cw.core.utils import utc_now
-from cw.core.workflow import load_workflow, set_plan_status, write_workflow, workflow_hash
-from cw.planning.planner import Planner
+from cw.core.workflow import load_workflow
 from cw.ui.console import Console, HELP, emit_json, error_summary
 
 
@@ -101,110 +100,13 @@ def _render_status(console: Console, data: dict[str, Any], verbose: bool = False
 
 
 def command_init(args: argparse.Namespace, console: Console) -> int:
-    root = _root()
-    with operation_lock(root, "init"):
-        project, created = initialize(root)
-    payload = {"project": project.project_id, "created": created, "static": ".codex/", "runtime": ".cw/", "plan": "NOT_CREATED"}
-    if args.json:
-        emit_json(payload)
-    else:
-        console.header("Initialize")
-        console.item("✓", "Workflow initialized" if created else "Workflow already initialized")
-        console.field("Project", project.project_id)
-        console.field("Static", ".codex/")
-        console.field("Runtime", ".cw/")
-        console.field("Plan", "NOT CREATED" if load_workflow(root).status == "NOT_CREATED" else load_workflow(root).status)
-        if load_workflow(root).status == "NOT_CREATED":
-            console.run("cw plan")
-    return 0
+    return lifecycle_commands.command_init(args, console, root_resolver=_root)
 
 
 def command_plan(args: argparse.Namespace, console: Console) -> int:
-    root = _root()
-    project, state, workflow = _context(root)
-    action = args.action
-    if action == "show":
-        payload = {"workflow": workflow.id, "status": workflow.status, "goal": workflow.goal, "phases": [
-            {"id": p.id, "name": p.name, "objective": p.objective, "depends_on": list(p.depends_on), "artifacts": list(p.artifacts),
-             "required_commands": [c.command for c in p.required_commands], "acceptance_criteria": [c.__dict__ if hasattr(c, "__dict__") else {"id": c.id, "description": c.description, "severity": c.severity} for c in p.acceptance_criteria],
-             "requires_human_approval": p.requires_human_approval} for p in workflow.phases]}
-        if args.json:
-            emit_json(payload)
-        else:
-            console.header("Plan")
-            console.field("Status", workflow.status)
-            console.field("Goal", workflow.goal or "NOT DEFINED")
-            console.line()
-            for phase in workflow.phases:
-                console.item("·", f"{phase.id}  {phase.name}")
-                console.wrapped(phase.objective, 4)
-            if not workflow.phases:
-                console.item("!", "No plan has been created")
-                console.run('cw plan --goal "..."')
-        return 0
-    if action == "approve":
-        if workflow.status != "PROPOSED" or WorkflowState(state["status"]) is not WorkflowState.PLAN_PROPOSED:
-            raise CwError("No proposed plan is awaiting approval", ErrorCode.INVALID_STATE)
-        with operation_lock(root, "plan-approve"):
-            set_plan_status(root, "APPROVED")
-            workflow = load_workflow(root)
-            state["workflow_sha256"] = workflow_hash(root / ".codex" / "workflow" / "phases.yaml")
-            transition(root, state, WorkflowState.READY)
-        payload = {"status": "READY", "phases": len(workflow.phases)}
-        if args.json:
-            emit_json(payload)
-        else:
-            console.header("Plan")
-            console.item("✓", "Plan approved")
-            console.field("Phases", len(workflow.phases))
-            console.run("cw")
-        return 0
-    with operation_lock(root, "plan"):
-        if action == "rebuild":
-            backup_metadata(root)
-            state = initial_state(project.project_id)
-            save_state(root, state)
-        current = WorkflowState(state["status"])
-        if current is WorkflowState.PLANNING:
-            pass
-        elif current is not WorkflowState.UNINITIALIZED:
-            if current is WorkflowState.PLAN_PROPOSED:
-                transition(root, state, WorkflowState.PLANNING)
-            else:
-                raise CwError("Existing workflow must be rebuilt explicitly", ErrorCode.INVALID_STATE, "Run: cw plan rebuild --goal \"...\"")
-        else:
-            transition(root, state, WorkflowState.PLANNING)
-        state["pending_goal"] = args.goal
-        save_state(root, state)
-        planner = Planner(
-            workflow.human_gate_categories,
-            backend=CodexAdapter(),
-            timeout=workflow.review_timeout,
-        )
-        try:
-            payload = planner.propose_plan(root, project.project_id, args.goal)
-        except CwError as exc:
-            if exc.code in {
-                ErrorCode.CODEX_NOT_FOUND, ErrorCode.PLAN_TIMEOUT,
-                ErrorCode.PLANNER_NETWORK_ERROR, ErrorCode.PLANNER_PROCESS_ERROR,
-            }:
-                state["last_error"] = state_error(exc)
-                transition(root, state, WorkflowState.ERROR, force_error=True)
-            raise
-        write_workflow(root / ".codex" / "workflow" / "phases.yaml", payload)
-        workflow = load_workflow(root)
-        bind_plan(root, state, workflow)
-        transition(root, state, WorkflowState.PLAN_PROPOSED)
-    output = {"status": "PROPOSED", "goal": workflow.goal, "phases": len(workflow.phases)}
-    if args.json:
-        emit_json(output)
-    else:
-        console.header("Plan")
-        console.item("✓", "Plan proposed")
-        console.field("Goal", workflow.goal)
-        console.field("Phases", len(workflow.phases))
-        console.run("cw plan show\n    cw plan approve")
-    return 0
+    return lifecycle_commands.command_plan(
+        args, console, root_resolver=_root, context=_context,
+    )
 
 
 def _current(workflow: Any, state: dict[str, Any]) -> Any:
@@ -452,42 +354,9 @@ def command_error(args: argparse.Namespace, console: Console) -> int:
 
 
 def command_repair(args: argparse.Namespace, console: Console) -> int:
-    root = _root()
-    reopened = None
-    with operation_lock(root, "repair"):
-        if args.reopen:
-            _, state, workflow = _context(root)
-            try:
-                target = workflow.phase(args.reopen)
-            except KeyError as exc:
-                raise CwError(f"Unknown phase: {args.reopen}", ErrorCode.USAGE_ERROR, exit_code=2) from exc
-            backup = backup_metadata(root)
-            affected = {target.id}
-            changed = True
-            while changed:
-                changed = False
-                for phase in workflow.phases:
-                    if phase.id not in affected and any(dep in affected for dep in phase.depends_on):
-                        affected.add(phase.id); changed = True
-            for phase_id in affected:
-                gate_path(root, phase_id).unlink(missing_ok=True)
-            state.update({
-                "current_phase": target.id, "status": WorkflowState.IN_PROGRESS.value,
-                "attempt": 0, "last_review": None, "last_gate": None, "last_error": None,
-            })
-            state.setdefault("history", []).append({"timestamp": utc_now(), "phase": target.id, "action": "reopened", "backup": backup.relative_to(root).as_posix()})
-            save_state(root, state)
-            reopened = target.id
-        else:
-            backup = repair(root)
-    payload = {"repaired": reopened is None, "reopened": reopened, "backup": backup.relative_to(root).as_posix()}
-    if args.json:
-        emit_json(payload)
-    else:
-        console.header("Repair")
-        console.item("✓", f"Phase reopened: {reopened}" if reopened else "Workflow metadata repaired")
-        console.field("Backup", payload["backup"])
-    return 0
+    return lifecycle_commands.command_repair(
+        args, console, root_resolver=_root, context=_context,
+    )
 
 
 def command_config(args: argparse.Namespace, console: Console) -> int:
