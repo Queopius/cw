@@ -23,6 +23,11 @@ performed before init writes, lock acquisition, normal context loading, repair,
 and backup. Individual critical loaders retain their own regular-file checks as
 defense in depth.
 
+The release demo executes against the copied installation under
+`~/.local/share/cw`, not through an editable checkout. It uses dependency
+injection for the offline reviewer while retaining real state transitions,
+readiness validation, artifact hashing, and gate creation.
+
 The core uses dependency-injected planner and reviewer adapters, dataclasses,
 enums, pathlib, typed errors, and explicit transitions. Codex planning and review
 both use ephemeral structured-output calls, while normal tests inject offline

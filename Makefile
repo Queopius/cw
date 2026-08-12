@@ -1,4 +1,4 @@
-.PHONY: test install check
+.PHONY: test install check demo
 
 test:
 	python3 -m unittest discover -s tests -v
@@ -9,3 +9,6 @@ check:
 
 install:
 	./install.sh
+
+demo:
+	python3 -m unittest tests.test_demo

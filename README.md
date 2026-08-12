@@ -125,6 +125,9 @@ Read [Getting started](docs/getting-started.md), [Workflow](docs/workflow.md),
 The promotion and tagging policy is documented in
 [Release process](docs/release-process.md).
 
+Maintainers can run the release-blocking, network-free two-repository isolation
+demonstration with `make demo`.
+
 ## License
 
 CW is licensed under the [Apache License 2.0](LICENSE).

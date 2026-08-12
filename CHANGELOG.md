@@ -40,6 +40,9 @@ All notable changes to CW are documented here.
 - Make repair fingerprint-aware: preserve workflows across legitimate repository
   renames, but back up and reset active project-specific metadata copied from a
   different Git repository, even when both directories share a basename.
+- Add a reproducible offline release demo that runs against a copied installation,
+  initializes two repositories, creates distinct plans, advances A through a
+  verified gate, and proves B remains byte-for-byte unchanged.
 
 ## 0.1.1 — 2026-08-12
 
