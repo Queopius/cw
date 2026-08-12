@@ -43,6 +43,9 @@ All notable changes to CW are documented here.
 - Add a reproducible offline release demo that runs against a copied installation,
   initializes two repositories, creates distinct plans, advances A through a
   verified gate, and proves B remains byte-for-byte unchanged.
+- Check repository fingerprints before init-time legacy migration, preventing
+  schema-less metadata from a same-named foreign repository from being modified
+  or adopted.
 
 ## 0.1.1 — 2026-08-12
 

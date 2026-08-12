@@ -107,6 +107,7 @@ def _preflight_identity(root: Path) -> None:
         (root / ".cw" / "state.json", "workflow_id", False),
         (root / ".codex" / "workflow" / "state.json", "workflow_id", False),
     )
+    identity_data: dict | None = None
     for path, key, is_workflow in candidates:
         if not path.exists():
             continue
@@ -117,10 +118,20 @@ def _preflight_identity(root: Path) -> None:
         except CwError:
             continue
         configured = data.get(key) if isinstance(data, dict) else None
+        if path.name == "project.json" and isinstance(data, dict):
+            identity_data = data
         if configured and configured != current:
             raise CwError(
                 "Project workflow mismatch", ErrorCode.WORKFLOW_PROJECT_MISMATCH,
                 "Run: cw repair", details=f"Workflow: {configured}\nRepository: {current}",
+            )
+    saved_fingerprint = identity_data.get("repository_root_fingerprint") if identity_data else None
+    if isinstance(saved_fingerprint, str) and saved_fingerprint:
+        current_fingerprint = repository_fingerprint(root)
+        if saved_fingerprint != current_fingerprint:
+            raise CwError(
+                "Repository identity changed", ErrorCode.WORKFLOW_PROJECT_MISMATCH,
+                "Run: cw repair", details="The workflow fingerprint belongs to another Git repository.",
             )
     plan_path = root / ".codex" / "workflow" / "phases.yaml"
     if plan_path.exists():

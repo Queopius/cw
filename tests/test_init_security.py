@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 from cw.checks.deterministic import load_readiness
-from cw.core.errors import CwError
+from cw.core.errors import CwError, ErrorCode
 from cw.core.initialize import initialize, repair
 from cw.core.project import load_project
 from cw.core.utils import safe_project_path
@@ -181,6 +181,27 @@ class InitAndSecurityTests(unittest.TestCase):
             plan.write_text(plan.read_text().replace('"alpha"', '"foreign"'), encoding="utf-8")
             with self.assertRaises(CwError):
                 initialize(root)
+
+    def test_init_rejects_schema_less_foreign_metadata_before_migration(self):
+        from tests.helpers import TempRepo
+
+        source = TempRepo(name="same-name")
+        target = TempRepo(name="same-name")
+        try:
+            tracked = (".cw/project.json", ".cw/state.json", ".codex/workflow/phases.yaml")
+            for relative in tracked:
+                data = json.loads((source.root / relative).read_text(encoding="utf-8"))
+                data.pop("schema_version")
+                (target.root / relative).write_text(json.dumps(data), encoding="utf-8")
+            before = {relative: (target.root / relative).read_bytes() for relative in tracked}
+            with self.assertRaises(CwError) as caught:
+                initialize(target.root)
+            self.assertEqual(ErrorCode.WORKFLOW_PROJECT_MISMATCH, caught.exception.code)
+            self.assertEqual(before, {relative: (target.root / relative).read_bytes() for relative in tracked})
+            self.assertEqual([], list((target.root / ".cw/backups").iterdir()))
+        finally:
+            source.close()
+            target.close()
 
     def test_legacy_state_migrates(self):
         with tempfile.TemporaryDirectory() as temporary:
