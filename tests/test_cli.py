@@ -11,6 +11,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from cw import __version__
 from cw.adapters.codex import CodexResult
 from cw.cli.main import main
 from cw.core.errors import CwError, ErrorCode
@@ -254,7 +255,7 @@ class CliTests(unittest.TestCase):
     def test_version_json(self):
         code, output = self.invoke("version", "--json")
         payload = json.loads(output)
-        self.assertEqual("0.1.2", payload["version"])
+        self.assertEqual(__version__, payload["version"])
         self.assertEqual("CW by Queopius", payload["brand"])
 
     def test_no_color_environment(self):

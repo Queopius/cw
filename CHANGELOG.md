@@ -4,6 +4,8 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.1.3 — 2026-08-13
+
 - Preserve review evidence as append-only records with exclusive atomic creation,
   including when an explicit phase reopen restarts semantic attempt numbering.
 - Validate complete semantic review evidence before accepting human approval, and
