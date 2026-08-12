@@ -4,6 +4,8 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.1.1 — 2026-08-12
+
 - Execute deterministic validation commands without a shell and reject shell
   control syntax in workflow configuration.
 - Enforce global and project policy precedence for review attempts and command
