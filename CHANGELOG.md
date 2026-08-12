@@ -4,10 +4,10 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
-- Begin the v0.2 CLI modularization by extracting lifecycle commands plus
-  status, history, doctor, diagnostics, configuration, and version use cases
-  behind injected command services while preserving the public parser and
-  compatibility seams.
+- Begin the v0.2 CLI modularization by extracting lifecycle, execution,
+  validation, review, retry, status, history, doctor, diagnostics,
+  configuration, and version use cases behind injected command services while
+  preserving the public parser and compatibility seams.
 
 ## 0.1.3 — 2026-08-13
 

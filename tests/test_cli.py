@@ -196,6 +196,18 @@ class CliTests(unittest.TestCase):
         self.assertFalse(payload["continue"])
         self.assertNotIn("decision", payload)
 
+    def test_human_review_command_reports_created_gate(self):
+        gate = self.repo.root / ".cw/gates/01-phase-1.approved.json"
+        with patch("cw.cli.main.human_approve", return_value=gate) as approver:
+            code, output = self.invoke("review", "--human-approve", "--json")
+        self.assertEqual(0, code)
+        self.assertEqual({
+            "decision": "APPROVE",
+            "gate": ".cw/gates/01-phase-1.approved.json",
+            "human": True,
+        }, json.loads(output))
+        approver.assert_called_once()
+
     def test_help_flag_uses_public_help(self):
         code, output = self.invoke("--help")
         self.assertEqual(0, code)
