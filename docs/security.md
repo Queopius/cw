@@ -36,6 +36,11 @@ invocation. This prevents accidental reuse or replay across sessions. The Stop
 hook checks the implementer and session environment before invoking review, so
 ordinary Codex sessions in an initialized repository do not trigger CW.
 
+CW applies best-effort redaction for common credential forms before persisting
+workflow errors or diagnostic records. Diagnostic files remain local under
+`.cw/logs/`, are never approval evidence, and should still be treated as
+sensitive. Raw mode means complete redacted diagnostic, not secret bypass.
+
 CW sends no telemetry. Repository content can be sent to Codex when a planner,
 implementer, or reviewer runs. Planning sends a bounded evidence selection over
 stdin, and review prompts scope the phase and review paths. Do not place secrets

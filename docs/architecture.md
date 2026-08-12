@@ -43,3 +43,17 @@ manifests participate in this check.
 phase. It validates review criteria and decisions, gate-to-review references,
 gate artifact integrity, state references, and the known event vocabulary in
 the append-only history. Unknown evidence is an error rather than approval.
+
+## Diagnostics
+
+Diagnostics are separate from workflow state. The latest structured record is
+written atomically to `.cw/logs/last-error.json`; distinct failures are appended
+to `.cw/logs/errors.jsonl`. This lets `cw error` remain usable when project state
+or a workflow schema cannot be loaded. An informational log cannot approve a
+phase or influence the state machine.
+
+Known credential forms are redacted before details reach either diagnostics or
+`state.json`. Normal commands show a compact classified message, `cw error`
+shows the stored detail, and `cw error --raw` additionally exposes the redacted
+internal traceback when one exists. Unexpected Python exceptions are converted
+to `INTERNAL_ERROR` instead of printing a traceback during daily use.

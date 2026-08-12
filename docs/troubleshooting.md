@@ -7,8 +7,10 @@ cw doctor
 cw status
 ```
 
-Normal status output shows a short classified error. Use `cw error` for stored
-details and `cw error --raw` for scripts expecting the original diagnostic.
+Normal status output shows a short classified error. Use `cw error` for the
+structured stored details and `cw error --raw` for the complete redacted
+diagnostic, including an internal traceback when available. This command reads
+the independent diagnostic store and can still work if workflow state is corrupt.
 
 - **Project workflow mismatch:** run `cw repair`; CW backs up metadata first.
 - **Schema requires migration:** run `cw repair`. CW creates a metadata backup,
@@ -38,4 +40,6 @@ details and `cw error --raw` for scripts expecting the original diagnostic.
 - **Plan goal unclear:** improve local documentation or pass `cw plan --goal`.
 
 Detailed local diagnostics live under `.cw/logs/`. CW never prints Python stack
-traces during normal daily commands.
+traces during normal daily commands. Common tokens, authorization headers,
+password assignments, and URL credentials are redacted before persistence, but
+diagnostics should still be handled as sensitive local metadata.

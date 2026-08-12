@@ -66,6 +66,7 @@ def error_summary(code: str, message: str) -> tuple[str, str]:
         "CODEX_NOT_FOUND": ("Codex not found", "The Codex CLI is required for planning and agent operations."),
         "SCHEMA_VALIDATION_ERROR": ("Workflow data invalid", message),
         "SCHEMA_VERSION_ERROR": ("Workflow schema incompatible", message),
+        "INTERNAL_ERROR": ("CW encountered an internal error", "The operation stopped safely. Run: cw error"),
         "PLAN_UNCLEAR": ("Project goal is unclear", message),
         "LOCKED": ("Another CW operation is active", message),
     }

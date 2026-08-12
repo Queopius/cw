@@ -59,6 +59,23 @@ class ReviewerTests(unittest.TestCase):
             run_review(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], self.repo.state(), FakeAdapter(error=error))
         self.assertEqual(0, self.repo.state()["attempt"])
 
+    def test_infrastructure_report_redacts_credentials(self):
+        error = CwError(
+            "network", ErrorCode.REVIEWER_NETWORK_ERROR,
+            details="Authorization: Bearer reviewer-secret-token",
+        )
+        with self.assertRaises(CwError):
+            self.review_adapter_error(error)
+        reports = list((self.repo.root / ".cw/reviews").glob("*-infrastructure-*.json"))
+        self.assertEqual(1, len(reports))
+        self.assertNotIn("reviewer-secret-token", reports[0].read_text(encoding="utf-8"))
+
+    def review_adapter_error(self, error):
+        return run_review(
+            self.repo.root, self.repo.workflow, self.repo.workflow.phases[0],
+            self.repo.state(), FakeAdapter(error=error),
+        )
+
     def test_human_approval_rejects_post_review_artifact_change(self):
         phase = replace(self.repo.workflow.phases[0], requires_human_approval=True)
         workflow = replace(self.repo.workflow, phases=(phase, *self.repo.workflow.phases[1:]))

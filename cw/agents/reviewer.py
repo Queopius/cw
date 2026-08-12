@@ -7,6 +7,7 @@ from typing import Any
 
 from cw.adapters.codex import CodexAdapter
 from cw.checks.deterministic import validate_phase
+from cw.core.diagnostics import redact, state_error
 from cw.core.errors import CwError, ErrorCode, HumanActionRequired
 from cw.core.gates import artifact_hashes, create_gate
 from cw.core.models import Phase, ReviewDecision, Workflow, WorkflowState
@@ -60,12 +61,12 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
         response = reviewer.run_reviewer(root, reviewer_prompt(workflow, phase), schema, workflow.review_timeout)
         decision, criteria, issues = validate_reviewer_result(phase, response.payload)
     except CwError as exc:
-        state["last_error"] = f"{exc.code.value}: {exc.message}\n{exc.details or ''}".rstrip()
+        state["last_error"] = state_error(exc)
         transition(root, state, WorkflowState.ERROR, force_error=True)
         report = {
             "schema_version": SCHEMA_VERSION, "workflow": workflow.id, "phase": phase.id,
             "attempt": attempt, "kind": "infrastructure_error", "error_code": exc.code.value,
-            "error": exc.message, "details": exc.details, "created_at": utc_now(),
+            "error": redact(exc.message), "details": redact(exc.details), "created_at": utc_now(),
         }
         path = root / ".cw" / "reviews" / f"{phase.id}-infrastructure-{utc_now().replace(':', '')}-{secrets.token_hex(4)}.json"
         atomic_json(path, report)

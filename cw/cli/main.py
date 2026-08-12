@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -16,6 +17,7 @@ from cw.agents.reviewer import human_approve, run_review
 from cw.checks.deterministic import load_readiness, validate_phase
 from cw.core.config import apply_policy, load_config, load_policy
 from cw.core.audit import audit_history
+from cw.core.diagnostics import legacy_diagnostic, load_diagnostic, raw_diagnostic, record_diagnostic, state_error
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_dependencies, validate_gate
 from cw.core.initialize import backup_metadata, initialize, repair
@@ -99,6 +101,8 @@ def _status_payload(root: Path) -> dict[str, Any]:
     index = workflow.index(current) if current and workflow.phases else None
     gates: dict[str, bool] = {}
     gate_error = None
+    gate_error_code = None
+    gate_error_details = None
     for phase in workflow.phases:
         exists = gate_path(root, phase.id).is_file()
         gates[phase.id] = exists
@@ -108,6 +112,8 @@ def _status_payload(root: Path) -> dict[str, Any]:
             except CwError as exc:
                 gates[phase.id] = False
                 gate_error = str(exc)
+                gate_error_code = exc.code.value
+                gate_error_details = exc.details
     return {
         "schema_version": SCHEMA_VERSION, "project": project.project_id, "repository_root": str(root),
         "branch": _git_branch(root), "workflow": "INITIALIZED" if not workflow.phases else "ACTIVE",
@@ -115,6 +121,7 @@ def _status_payload(root: Path) -> dict[str, Any]:
         "phase_index": index, "phase_count": len(workflow.phases), "attempt": state.get("attempt", 0),
         "max_attempts": workflow.max_review_attempts, "ready": (root / ".cw" / "runtime" / "READY_FOR_REVIEW.json").is_file(),
         "gate": gates.get(current, False) if current else False, "gates": gates, "gate_error": gate_error,
+        "gate_error_code": gate_error_code, "gate_error_details": gate_error_details,
         "phases": [{"id": p.id, "name": p.name, "depends_on": list(p.depends_on)} for p in workflow.phases],
         "last_error": state.get("last_error"),
     }
@@ -250,7 +257,7 @@ def command_plan(args: argparse.Namespace, console: Console) -> int:
                 ErrorCode.CODEX_NOT_FOUND, ErrorCode.PLAN_TIMEOUT,
                 ErrorCode.PLANNER_NETWORK_ERROR, ErrorCode.PLANNER_PROCESS_ERROR,
             }:
-                state["last_error"] = f"{exc.code.value}: {exc.message}\n{exc.details or ''}".rstrip()
+                state["last_error"] = state_error(exc)
                 transition(root, state, WorkflowState.ERROR, force_error=True)
             raise
         write_workflow(root / ".codex" / "workflow" / "phases.yaml", payload)
@@ -341,14 +348,21 @@ including this exact session_id, and stop normally.
             })
         else:
             state = load_state(root)
-        state["last_error"] = f"{failure.code.value}: {failure.message}\n{failure.details or ''}".rstrip()
+        state["last_error"] = state_error(failure)
         transition(root, state, WorkflowState.ERROR, force_error=True)
         raise failure
     return result
 
 
 def command_status(args: argparse.Namespace, console: Console) -> int:
-    data = _status_payload(_root())
+    root = _root()
+    data = _status_payload(root)
+    if data.get("gate_error"):
+        code = ErrorCode(data.get("gate_error_code") or ErrorCode.INVALID_GATE.value)
+        _record_error(
+            CwError(data["gate_error"], code, "Run: cw repair --reopen <phase>", data.get("gate_error_details")),
+            source="status",
+        )
     if args.json:
         emit_json(data)
     else:
@@ -372,6 +386,14 @@ def command_validate(args: argparse.Namespace, console: Console) -> int:
             console.item("✓" if check.get("status") != "failed" and check.get("exit_code", 0) == 0 else "✕", check["name"])
         console.line()
         console.line("Validation passed." if result.passed else "Validation failed.")
+    if not result.passed:
+        _record_error(
+            CwError(
+                "Deterministic validation failed", ErrorCode.WORKFLOW_ERROR,
+                "Run: cw validate", details="\n".join(result.errors),
+            ),
+            source="validate",
+        )
     return 0 if result.passed else 1
 
 
@@ -468,6 +490,7 @@ def command_retry(args: argparse.Namespace, console: Console) -> int:
 def command_history(args: argparse.Namespace, console: Console) -> int:
     root = _root()
     _, state, workflow = _context(root)
+    audit_history(root, workflow, state)
     events = [event for event in state.get("history", []) if not args.phase or event.get("phase") == args.phase]
     payload = {"workflow": workflow.id, "events": events}
     if args.json:
@@ -573,18 +596,39 @@ def command_doctor(args: argparse.Namespace, console: Console) -> int:
 
 def command_error(args: argparse.Namespace, console: Console) -> int:
     root = _root()
-    _, state, _ = _context(root)
-    value = state.get("last_error")
-    payload = {"error": value}
+    record = load_diagnostic(root)
+    if record is None:
+        try:
+            state = load_json(root / ".cw/state.json")
+            record = legacy_diagnostic(state.get("last_error") if isinstance(state, dict) else None)
+        except CwError:
+            record = None
+    payload = {"error": record}
     if args.json:
         emit_json(payload)
     else:
         console.header("Error")
-        if value:
-            console.line(value if args.raw else value)
+        if record and args.raw:
+            console.line(raw_diagnostic(record))
+        elif record:
+            title, detail = error_summary(record["code"], record["message"])
+            console.item("✕", title)
+            console.field("Code", record["code"])
+            console.field("When", record["timestamp"])
+            console.wrapped(detail)
+            if record.get("details"):
+                console.line()
+                console.line("Details")
+                console.wrapped(str(record["details"]))
+            if args.verbose and record.get("traceback"):
+                console.line()
+                console.line("Traceback")
+                console.line(str(record["traceback"]))
+            if record.get("hint"):
+                console.run(str(record["hint"]).removeprefix("Run: "))
         else:
             console.item("✓", "No stored workflow error")
-    return 1 if value else 0
+    return 1 if record else 0
 
 
 def command_repair(args: argparse.Namespace, console: Console) -> int:
@@ -660,13 +704,10 @@ COMMANDS = {
 }
 
 
-def _record_error(exc: CwError) -> None:
+def _record_error(exc: CwError, *, source: str | None = None, traceback_text: str | None = None) -> None:
     try:
         root = repository_root(Path.cwd())
-        log = root / ".cw" / "logs" / "errors.jsonl"
-        if log.parent.is_dir():
-            with log.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps({"timestamp": utc_now(), "code": exc.code.value, "message": exc.message, "details": exc.details}) + "\n")
+        record_diagnostic(root, exc, source=source, traceback_text=traceback_text)
     except Exception:
         pass
 
@@ -689,7 +730,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return COMMANDS[command](args, console)
     except CwError as exc:
-        _record_error(exc)
+        _record_error(exc, source=command)
         if getattr(args, "hook", False):
             reason = f"{exc.message}. {exc.hint or 'Run: cw error'}"
             print(json.dumps({"continue": False, "stopReason": reason, "systemMessage": reason}))
@@ -707,6 +748,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             if exc.hint:
                 console.run(exc.hint.removeprefix("Run: "))
         return exc.exit_code
+    except Exception as exc:
+        internal = CwError(
+            "Unexpected internal failure", ErrorCode.INTERNAL_ERROR,
+            "Run: cw error", details=f"{type(exc).__name__}: {exc}",
+        )
+        _record_error(internal, source=command, traceback_text=traceback.format_exc())
+        if args.json:
+            emit_json({"error": {"code": internal.code.value, "message": internal.message, "hint": internal.hint}})
+        elif not args.quiet:
+            title, detail = error_summary(internal.code.value, internal.message)
+            console.item("✕", title)
+            console.wrapped(detail)
+            if args.verbose:
+                console.line()
+                console.wrapped(internal.details or "")
+            console.run("cw error")
+        return 1
     except KeyboardInterrupt:
         return 130
 

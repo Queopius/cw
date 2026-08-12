@@ -26,6 +26,9 @@ All notable changes to CW are documented here.
   overwriting them.
 - Audit every retained review, gate, state reference, and workflow history event
   through `cw doctor`, including historical phases.
+- Persist atomic, redacted diagnostics independently from workflow state; make
+  `cw error` usable during metadata corruption and keep unexpected exceptions
+  compact while retaining their redacted traceback for raw diagnostics.
 
 ## 0.1.1 — 2026-08-12
 
