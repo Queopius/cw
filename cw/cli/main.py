@@ -231,7 +231,7 @@ def command_plan(args: argparse.Namespace, console: Console) -> int:
                 raise CwError("Existing workflow must be rebuilt explicitly", ErrorCode.INVALID_STATE, "Run: cw plan rebuild --goal \"...\"")
         else:
             transition(root, state, WorkflowState.PLANNING)
-        payload = Planner().propose_plan(root, project.project_id, args.goal)
+        payload = Planner(workflow.human_gate_categories).propose_plan(root, project.project_id, args.goal)
         write_workflow(root / ".codex" / "workflow" / "phases.yaml", payload)
         workflow = load_workflow(root)
         bind_plan(root, state, workflow)
@@ -291,7 +291,13 @@ When complete, create .cw/runtime/READY_FOR_REVIEW.json matching the installed s
     console.header("Start")
     console.item("→", f"{phase.id} · {phase.name}")
     console.field("Sandbox", "workspace-write")
-    return CodexAdapter().run_implementer(root, prompt)
+    try:
+        return CodexAdapter().run_implementer(root, prompt, allow_network=workflow.allow_network)
+    except CwError as exc:
+        state = load_state(root)
+        state["last_error"] = f"{exc.code.value}: {exc.message}\n{exc.details or ''}".rstrip()
+        transition(root, state, WorkflowState.ERROR, force_error=True)
+        raise
 
 
 def command_status(args: argparse.Namespace, console: Console) -> int:
@@ -377,6 +383,10 @@ def command_retry(args: argparse.Namespace, console: Console) -> int:
     if WorkflowState(state["status"]) is not WorkflowState.ERROR:
         raise CwError("There is no retryable infrastructure error", ErrorCode.INVALID_STATE)
     error = str(state.get("last_error") or "")
+    if "IMPLEMENTER_PROCESS_ERROR" in error:
+        state["last_error"] = None
+        transition(root, state, WorkflowState.IN_PROGRESS)
+        return command_start(args, console)
     if not any(code in error for code in ("REVIEWER_NETWORK_ERROR", "REVIEW_TIMEOUT", "REVIEWER_PROCESS_ERROR", "SCHEMA_VALIDATION_ERROR")):
         raise CwError("The last error is not safely retryable", ErrorCode.INVALID_STATE, "Run: cw error")
     args.hook = False

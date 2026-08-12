@@ -15,6 +15,7 @@ from cw.core.commands import command_arguments
 from cw.core.config import load_policy
 from cw.core.errors import CwError, ErrorCode
 from cw.core.models import RequiredCommand
+from cw.planning.planner import Planner
 from tests.helpers import TempRepo
 
 
@@ -119,6 +120,30 @@ class EffectivePolicyTests(unittest.TestCase):
         with patch.dict(os.environ, {"XDG_CONFIG_HOME": self.xdg.name}):
             _, _, workflow = _context(self.repo.root)
         self.assertEqual(2, workflow.max_review_attempts)
+
+    def test_agent_policy_values_are_applied_to_workflow(self):
+        (self.repo.root / ".cw" / "config.toml").write_text(
+            'allow_network = true\nhuman_gate_categories = ["authentication-security"]\n',
+            encoding="utf-8",
+        )
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": self.xdg.name}):
+            _, _, workflow = _context(self.repo.root)
+        self.assertTrue(workflow.allow_network)
+        self.assertEqual(("authentication-security",), workflow.human_gate_categories)
+
+    def test_configured_human_gate_categories_drive_planning(self):
+        authentication = Planner(("authentication-security",)).propose_plan(
+            self.repo.root, "sample-app", "Strengthen authorization and access control"
+        )
+        payments_only = Planner(("payments",)).propose_plan(
+            self.repo.root, "sample-app", "Strengthen authorization and access control"
+        )
+        disabled = Planner(()).propose_plan(
+            self.repo.root, "sample-app", "Implement subscription billing"
+        )
+        self.assertTrue(authentication["phases"][1]["requires_human_approval"])
+        self.assertFalse(payments_only["phases"][1]["requires_human_approval"])
+        self.assertFalse(disabled["phases"][1]["requires_human_approval"])
 
     def test_invalid_policy_fails_as_configuration_error(self):
         (self.repo.root / ".cw" / "config.toml").write_text("review_timeout = 0\n", encoding="utf-8")

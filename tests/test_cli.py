@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cw.cli.main import main
+from cw.core.errors import CwError, ErrorCode
 from cw.core.models import WorkflowState
 from cw.core.state import save_state, transition
 from cw.ui.console import Console
@@ -50,6 +51,34 @@ class CliTests(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertIn("Phase 1", output)
         implementer.assert_called_once()
+
+    def test_start_passes_effective_network_policy(self):
+        (self.repo.root / ".cw/config.toml").write_text("allow_network = true\n", encoding="utf-8")
+        with patch("cw.cli.main.CodexAdapter.run_implementer", return_value=0) as implementer:
+            code, _ = self.invoke("start")
+        self.assertEqual(0, code)
+        self.assertTrue(implementer.call_args.kwargs["allow_network"])
+
+    def test_implementer_failure_enters_retryable_error_state(self):
+        failure = CwError("implementer failed", ErrorCode.IMPLEMENTER_PROCESS_ERROR, "Run: cw retry", details="exit 9")
+        with patch("cw.cli.main.CodexAdapter.run_implementer", side_effect=failure):
+            code, output = self.invoke("start")
+        self.assertEqual(1, code)
+        self.assertIn("Implementer stopped unexpectedly", output)
+        self.assertNotIn("exit 9", output)
+        state = self.repo.state()
+        self.assertEqual("ERROR", state["status"])
+        self.assertIn("IMPLEMENTER_PROCESS_ERROR", state["last_error"])
+
+    def test_retry_restarts_only_failed_implementer(self):
+        state = self.repo.state()
+        state["last_error"] = "IMPLEMENTER_PROCESS_ERROR: exited"
+        transition(self.repo.root, state, WorkflowState.ERROR, force_error=True)
+        with patch("cw.cli.main.CodexAdapter.run_implementer", return_value=0) as implementer:
+            code, _ = self.invoke("retry")
+        self.assertEqual(0, code)
+        implementer.assert_called_once()
+        self.assertEqual("IN_PROGRESS", self.repo.state()["status"])
 
     def test_help_flag_uses_public_help(self):
         code, output = self.invoke("--help")

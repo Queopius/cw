@@ -6,6 +6,12 @@ CW applies least privilege to agent roles:
 - reviewer: `read-only`, ephemeral, hooks disabled;
 - unrestricted sandbox: never part of normal operation.
 
+Implementer network access is denied by default through Codex's documented
+`sandbox_workspace_write.network_access` override. CW also disables web search
+for that invocation unless project policy explicitly allows network access. The
+reviewer remains read-only and has web search disabled so its decision is based
+on repository evidence.
+
 CW does not bypass Codex hook trust. Project paths reject absolute values,
 `..` traversal, null bytes, and resolved symlink escapes. Readiness manifests
 cannot introduce commands; only approved workflow commands execute. Deterministic
@@ -21,3 +27,6 @@ prompts, artifacts, or diagnostic logs.
 
 CW inspects Git metadata but never automatically pushes, merges, rebases, cleans,
 or resets a repository.
+
+Codex sandbox configuration follows the official
+[OpenAI configuration reference](https://developers.openai.com/codex/config-reference/).

@@ -18,7 +18,10 @@ DEFAULTS: dict[str, Any] = {
     "max_review_attempts": 3,
     "allow_network": False,
     "protected_paths": [".cw/gates", ".cw/reviews", ".codex/workflow/phases.yaml"],
-    "human_gate_categories": ["payments", "cryptography", "destructive-migration", "production"],
+    "human_gate_categories": [
+        "payments", "cryptography", "destructive-migration", "production",
+        "authentication-security", "public-api-breaking", "infrastructure-deletion",
+    ],
     "command_timeout": 1200,
     "review_timeout": 1200,
 }
@@ -142,4 +145,7 @@ def apply_policy(workflow: Workflow, policy: Policy) -> Workflow:
         max_review_attempts=policy.max_review_attempts,
         command_timeout=policy.command_timeout,
         review_timeout=policy.review_timeout,
+        allow_network=policy.allow_network,
+        protected_paths=policy.protected_paths,
+        human_gate_categories=policy.human_gate_categories,
     )

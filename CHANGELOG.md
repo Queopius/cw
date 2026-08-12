@@ -4,6 +4,12 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+- Enforce the implementer network policy through the Codex workspace-write
+  sandbox and disable web search when network access is denied.
+- Apply configured human-gate categories during plan generation.
+- Record unexpected implementer exits as retryable workflow infrastructure
+  errors.
+
 ## 0.1.1 — 2026-08-12
 
 - Execute deterministic validation commands without a shell and reject shell

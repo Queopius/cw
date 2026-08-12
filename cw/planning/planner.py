@@ -23,6 +23,24 @@ class Planner:
     """Repository-aware deterministic planner with a future-pluggable AI boundary."""
 
     MAX_EVIDENCE_BYTES = 160_000
+    DEFAULT_HUMAN_GATE_CATEGORIES = (
+        "payments", "cryptography", "destructive-migration", "production",
+        "authentication-security", "public-api-breaking", "infrastructure-deletion",
+    )
+    HUMAN_GATE_PATTERNS = {
+        "payments": ("payment", "billing", "stripe", "checkout"),
+        "cryptography": ("cryptograph", "encryption", "encryption key"),
+        "destructive-migration": ("destructive migration", "drop table", "data deletion"),
+        "production": ("production", "deploy", "release"),
+        "authentication-security": ("authentication security", "authorization", "access control", "credential"),
+        "public-api-breaking": ("breaking api", "breaking public api", "api compatibility"),
+        "infrastructure-deletion": ("infrastructure deletion", "delete infrastructure", "destroy infrastructure"),
+    }
+
+    def __init__(self, human_gate_categories: tuple[str, ...] | None = None) -> None:
+        self.human_gate_categories = (
+            human_gate_categories if human_gate_categories is not None else self.DEFAULT_HUMAN_GATE_CATEGORIES
+        )
 
     def inspect_project(self, root: Path) -> ProjectInspection:
         stacks: list[str] = []
@@ -198,7 +216,11 @@ class Planner:
             raw = load_workflow(base)
             validate_workflow(root, raw)
 
-    @staticmethod
-    def _needs_human_gate(goal: str) -> bool:
+    def _needs_human_gate(self, goal: str) -> bool:
         lowered = goal.lower()
-        return any(term in lowered for term in ("payment", "billing", "cryptograph", "production", "destructive migration", "authentication security", "breaking api"))
+        for category in self.human_gate_categories:
+            normalized = category.lower().replace("_", "-").strip()
+            patterns = self.HUMAN_GATE_PATTERNS.get(normalized, (normalized.replace("-", " "),))
+            if any(pattern in lowered for pattern in patterns):
+                return True
+        return False

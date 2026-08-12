@@ -12,6 +12,9 @@ details and `cw error --raw` for scripts expecting the original diagnostic.
 
 - **Project workflow mismatch:** run `cw repair`; CW backs up metadata first.
 - **Reviewer unavailable or timed out:** preserve readiness and run `cw retry`.
+- **Implementer stopped unexpectedly:** CW preserves the current phase, records
+  the process failure without consuming a semantic review attempt, and `cw retry`
+  restarts the implementer rather than the reviewer.
 - **Approval gate invalidated:** do not overwrite the gate; run
   `cw repair --reopen <phase>`. CW backs up metadata and invalidates dependent
   gates before returning that phase to implementation.

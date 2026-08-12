@@ -54,6 +54,7 @@ def error_summary(code: str, message: str) -> tuple[str, str]:
     mapping = {
         "REVIEWER_NETWORK_ERROR": ("Reviewer unavailable", "Could not contact the Codex reviewer."),
         "REVIEW_TIMEOUT": ("Reviewer timed out", "The independent review exceeded its configured timeout."),
+        "IMPLEMENTER_PROCESS_ERROR": ("Implementer stopped unexpectedly", "Codex did not finish the implementation session normally."),
         "WORKFLOW_PROJECT_MISMATCH": ("Project workflow mismatch", "This workflow belongs to another repository."),
         "RUNTIME_NOT_WRITABLE": ("Runtime path is read-only", ".cw must be writable."),
         "INVALID_STATE": ("Workflow state invalid", message),

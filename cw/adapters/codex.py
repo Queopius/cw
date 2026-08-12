@@ -29,14 +29,29 @@ class CodexAdapter:
         if not self.check_availability():
             raise CwError("Codex CLI was not found", ErrorCode.CODEX_NOT_FOUND, "Install Codex and run: cw doctor")
 
-    def run_implementer(self, root: Path, prompt: str) -> int:
+    def run_implementer(self, root: Path, prompt: str, *, allow_network: bool = False) -> int:
         self._require()
         environment = os.environ.copy()
         environment["CW_IMPLEMENTER_ACTIVE"] = "1"
-        return subprocess.call([
-            self.command, "--cd", str(root), "--sandbox", "workspace-write",
+        command = [
+            self.command, "--strict-config",
+            "--config", f"sandbox_workspace_write.network_access={str(allow_network).lower()}",
+        ]
+        if not allow_network:
+            command.extend(["--config", 'web_search="disabled"'])
+        command.extend([
+            "--cd", str(root), "--sandbox", "workspace-write",
             "--ask-for-approval", "never", "--no-alt-screen", prompt,
-        ], cwd=root, env=environment)
+        ])
+        return_code = subprocess.call(command, cwd=root, env=environment)
+        if return_code:
+            raise CwError(
+                "Codex implementer exited unexpectedly",
+                ErrorCode.IMPLEMENTER_PROCESS_ERROR,
+                "Run: cw retry",
+                details=f"Codex exit code: {return_code}",
+            )
+        return 0
 
     def run_reviewer(self, root: Path, prompt: str, schema: Path, timeout: int) -> CodexResult:
         self._require()
@@ -45,7 +60,8 @@ class CodexAdapter:
             environment = os.environ.copy()
             environment["CW_REVIEWER_ACTIVE"] = "1"
             command = [
-                self.command, "--ask-for-approval", "never", "exec", "--ephemeral", "--disable", "hooks", "--sandbox", "read-only",
+                self.command, "--strict-config", "--config", 'web_search="disabled"',
+                "--ask-for-approval", "never", "exec", "--ephemeral", "--disable", "hooks", "--sandbox", "read-only",
                 "--color", "never", "--output-schema", str(schema),
                 "--output-last-message", str(output), "--cd", str(root), prompt,
             ]
