@@ -52,6 +52,31 @@ class PlannerBackendTests(unittest.TestCase):
         self.assertNotIn("DO-NOT-SEND-SOURCE-CONTENT", prompt)
         self.assertIn("untrusted content", prompt)
 
+    def test_manifest_and_bounded_structure_are_planner_context(self):
+        (self.repo.root / "package.json").write_text(
+            '{"name":"sample","scripts":{"test":"node --test"}}\n', encoding="utf-8",
+        )
+        source = self.repo.root / "src" / "webhook.py"
+        source.parent.mkdir(exist_ok=True)
+        source.write_text("TOP-SECRET-SOURCE-BODY", encoding="utf-8")
+        backend = self.backend()
+
+        Planner(backend=backend).propose_plan(self.repo.root, "sample-app", self.goal)
+
+        prompt = backend.calls[0][1]
+        self.assertIn('"package.json":', prompt)
+        self.assertIn("src/webhook.py", prompt)
+        self.assertNotIn("TOP-SECRET-SOURCE-BODY", prompt)
+        self.assertIn("npm test", prompt)
+
+    def test_node_test_command_requires_declared_non_placeholder_script(self):
+        package = self.repo.root / "package.json"
+        package.write_text('{"scripts":{"test":"echo \\"Error: no test specified\\""}}', encoding="utf-8")
+        self.assertNotIn("npm test", Planner().inspect_project(self.repo.root).suggested_commands)
+
+        package.write_text('{"scripts":{"test":"node --test"}}', encoding="utf-8")
+        self.assertIn("npm test", Planner().inspect_project(self.repo.root).suggested_commands)
+
     def test_backend_cannot_supply_project_identity_or_settings(self):
         backend = FakePlannerBackend({"workflow": {"id": "foreign"}, "phases": self.local["phases"]})
         with self.assertRaises(CwError) as raised:

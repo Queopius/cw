@@ -49,11 +49,12 @@ def _audit_review(path: Path, workflow: Workflow) -> dict[str, Any]:
         return data
     if kind != "semantic_review":
         raise CwError(f"Review kind is invalid: {path.name}", ErrorCode.SCHEMA_VALIDATION_ERROR)
-    decision, criteria, issues = validate_reviewer_result(phase, data)
+    decision, criteria, blocking_criteria, issues = validate_reviewer_result(phase, data, root=path.parents[2])
     hashes = data.get("artifact_hashes")
     if (
         decision.value != data.get("decision")
         or criteria != data.get("criteria")
+        or ("blocking_criteria" in data and blocking_criteria != data.get("blocking_criteria"))
         or issues != data.get("blocking_issues")
         or not isinstance(hashes, dict)
         or set(hashes) != set(phase.artifacts)

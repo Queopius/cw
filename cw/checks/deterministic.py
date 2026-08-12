@@ -73,8 +73,12 @@ def validate_phase(root: Path, workflow: Workflow, phase: Phase) -> ValidationRe
         missing = required - declared
         if missing:
             raise CwError(f"Required artifacts are not declared: {', '.join(sorted(missing))}", ErrorCode.SCHEMA_VALIDATION_ERROR)
-        result.artifact_hashes = artifact_hashes(root, phase.artifacts)
-        result.checks.append({"name": "Artifacts", "status": "passed", "count": len(result.artifact_hashes)})
+        # Establish existence and containment before running project commands.
+        # The authoritative hashes are captured only after those commands have
+        # completed because validation tools may legitimately rewrite files.
+        for artifact in phase.artifacts:
+            safe_project_path(root, artifact, must_exist=True)
+        result.checks.append({"name": "Artifacts", "status": "passed", "count": len(phase.artifacts)})
         for command in phase.required_commands:
             timeout = command.timeout_seconds or workflow.command_timeout
             arguments = command_arguments(command.command)
@@ -86,6 +90,10 @@ def validate_phase(root: Path, workflow: Workflow, phase: Phase) -> ValidationRe
             result.checks.append(check)
             if completed.returncode:
                 raise CwError(f"Required command failed: {command.command}", details=(completed.stderr or completed.stdout)[-4000:])
+        # A required command must not silently invalidate an already approved
+        # dependency, and gate/review evidence must bind the final file bytes.
+        validate_dependencies(root, workflow, phase)
+        result.artifact_hashes = artifact_hashes(root, phase.artifacts)
         result.checks.append({"name": "SHA-256 integrity", "status": "passed"})
         result.passed = True
     except (CwError, OSError, subprocess.TimeoutExpired) as exc:
