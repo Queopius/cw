@@ -1,0 +1,30 @@
+# Gates and reviews
+
+Validation order is fixed:
+
+1. readiness structure and state;
+2. dependency gates;
+3. artifact declaration and existence;
+4. repository containment and symlink safety;
+5. approved workflow commands;
+6. SHA-256 artifact capture;
+7. independent semantic review.
+
+The reviewer uses a separate ephemeral `codex exec` process with `read-only`,
+approval policy `never`, hooks disabled, and a JSON output schema. It reviews
+only current-phase paths and must evaluate every configured criterion exactly
+once with evidence.
+
+Approval fails closed for missing, duplicated, or invented criteria; unknown or
+ambiguous evidence; any failed blocking criterion; or remaining blocking issues.
+
+Semantic `REVISE` results increment the phase attempt. Timeouts, network errors,
+transport errors, process crashes, and invalid reviewer transport output set
+`ERROR` without consuming a semantic attempt. `cw retry` reuses the existing
+readiness manifest and does not restart implementation.
+
+Approval writes `.cw/gates/<phase>.approved.json` with workflow/version, review
+reference, timestamp, optional Git commit, CW version, and artifact hashes.
+Changed approved artifacts invalidate the gate; CW never recreates it silently.
+After semantic approval of a human-gated phase, `cw review --human-approve` is
+the explicit local action that creates its gate.

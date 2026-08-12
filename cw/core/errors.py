@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+
+
+class ErrorCode(str, Enum):
+    WORKFLOW_ERROR = "WORKFLOW_ERROR"
+    WORKFLOW_PROJECT_MISMATCH = "WORKFLOW_PROJECT_MISMATCH"
+    RUNTIME_NOT_WRITABLE = "RUNTIME_NOT_WRITABLE"
+    INVALID_STATE = "INVALID_STATE"
+    INVALID_GATE = "INVALID_GATE"
+    HOOK_UNTRUSTED = "HOOK_UNTRUSTED"
+    CODEX_NOT_FOUND = "CODEX_NOT_FOUND"
+    REVIEW_TIMEOUT = "REVIEW_TIMEOUT"
+    REVIEWER_NETWORK_ERROR = "REVIEWER_NETWORK_ERROR"
+    REVIEWER_PROCESS_ERROR = "REVIEWER_PROCESS_ERROR"
+    SCHEMA_VALIDATION_ERROR = "SCHEMA_VALIDATION_ERROR"
+    LOCKED = "LOCKED"
+    PLAN_UNCLEAR = "PLAN_UNCLEAR"
+    USAGE_ERROR = "USAGE_ERROR"
+
+
+@dataclass(slots=True)
+class CwError(RuntimeError):
+    message: str
+    code: ErrorCode = ErrorCode.WORKFLOW_ERROR
+    hint: str | None = None
+    details: str | None = None
+    exit_code: int = 1
+
+    def __str__(self) -> str:
+        return self.message
+
+
+class HumanActionRequired(CwError):
+    def __init__(self, message: str, *, hint: str | None = None) -> None:
+        super().__init__(message, ErrorCode.WORKFLOW_ERROR, hint, exit_code=3)

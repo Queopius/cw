@@ -1,0 +1,17 @@
+{
+  "description": "CW verified phase gate",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/phase_gate.py\"",
+            "timeout": 1200,
+            "statusMessage": "Validating current CW phase"
+          }
+        ]
+      }
+    ]
+  }
+}
