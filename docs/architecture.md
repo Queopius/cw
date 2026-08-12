@@ -82,6 +82,12 @@ to `.cw/logs/errors.jsonl`. This lets `cw error` remain usable when project stat
 or a workflow schema cannot be loaded. An informational log cannot approve a
 phase or influence the state machine.
 
+Retryable infrastructure state is stored separately from the human-facing
+diagnostic string. Its structured metadata binds an error code to the failed
+operation and phase, preventing retry dispatch from reinterpreting stale text.
+Legacy review failures are normalized only after a metadata backup; their
+original records remain available in backups and redacted diagnostics.
+
 Known credential forms are redacted before details reach either diagnostics or
 `state.json`. Normal commands show a compact classified message, `cw error`
 shows the stored detail, and `cw error --raw` additionally exposes the redacted

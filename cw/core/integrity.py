@@ -159,8 +159,24 @@ def _validate_state_evolution(
         raise CwError("Protected workflow state changed its prior gate", ErrorCode.PROTECTED_PATH_MODIFIED)
     status = WorkflowState(str(after.get("status")))
     if status is WorkflowState.ERROR:
-        if after.get("attempt") != before.get("attempt") or len(history) != len(prior_history):
+        if after.get("attempt") != before.get("attempt") or len(history) != len(prior_history) + 1:
             raise CwError("Infrastructure failure consumed or rewrote review history", ErrorCode.PROTECTED_PATH_MODIFIED)
+        event = history[-1]
+        metadata = after.get("infrastructure_error")
+        error_code = report.get("error_code") if report else None
+        if (
+            not isinstance(event, dict)
+            or event.get("phase") != phase.id
+            or event.get("action") != "infrastructure_error"
+            or event.get("operation") != "review"
+            or event.get("error_code") != error_code
+            or not isinstance(metadata, dict)
+            or metadata.get("error_code") != error_code
+            or metadata.get("retryable") is not True
+            or metadata.get("operation") != "review"
+            or metadata.get("phase") != phase.id
+        ):
+            raise CwError("Infrastructure review history event is invalid", ErrorCode.PROTECTED_PATH_MODIFIED)
     else:
         if after.get("attempt") != int(before.get("attempt", 0)) + 1 or len(history) != len(prior_history) + 1:
             raise CwError("Semantic review state delta is invalid", ErrorCode.PROTECTED_PATH_MODIFIED)
@@ -174,7 +190,11 @@ def _validate_state_evolution(
             else "approved" if decision == ReviewDecision.APPROVE.value
             else "revision_required"
         )
-        if event.get("action") != expected_action or after.get("last_error") is not None:
+        if (
+            event.get("action") != expected_action
+            or after.get("last_error") is not None
+            or after.get("infrastructure_error") is not None
+        ):
             raise CwError("Semantic review history does not match its decision", ErrorCode.PROTECTED_PATH_MODIFIED)
 
 

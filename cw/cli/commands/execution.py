@@ -7,15 +7,23 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from cw.checks.deterministic import validate_phase
+from cw.checks.deterministic import inspect_completed_work, validate_phase
 from cw.core.diagnostics import state_error
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import validate_dependencies, validate_gate
 from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
+from cw.core.initialize import backup_metadata
 from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
+from cw.core.recovery import (
+    mark_infrastructure_error,
+    readiness_is_valid,
+    regenerate_readiness,
+    retryable_infrastructure_error,
+    migrate_legacy_reviewer_error,
+)
 from cw.core.session import create_session, finish_session, load_session, readiness_path
-from cw.core.state import load_state, transition
+from cw.core.state import load_state, save_state, transition
 from cw.core.utils import utc_now
 from cw.ui.console import Console, emit_json
 
@@ -121,6 +129,12 @@ including this exact session_id, and stop normally.
         else:
             state = load_state(root)
         state["last_error"] = state_error(failure)
+        if failure.code in {
+            ErrorCode.IMPLEMENTER_PROCESS_ERROR, ErrorCode.CODEX_NOT_FOUND,
+        }:
+            mark_infrastructure_error(
+                state, failure, operation="implementation", phase=phase.id,
+            )
         transition(root, state, WorkflowState.ERROR, force_error=True)
         if not readiness_path(root).exists() or failure.code is ErrorCode.PROTECTED_PATH_MODIFIED:
             finish_session(root)
@@ -142,6 +156,9 @@ including this exact session_id, and stop normally.
             "Run: cw retry",
         )
         state["last_error"] = state_error(failure)
+        mark_infrastructure_error(
+            state, failure, operation="implementation", phase=phase.id,
+        )
         transition(root, state, WorkflowState.ERROR, force_error=True)
         finish_session(root)
         raise failure
@@ -276,42 +293,96 @@ def command_retry(
     *,
     root_resolver: RootResolver,
     context: ContextLoader,
+    current_resolver: CurrentResolver,
     review_command: Command,
     start_command: Command,
     plan_command: Command,
 ) -> int:
     root = root_resolver()
-    _, state, _ = context(root)
-    if WorkflowState(state["status"]) is not WorkflowState.ERROR:
+    _, state, workflow = context(root)
+    if not isinstance(state.get("infrastructure_error"), dict):
+        # A direct retry of prototype-era state performs the same safe,
+        # backed-up normalization as `cw repair` before taking recovery action.
+        with operation_lock(root, "retry-migration"):
+            backup_metadata(root)
+            migrated = migrate_legacy_reviewer_error(root, workflow, state)
+            if migrated is not None:
+                state["last_error"] = None
+                save_state(root, state)
+    metadata = retryable_infrastructure_error(state)
+    status = WorkflowState(state["status"])
+    if metadata is None or status not in {WorkflowState.ERROR, WorkflowState.READY_FOR_REVIEW}:
         raise CwError("There is no retryable infrastructure error", ErrorCode.INVALID_STATE)
-    error = str(state.get("last_error") or "")
-    readiness_exists = readiness_path(root).is_file()
-    if "IMPLEMENTER_PROCESS_ERROR" in error and readiness_exists:
+    phase_id = state.get("current_phase")
+    if metadata.get("phase") not in {None, phase_id}:
+        raise CwError("Infrastructure error belongs to another phase", ErrorCode.INVALID_STATE, "Run: cw repair")
+    operation = str(metadata["operation"])
+    if operation == "codex":
+        operation = "planning" if phase_id is None else "review" if readiness_path(root).exists() else "implementation"
+    elif operation == "implementation" and phase_id is not None:
+        phase = current_resolver(workflow, state)
+        if readiness_is_valid(root, workflow, phase):
+            # An implementer may exit after successfully producing readiness.
+            # Recovery should continue from that durable boundary, not rerun it.
+            operation = "review"
+    started_at = utc_now()
+    state.setdefault("history", []).append({
+        "timestamp": started_at,
+        "phase": phase_id,
+        "action": "retry_started",
+        "operation": operation,
+    })
+    metadata = {**metadata, "retry_started_at": started_at}
+    state["infrastructure_error"] = metadata
+    save_state(root, state)
+
+    if operation == "review":
+        phase = current_resolver(workflow, state)
+        with operation_lock(root, "retry-review"):
+            if readiness_is_valid(root, workflow, phase):
+                state["last_error"] = None
+                if status is WorkflowState.ERROR:
+                    transition(root, state, WorkflowState.READY_FOR_REVIEW)
+                else:
+                    save_state(root, state)
+            else:
+                validation = inspect_completed_work(root, workflow, phase)
+                if not validation.passed:
+                    raise CwError(
+                        "Implemented work is not ready for readiness recovery",
+                        ErrorCode.INVALID_STATE,
+                        "Restore the required artifacts or checks, then run: cw retry",
+                        details="\n".join(validation.errors),
+                    )
+                if status is WorkflowState.ERROR:
+                    transition(root, state, WorkflowState.IN_PROGRESS)
+                else:
+                    transition(root, state, WorkflowState.IN_PROGRESS)
+                regenerate_readiness(root, workflow, phase, validation)
+                state.setdefault("history", []).append({
+                    "timestamp": utc_now(),
+                    "phase": phase.id,
+                    "action": "readiness_resume_started",
+                    "operation": "review",
+                })
+                state["last_error"] = None
+                transition(root, state, WorkflowState.READY_FOR_REVIEW)
         args.hook = False
         args.human_approve = False
         return review_command(args, console)
-    if "IMPLEMENTER_PROCESS_ERROR" in error or (
-        "CODEX_NOT_FOUND" in error and state.get("current_phase") and not readiness_exists
-    ):
+    if operation == "implementation":
+        if status is not WorkflowState.ERROR:
+            raise CwError("Implementation retry state is invalid", ErrorCode.INVALID_STATE)
         state["last_error"] = None
+        state["infrastructure_error"] = None
         transition(root, state, WorkflowState.IN_PROGRESS)
         return start_command(args, console)
-    planner_errors = (
-        "PLANNER_NETWORK_ERROR", "PLANNER_PROCESS_ERROR", "PLAN_TIMEOUT", "CODEX_NOT_FOUND",
-    )
-    if any(code in error for code in planner_errors) and not state.get("current_phase"):
+    if operation == "planning" and not phase_id:
         goal = state.get("pending_goal")
         state["last_error"] = None
+        state["infrastructure_error"] = None
         transition(root, state, WorkflowState.PLANNING)
         args.action = None
         args.goal = goal
         return plan_command(args, console)
-    reviewer_errors = (
-        "REVIEWER_NETWORK_ERROR", "REVIEW_TIMEOUT", "REVIEWER_PROCESS_ERROR",
-        "SCHEMA_VALIDATION_ERROR", "CODEX_NOT_FOUND",
-    )
-    if not any(code in error for code in reviewer_errors):
-        raise CwError("The last error is not safely retryable", ErrorCode.INVALID_STATE, "Run: cw error")
-    args.hook = False
-    args.human_approve = False
-    return review_command(args, console)
+    raise CwError("The infrastructure error cannot be retried safely", ErrorCode.INVALID_STATE, "Run: cw error")

@@ -105,6 +105,10 @@ class ReviewerTests(unittest.TestCase):
         with self.assertRaises(CwError):
             run_review(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], self.repo.state(), FakeAdapter(error=error))
         self.assertEqual(0, self.repo.state()["attempt"])
+        metadata = self.repo.state()["infrastructure_error"]
+        self.assertEqual("REVIEWER_NETWORK_ERROR", metadata["error_code"])
+        self.assertEqual("review", metadata["operation"])
+        self.assertTrue(metadata["retryable"])
 
     def test_infrastructure_report_redacts_credentials(self):
         error = CwError(

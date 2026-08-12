@@ -15,7 +15,8 @@ from .utils import load_json, safe_project_path
 SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
 EVENT_ACTIONS = {
     "approved", "human_approved", "human_review_required", "revision_required",
-    "protected_path_violation", "reopened",
+    "protected_path_violation", "reopened", "infrastructure_error",
+    "infrastructure_error_migrated", "retry_started", "readiness_resume_started",
 }
 
 
@@ -94,15 +95,19 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
     if not isinstance(history, list):
         raise CwError("Workflow history must be a list", ErrorCode.INVALID_STATE)
     for index, event in enumerate(history):
+        action = event.get("action") if isinstance(event, dict) else None
+        phase = event.get("phase") if isinstance(event, dict) else None
+        phase_valid = phase in phase_ids or (
+            action == "retry_started" and event.get("operation") == "planning" and phase is None
+        )
         if (
             not isinstance(event, dict)
-            or event.get("phase") not in phase_ids
-            or event.get("action") not in EVENT_ACTIONS
+            or not phase_valid
+            or action not in EVENT_ACTIONS
             or not isinstance(event.get("timestamp"), str)
             or not event["timestamp"]
         ):
             raise CwError(f"Workflow history event is invalid: {index}", ErrorCode.INVALID_STATE)
-        action = event["action"]
         if action in {"approved", "human_review_required", "revision_required"}:
             attempt = event.get("attempt")
             if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
@@ -122,4 +127,9 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
             backup = event.get("backup")
             if not isinstance(backup, str) or not backup.startswith(".cw/backups/"):
                 raise CwError(f"Workflow history backup is invalid: {index}", ErrorCode.INVALID_STATE)
+        if action in {"infrastructure_error", "infrastructure_error_migrated"}:
+            if not isinstance(event.get("error_code"), str) or not isinstance(event.get("operation"), str):
+                raise CwError(f"Workflow infrastructure event is invalid: {index}", ErrorCode.INVALID_STATE)
+        if action in {"retry_started", "readiness_resume_started"} and not isinstance(event.get("operation"), str):
+            raise CwError(f"Workflow retry event is invalid: {index}", ErrorCode.INVALID_STATE)
     return {"reviews": len(review_files), "gates": len(gate_files), "events": len(history)}

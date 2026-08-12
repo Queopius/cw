@@ -26,11 +26,22 @@ the independent diagnostic store and can still work if workflow state is corrupt
   file under `.cw/reviews/`, `.cw/gates/`, or `.cw/state.json`. CW will not delete
   or regenerate historical approval evidence automatically.
 - **Reviewer unavailable or timed out:** preserve readiness and run `cw retry`.
+  CW records the failure as a retryable `review` operation and does not consume
+  a semantic attempt. If an older project has only `reviewer_result: null` plus
+  `system_error`, run `cw repair` first; repair backs up and classifies that
+  record, corrects the attempt count, and preserves a valid readiness manifest.
+  Direct `cw retry` also performs this backup-first migration when needed.
+- **Legacy reviewer error with no readiness:** run `cw retry`. CW first checks
+  current artifacts, dependency gates, and configured deterministic commands.
+  If they pass, it regenerates only readiness and invokes the reviewer; it never
+  reruns the complete implementation automatically. Missing or failing work
+  remains in `ERROR` with an actionable validation failure.
 - **Planner unavailable, invalid, or timed out:** CW preserves the pending goal,
   writes no partial plan, and `cw retry` reruns planning.
 - **Implementer stopped unexpectedly:** CW preserves the current phase, records
   the process failure without consuming a semantic review attempt, and `cw retry`
-  restarts the implementer rather than the reviewer.
+  restarts the implementer rather than the reviewer. If the implementer already
+  produced valid readiness, retry continues directly with review instead.
 - **Approval gate invalidated:** do not overwrite the gate; run
   `cw repair --reopen <phase>`. CW backs up metadata and invalidates dependent
   gates before returning that phase to implementation.

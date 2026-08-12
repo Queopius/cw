@@ -12,6 +12,13 @@ All notable changes to CW are documented here.
   dispatch and its structured top-level error boundary.
 - Add atomic, locked `cw config set` project overrides with strict typed value
   validation, safe-path enforcement, and consistent global flag placement.
+- Recover prototype-era reviewer infrastructure failures through structured,
+  retryable operation metadata without consuming semantic review attempts.
+- Make `cw repair` back up and classify legacy reviewer system errors, preserve
+  valid readiness, and correct historically inflated attempt counts.
+- Make `cw retry` perform deterministic recovery: reuse valid readiness or
+  validate existing artifacts and regenerate only the readiness manifest before
+  invoking the independent reviewer.
 
 ## 0.1.3 — 2026-08-13
 

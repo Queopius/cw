@@ -119,6 +119,7 @@ def command_retry(args: argparse.Namespace, console: Console) -> int:
         console,
         root_resolver=_root,
         context=_context,
+        current_resolver=_current,
         review_command=command_review,
         start_command=command_start,
         plan_command=command_plan,

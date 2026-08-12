@@ -11,6 +11,7 @@ from cw.core.diagnostics import redact, state_error
 from cw.core.errors import CwError, ErrorCode, HumanActionRequired
 from cw.core.gates import artifact_hashes, create_gate, validate_approval_review
 from cw.core.models import Phase, ReviewDecision, Workflow, WorkflowState
+from cw.core.recovery import mark_infrastructure_error
 from cw.core.reviews import validate_reviewer_result
 from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import finish_session, readiness_path
@@ -82,6 +83,13 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
         )
     except CwError as exc:
         state["last_error"] = state_error(exc)
+        metadata = mark_infrastructure_error(
+            state, exc, operation="review", phase=phase.id,
+        )
+        _event(
+            state, phase.id, "infrastructure_error",
+            operation="review", error_code=metadata["error_code"],
+        )
         transition(root, state, WorkflowState.ERROR, force_error=True)
         report = {
             "schema_version": SCHEMA_VERSION, "workflow": workflow.id, "phase": phase.id,
@@ -103,6 +111,7 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
     path = _persist_review(root, phase, report, f"attempt-{attempt:02d}")
     state["last_review"] = path.relative_to(root).as_posix()
     state["last_error"] = None
+    state["infrastructure_error"] = None
 
     if decision is ReviewDecision.APPROVE:
         if phase.requires_human_approval:

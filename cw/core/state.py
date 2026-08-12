@@ -35,6 +35,7 @@ def initial_state(project_id: str) -> dict[str, Any]:
         "workflow_version": None, "workflow_sha256": None, "current_phase": None,
         "status": WorkflowState.UNINITIALIZED.value, "attempt": 0,
         "last_review": None, "last_gate": None, "last_error": None,
+        "infrastructure_error": None,
         "pending_goal": None,
         "history": [], "updated_at": utc_now(),
     }
@@ -71,6 +72,7 @@ def bind_plan(root: Path, state: dict[str, Any], workflow: Workflow) -> None:
         "workflow_sha256": workflow_hash(path),
         "current_phase": workflow.phases[0].id if workflow.phases else None,
         "attempt": 0, "last_review": None, "last_gate": None, "last_error": None,
+        "infrastructure_error": None,
         "pending_goal": None,
     })
     save_state(root, state)
@@ -83,3 +85,29 @@ def validate_state(root: Path, state: dict[str, Any], workflow: Workflow) -> Non
         raise CwError("Workflow changed after state was created", ErrorCode.INVALID_STATE, "Run: cw plan rebuild")
     if workflow.phases and state.get("current_phase") not in {phase.id for phase in workflow.phases}:
         raise CwError("Current phase is not in the workflow", ErrorCode.INVALID_STATE)
+    infrastructure = state.get("infrastructure_error")
+    if infrastructure is not None:
+        required = {"error_code", "retryable", "operation", "phase", "occurred_at"}
+        allowed = required | {"legacy", "retry_started_at"}
+        valid_codes = {code.value for code in ErrorCode}
+        valid_phases = {phase.id for phase in workflow.phases} | {None}
+        if (
+            not isinstance(infrastructure, dict)
+            or not required.issubset(infrastructure)
+            or set(infrastructure) - allowed
+            or infrastructure.get("error_code") not in valid_codes
+            or not isinstance(infrastructure.get("retryable"), bool)
+            or infrastructure.get("operation") not in {"review", "implementation", "planning", "codex"}
+            or infrastructure.get("phase") not in valid_phases
+            or not isinstance(infrastructure.get("occurred_at"), str)
+            or not infrastructure["occurred_at"]
+            or ("legacy" in infrastructure and not isinstance(infrastructure["legacy"], bool))
+            or (
+                "retry_started_at" in infrastructure
+                and (
+                    not isinstance(infrastructure["retry_started_at"], str)
+                    or not infrastructure["retry_started_at"]
+                )
+            )
+        ):
+            raise CwError("Infrastructure error metadata is invalid", ErrorCode.INVALID_STATE, "Run: cw repair")

@@ -71,6 +71,7 @@ def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
             for phase in workflow.phases
         ],
         "last_error": state.get("last_error"),
+        "infrastructure_error": state.get("infrastructure_error"),
     }
 
 
@@ -103,7 +104,13 @@ def render_status(console: Console, data: dict[str, Any], verbose: bool = False)
         console.line()
         console.item("✕", "Approval gate invalidated")
         console.run("cw error")
-    if data["state"] == "ERROR" and data.get("last_error"):
+    recovery = data.get("infrastructure_error")
+    if data["state"] == "ERROR" and isinstance(recovery, dict) and recovery.get("retryable") is True:
+        console.line()
+        console.item("!", "Infrastructure recovery available")
+        console.field("Operation", recovery.get("operation", "unknown"))
+        console.run("cw retry")
+    elif data["state"] == "ERROR" and data.get("last_error"):
         code = data["last_error"].split(":", 1)[0]
         title, detail = error_summary(code, data["last_error"])
         console.line()

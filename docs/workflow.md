@@ -25,6 +25,15 @@ The hook is inert in unrelated Codex sessions and reviewer sessions. A semantic
 decision consumes both runtime files; an infrastructure failure preserves them
 so `cw retry` can rerun only the reviewer.
 
+Infrastructure failures carry an explicit error code, retryability flag,
+operation, phase, and occurrence timestamp. They never increment the semantic
+review attempt. For prototype-era reviewer records, backup-first repair recognizes
+known transport, process, timeout, permission, smoke-test, and response-schema
+signatures and restores the effective attempt count. Retry records a fresh audit
+event, preserves the current phase and approved gates, and reuses valid readiness.
+Without readiness it validates completed work and may regenerate only the
+manifest; it does not blindly invoke the implementer.
+
 CW follows the official [Codex Stop hook contract](https://learn.chatgpt.com/docs/hooks):
 terminal review outcomes return `continue: false`, while `decision: block` is
 avoided because it asks Codex to create a continuation turn. A repeated event

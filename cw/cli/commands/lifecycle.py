@@ -11,6 +11,7 @@ from cw.core.gates import gate_path
 from cw.core.initialize import backup_metadata, initialize, repair as repair_metadata
 from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
+from cw.core.recovery import mark_infrastructure_error
 from cw.core.state import bind_plan, initial_state, save_state, transition
 from cw.core.utils import utc_now
 from cw.core.workflow import load_workflow, set_plan_status, write_workflow, workflow_hash
@@ -168,6 +169,9 @@ def command_plan(
                 ErrorCode.PLANNER_PROCESS_ERROR,
             }:
                 state["last_error"] = state_error(exc)
+                mark_infrastructure_error(
+                    state, exc, operation="planning", phase=None,
+                )
                 transition(root, state, WorkflowState.ERROR, force_error=True)
             raise
         write_workflow(root / ".codex" / "workflow" / "phases.yaml", payload)
@@ -222,6 +226,7 @@ def command_repair(
                 "last_review": None,
                 "last_gate": None,
                 "last_error": None,
+                "infrastructure_error": None,
             })
             state.setdefault("history", []).append({
                 "timestamp": utc_now(),
