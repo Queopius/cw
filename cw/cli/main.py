@@ -26,7 +26,7 @@ from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
 from cw.core.project import load_project, repository_root
 from cw.core.schema import SCHEMA_VERSION
-from cw.core.session import create_session, load_session, readiness_path
+from cw.core.session import create_session, finish_session, load_session, process_is_alive, readiness_path
 from cw.core.state import bind_plan, initial_state, load_state, save_state, transition, validate_state
 from cw.core.utils import atomic_json, load_json, utc_now
 from cw.core.workflow import load_workflow, set_plan_status, write_workflow, workflow_hash
@@ -287,6 +287,11 @@ def _current(workflow: Any, state: dict[str, Any]) -> Any:
 
 
 def command_start(args: argparse.Namespace, console: Console) -> int:
+    if args.json:
+        raise CwError(
+            "JSON mode is not supported for cw start", ErrorCode.USAGE_ERROR,
+            "Run: cw start", exit_code=2,
+        )
     root = _root()
     _, state, workflow = _context(root)
     phase = _current(workflow, state)
@@ -311,17 +316,14 @@ def command_start(args: argparse.Namespace, console: Console) -> int:
             raise CwError(f"Cannot start while workflow is {status.value}", ErrorCode.INVALID_STATE, "Run: cw status")
         validate_dependencies(root, workflow, phase)
         protected_before = snapshot_protected_paths(root, workflow.protected_paths)
-        session = create_session(root, workflow, phase) if not args.json else None
+        session = create_session(root, workflow, phase)
     prompt = f"""Work only on CW phase {phase.id}: {phase.name}.
 Objective: {phase.objective}
 Read AGENTS.md and .codex/workflow/phases.yaml. Do not change workflow state, criteria, reviews, or gates.
-Active implementation session: {session['session_id'] if session else ''}
+Active implementation session: {session['session_id']}
 When complete, create .cw/runtime/READY_FOR_REVIEW.json matching the installed schema,
 including this exact session_id, and stop normally.
 """
-    if args.json:
-        emit_json({"phase": phase.id, "state": "IN_PROGRESS", "sandbox": "workspace-write"})
-        return 0
     console.header("Start")
     console.item("→", f"{phase.id} · {phase.name}")
     console.field("Sandbox", "workspace-write")
@@ -332,7 +334,7 @@ including this exact session_id, and stop normally.
             root,
             prompt,
             allow_network=workflow.allow_network,
-            session_id=session["session_id"] if session else None,
+            session_id=session["session_id"],
         )
     except CwError as exc:
         failure = exc
@@ -350,7 +352,30 @@ including this exact session_id, and stop normally.
             state = load_state(root)
         state["last_error"] = state_error(failure)
         transition(root, state, WorkflowState.ERROR, force_error=True)
+        if not readiness_path(root).exists() or failure.code is ErrorCode.PROTECTED_PATH_MODIFIED:
+            finish_session(root)
+        if failure.code is ErrorCode.PROTECTED_PATH_MODIFIED:
+            readiness_path(root).unlink(missing_ok=True)
         raise failure
+    state = load_state(root)
+    status = WorkflowState(state["status"])
+    if status is WorkflowState.ERROR:
+        raw_error = str(state.get("last_error") or "")
+        code_value = raw_error.split(":", 1)[0]
+        code = ErrorCode(code_value) if code_value in {item.value for item in ErrorCode} else ErrorCode.WORKFLOW_ERROR
+        raise CwError("Phase review failed", code, "Run: cw retry", details=raw_error)
+    if status is WorkflowState.IN_PROGRESS and not readiness_path(root).exists():
+        failure = CwError(
+            "Codex implementer stopped without readiness", ErrorCode.IMPLEMENTER_PROCESS_ERROR,
+            "Run: cw retry",
+        )
+        state["last_error"] = state_error(failure)
+        transition(root, state, WorkflowState.ERROR, force_error=True)
+        finish_session(root)
+        raise failure
+    if status is WorkflowState.IN_PROGRESS and readiness_path(root).exists():
+        console.item("!", "Phase is ready; automatic review did not run")
+        console.run("cw review")
     return result
 
 
@@ -535,12 +560,16 @@ def _doctor(root: Path | None, reviewer: bool) -> list[dict[str, Any]]:
         checks.append({"section": "Security", "name": "Protected paths", "status": "pass", "detail": f"{len(workflow.protected_paths)} enforced"})
         phase = _current(workflow, state) if workflow.phases and state.get("current_phase") else None
         session = load_session(root, workflow, phase) if phase else None
+        readiness = readiness_path(root)
+        owner = session.get("owner_pid") if session else None
+        owner_active = isinstance(owner, int) and process_is_alive(owner)
+        if session and not owner_active and not readiness.exists():
+            raise CwError("A stale implementer session exists", ErrorCode.INVALID_STATE, "Run: cw repair")
         checks.append({
             "section": "Security", "name": "Implementer session",
-            "status": "pass" if session else "neutral",
-            "detail": f"active for {session['phase']}" if session else "none",
+            "status": "pass" if owner_active else "warning" if session else "neutral",
+            "detail": f"active for {session['phase']}" if owner_active else f"detached; review ready for {session['phase']}" if session else "none",
         })
-        readiness = readiness_path(root)
         if readiness.exists():
             if phase is None or session is None:
                 raise CwError("Readiness manifest has no active implementer session", ErrorCode.INVALID_STATE, "Run: cw repair")

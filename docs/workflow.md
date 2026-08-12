@@ -17,7 +17,9 @@ precise state, history, review, and gate delta produced by a valid current-phase
 review. Any other protected mutation stops the workflow in `ERROR`.
 
 Each `cw start` creates an atomic `.cw/runtime/implementer-session.json` and
-passes its random session ID to the implementer and Stop hook. Readiness must
+passes its random session ID to the implementer and Stop hook. The session also
+records its owning CW process as a lease: a concurrent `cw start` is rejected,
+and an orphan without readiness requires backup-first `cw repair`. Readiness must
 contain that exact ID, so a manifest from an older invocation cannot be replayed.
 The hook is inert in unrelated Codex sessions and reviewer sessions. A semantic
 decision consumes both runtime files; an infrastructure failure preserves them
@@ -33,7 +35,15 @@ next `cw start` validates the gate and its dependency artifact hashes before
 selecting the next phase. The last approved phase transitions to `COMPLETED`.
 
 Only one mutating operation can hold `.cw/locks/operation.lock`. A dead process
-lock is recognized as stale and safely replaced.
+lock is recognized as stale and safely replaced. The session lease extends
+exclusion across the long-lived Codex subprocess while still allowing its Stop
+hook to acquire the short metadata lock for review.
+
+After Codex exits, CW verifies the outcome. A semantic review may have consumed
+the session, or a valid readiness manifest may remain for manual `cw review`.
+Exiting without either is `IMPLEMENTER_PROCESS_ERROR` and is safely retryable.
+`cw start --json` is rejected because a machine-output shortcut must never move
+state without actually starting the implementer.
 
 Every retained review, gate, and history event remains part of the workflow's
 audit surface. `cw doctor` checks the entire surface, including records from

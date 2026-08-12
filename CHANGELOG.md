@@ -29,6 +29,11 @@ All notable changes to CW are documented here.
 - Persist atomic, redacted diagnostics independently from workflow state; make
   `cw error` usable during metadata corruption and keep unexpected exceptions
   compact while retaining their redacted traceback for raw diagnostics.
+- Add owner-process leases for implementer sessions, reject parallel starts,
+  repair orphan sessions safely, and treat a normal Codex exit without readiness
+  as a retryable infrastructure failure.
+- Reject `cw start --json` before state mutation instead of reporting a start
+  that never launched an implementer.
 
 ## 0.1.1 — 2026-08-12
 

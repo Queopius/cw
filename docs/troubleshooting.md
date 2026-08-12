@@ -35,6 +35,12 @@ the independent diagnostic store and can still work if workflow state is corrupt
   invocation. Inspect it, then restart the phase; do not copy runtime manifests
   between sessions or repositories. `cw repair` backs up and removes corrupt
   session/readiness pairs.
+- **Stale implementer session:** if no readiness exists, run `cw repair`; CW
+  backs up metadata and removes the orphan lease. If readiness exists, run
+  `cw review` so completed implementation is not restarted unnecessarily.
+- **Implementer stopped without readiness:** inspect `cw error`, then run
+  `cw retry`. CW removes the incomplete lease and starts a new implementer
+  session without consuming a semantic review attempt.
 - **Another operation is active:** wait; if its process died, the next operation
   automatically recognizes the stale lock.
 - **Plan goal unclear:** improve local documentation or pass `cw plan --goal`.

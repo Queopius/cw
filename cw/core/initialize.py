@@ -311,11 +311,14 @@ def repair(root: Path) -> Path:
         state = initial_state(current_id)
         state.update({"workflow_version": workflow.version, "workflow_sha256": workflow_hash(plan_path), "current_phase": workflow.phases[0].id, "status": "PLAN_PROPOSED" if workflow.status == "PROPOSED" else "READY"})
     atomic_json(state_path, state)
-    from .session import load_session, readiness_path, session_path
+    from .session import load_session, process_is_alive, readiness_path, session_path
     phase_id = state.get("current_phase")
     if session_path(root).exists() and phase_id in {phase.id for phase in workflow.phases}:
         try:
-            load_session(root, workflow, workflow.phase(str(phase_id)))
+            session = load_session(root, workflow, workflow.phase(str(phase_id)))
+            owner = session.get("owner_pid") if session else None
+            if not readiness_path(root).exists() and (not isinstance(owner, int) or not process_is_alive(owner)):
+                session_path(root).unlink(missing_ok=True)
         except CwError:
             session_path(root).unlink(missing_ok=True)
             readiness_path(root).unlink(missing_ok=True)

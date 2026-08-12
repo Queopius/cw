@@ -35,6 +35,9 @@ Readiness manifests are bound to the random ID of the current `cw start`
 invocation. This prevents accidental reuse or replay across sessions. The Stop
 hook checks the implementer and session environment before invoking review, so
 ordinary Codex sessions in an initialized repository do not trigger CW.
+The session carries an owner-process lease to prevent concurrent implementers
+from replacing each other's identity; no unrestricted sandbox is used to
+enforce this coordination.
 
 CW applies best-effort redaction for common credential forms before persisting
 workflow errors or diagnostic records. Diagnostic files remain local under

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import secrets
 from pathlib import Path
@@ -31,6 +32,18 @@ def create_session(root: Path, workflow: Workflow, phase: Phase) -> dict[str, An
             "Run: cw review",
             details=READINESS_FILE,
         )
+    existing = load_session(root, workflow, phase)
+    if existing is not None:
+        owner = existing.get("owner_pid")
+        if isinstance(owner, int) and process_is_alive(owner):
+            raise CwError(
+                "Another CW implementation session is active", ErrorCode.LOCKED,
+                "Wait for it to finish, then run: cw status",
+            )
+        raise CwError(
+            "A stale implementer session exists", ErrorCode.INVALID_STATE,
+            "Run: cw repair",
+        )
     payload = {
         "schema_version": SCHEMA_VERSION,
         "session_id": secrets.token_hex(16),
@@ -38,6 +51,7 @@ def create_session(root: Path, workflow: Workflow, phase: Phase) -> dict[str, An
         "phase": phase.id,
         "status": "ACTIVE",
         "started_at": utc_now(),
+        "owner_pid": os.getpid(),
     }
     atomic_json(session_path(root), payload)
     return payload
@@ -51,18 +65,31 @@ def load_session(root: Path, workflow: Workflow, phase: Phase) -> dict[str, Any]
         raise CwError("Implementer session metadata cannot be a symlink", ErrorCode.INVALID_STATE, "Run: cw repair")
     data = load_json(path)
     schema_version(data, "Implementer session")
+    required = {"schema_version", "session_id", "workflow", "phase", "status", "started_at"}
     if (
         not isinstance(data, dict)
-        or set(data) != {"schema_version", "session_id", "workflow", "phase", "status", "started_at"}
+        or not required.issubset(data)
+        or set(data) - (required | {"owner_pid"})
         or not isinstance(data.get("session_id"), str)
         or re.fullmatch(r"[0-9a-f]{32}", data["session_id"]) is None
         or data.get("workflow") != workflow.id
         or data.get("phase") != phase.id
         or data.get("status") != "ACTIVE"
         or not isinstance(data.get("started_at"), str)
+        or ("owner_pid" in data and (isinstance(data["owner_pid"], bool) or not isinstance(data["owner_pid"], int) or data["owner_pid"] <= 0))
     ):
         raise CwError("Implementer session metadata is invalid", ErrorCode.INVALID_STATE, "Run: cw repair")
     return data
+
+
+def process_is_alive(process_id: int) -> bool:
+    try:
+        os.kill(process_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def finish_session(root: Path) -> None:

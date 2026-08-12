@@ -48,7 +48,10 @@ class CliTests(unittest.TestCase):
         self.assertIn("01  Phase 1", output)
 
     def test_default_command_is_start(self):
-        with patch("cw.cli.main.CodexAdapter.run_implementer", return_value=0) as implementer:
+        def implement(*_args, **_kwargs):
+            self.repo.artifact(); self.repo.ready(); return 0
+
+        with patch("cw.cli.main.CodexAdapter.run_implementer", side_effect=implement) as implementer:
             code, output = self.invoke()
         self.assertEqual(0, code)
         self.assertIn("Phase 1", output)
@@ -56,7 +59,10 @@ class CliTests(unittest.TestCase):
 
     def test_start_passes_effective_network_policy(self):
         (self.repo.root / ".cw/config.toml").write_text("allow_network = true\n", encoding="utf-8")
-        with patch("cw.cli.main.CodexAdapter.run_implementer", return_value=0) as implementer:
+        def implement(*_args, **_kwargs):
+            self.repo.artifact(); self.repo.ready(); return 0
+
+        with patch("cw.cli.main.CodexAdapter.run_implementer", side_effect=implement) as implementer:
             code, _ = self.invoke("start")
         self.assertEqual(0, code)
         self.assertTrue(implementer.call_args.kwargs["allow_network"])
@@ -118,11 +124,29 @@ class CliTests(unittest.TestCase):
         state = self.repo.state()
         state["last_error"] = "IMPLEMENTER_PROCESS_ERROR: exited"
         transition(self.repo.root, state, WorkflowState.ERROR, force_error=True)
-        with patch("cw.cli.main.CodexAdapter.run_implementer", return_value=0) as implementer:
+        def implement(*_args, **_kwargs):
+            self.repo.artifact(); self.repo.ready(); return 0
+
+        with patch("cw.cli.main.CodexAdapter.run_implementer", side_effect=implement) as implementer:
             code, _ = self.invoke("retry")
         self.assertEqual(0, code)
         implementer.assert_called_once()
         self.assertEqual("IN_PROGRESS", self.repo.state()["status"])
+
+    def test_start_without_readiness_enters_retryable_error(self):
+        with patch("cw.cli.main.CodexAdapter.run_implementer", return_value=0):
+            code, output = self.invoke("start")
+        self.assertEqual(1, code)
+        self.assertIn("Implementer stopped unexpectedly", output)
+        self.assertEqual("ERROR", self.repo.state()["status"])
+        self.assertFalse((self.repo.root / ".cw/runtime/implementer-session.json").exists())
+
+    def test_start_json_is_rejected_without_mutating_state(self):
+        before = (self.repo.root / ".cw/state.json").read_bytes()
+        code, output = self.invoke("start", "--json")
+        self.assertEqual(2, code)
+        self.assertEqual("USAGE_ERROR", json.loads(output)["error"]["code"])
+        self.assertEqual(before, (self.repo.root / ".cw/state.json").read_bytes())
 
     def test_retry_reviews_existing_readiness_after_implementer_exit(self):
         failure = CwError("exited after readiness", ErrorCode.IMPLEMENTER_PROCESS_ERROR, "Run: cw retry")

@@ -57,6 +57,34 @@ class SessionAndHookTests(unittest.TestCase):
         self.assertFalse(validation.passed)
         self.assertIn("active implementer session", validation.errors[0])
 
+    def test_parallel_implementer_session_is_rejected(self):
+        create_session(self.repo.root, self.repo.workflow, self.phase)
+        with self.assertRaises(CwError) as caught:
+            create_session(self.repo.root, self.repo.workflow, self.phase)
+        self.assertEqual(ErrorCode.LOCKED, caught.exception.code)
+
+    def test_stale_implementer_session_requires_repair(self):
+        create_session(self.repo.root, self.repo.workflow, self.phase)
+        path = session_path(self.repo.root)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["owner_pid"] = 2_147_483_647
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        with self.assertRaises(CwError) as caught:
+            create_session(self.repo.root, self.repo.workflow, self.phase)
+        self.assertEqual(ErrorCode.INVALID_STATE, caught.exception.code)
+        self.assertIn("repair", caught.exception.hint)
+
+    def test_repair_removes_stale_session_without_readiness(self):
+        from cw.core.initialize import repair
+
+        create_session(self.repo.root, self.repo.workflow, self.phase)
+        path = session_path(self.repo.root)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["owner_pid"] = 2_147_483_647
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        repair(self.repo.root)
+        self.assertFalse(path.exists())
+
     def test_readiness_without_active_session_fails_closed(self):
         self.repo.artifact()
         self.repo.ready()
