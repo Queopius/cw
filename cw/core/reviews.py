@@ -7,6 +7,7 @@ from typing import Any
 
 from .errors import CwError, ErrorCode
 from .models import Phase, ReviewDecision
+from .severity import CriterionSeverity
 from .utils import safe_project_path
 
 
@@ -67,9 +68,13 @@ def validate_reviewer_result(
     received: dict[str, dict[str, Any]] = {}
     consistency: list[str] = []
     for result in results:
+        result_fields = set(result) if isinstance(result, dict) else set()
         if (
             not isinstance(result, dict)
-            or set(result) != {"id", "status", "evidence"}
+            or (
+                result_fields != {"id", "status", "evidence"}
+                and (strict or result_fields != {"id", "status", "evidence", "severity"})
+            )
             or not isinstance(result.get("id"), str)
         ):
             consistency.append("Malformed criterion result")
@@ -81,6 +86,9 @@ def validate_reviewer_result(
             consistency.append(f"Invented criterion: {criterion_id}")
         else:
             received[criterion_id] = result
+            configured_severity = expected[criterion_id].severity.value
+            if "severity" in result and result["severity"] != configured_severity:
+                consistency.append(f"Criterion severity mismatch: {criterion_id}")
     for criterion_id in expected:
         if criterion_id not in received:
             consistency.append(f"Missing criterion: {criterion_id}")
@@ -137,7 +145,8 @@ def validate_reviewer_result(
             consistency.append(f"Blocking evidence is outside review scope: {description}")
     blocking_failed = [
         criterion_id for criterion_id, criterion in expected.items()
-        if criterion.severity == "blocking" and received.get(criterion_id, {}).get("status") != "PASS"
+        if criterion.severity == CriterionSeverity.BLOCKING
+        and received.get(criterion_id, {}).get("status") != "PASS"
     ]
     configured_blockers = [
         description for description in phase.blocking_criteria

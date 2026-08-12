@@ -10,6 +10,7 @@ from .errors import CwError, ErrorCode
 from .layout import safe_file
 from .models import Workflow
 from .schema import schema_version
+from .severity import CANONICAL_CRITERION_SEVERITIES
 from .utils import atomic_write, safe_project_path, sha256_bytes
 
 
@@ -40,6 +41,11 @@ def load_workflow(root: Path, *, allow_empty: bool = True) -> Workflow:
             raise CwError("Plan has not been created.", ErrorCode.INVALID_STATE, "Run: cw plan")
         raise CwError("Missing phases.yaml", ErrorCode.SCHEMA_VALIDATION_ERROR)
     data = _read_document(path)
+    return workflow_from_document(root, data)
+
+
+def workflow_from_document(root: Path, data: dict[str, Any]) -> Workflow:
+    """Parse and strictly validate an already-loaded canonical workflow."""
     schema_version(data, "Workflow plan")
     meta = data.get("workflow", {})
     settings = data.get("settings", {})
@@ -87,7 +93,7 @@ def validate_workflow(root: Path, workflow: Workflow) -> None:
                 raise CwError(f"Phase {phase.id} targets protected workflow metadata", ErrorCode.SCHEMA_VALIDATION_ERROR)
             safe_project_path(root, value)
         for criterion in phase.acceptance_criteria:
-            if criterion.severity not in {"blocking", "advisory"}:
+            if criterion.severity.value not in CANONICAL_CRITERION_SEVERITIES:
                 raise CwError(f"Criterion severity is invalid: {criterion.id}", ErrorCode.SCHEMA_VALIDATION_ERROR)
             if criterion.id in criteria:
                 raise CwError(f"Duplicate criterion: {criterion.id}", ErrorCode.SCHEMA_VALIDATION_ERROR)

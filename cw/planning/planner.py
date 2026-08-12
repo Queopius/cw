@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 from cw.core.errors import CwError, ErrorCode
 from cw.core.schema import SCHEMA_VERSION
+from cw.core.severity import CANONICAL_CRITERION_SEVERITIES, CriterionSeverity
 
 
 def _read_text_prefix(path: Path, limit: int) -> str:
@@ -211,8 +212,8 @@ class Planner:
                 "depends_on": [], "artifacts": ["docs/workflow/01-repository-assessment.md"],
                 "review_paths": list(dict.fromkeys([*inspection.evidence, *review_paths])), "required_commands": [],
                 "acceptance_criteria": [
-                    {"id": "BASE-001", "severity": "blocking", "description": "Current architecture and constraints are documented."},
-                    {"id": "BASE-002", "severity": "blocking", "description": "The existing verification baseline is recorded."},
+                    {"id": "BASE-001", "severity": CriterionSeverity.BLOCKING.value, "description": "Current architecture and constraints are documented."},
+                    {"id": "BASE-002", "severity": CriterionSeverity.BLOCKING.value, "description": "The existing verification baseline is recorded."},
                 ], "blocking_criteria": ["Unknown baseline risks"], "requires_human_approval": False,
             },
             {
@@ -220,8 +221,8 @@ class Planner:
                 "depends_on": ["01-repository-assessment"], "artifacts": [f"docs/workflow/02-{slug}.md"],
                 "review_paths": review_paths, "required_commands": commands,
                 "acceptance_criteria": [
-                    {"id": "GOAL-001", "severity": "blocking", "description": f"The implementation satisfies: {objective}."},
-                    {"id": "GOAL-002", "severity": "blocking", "description": "Relevant automated tests cover the delivered behavior."},
+                    {"id": "GOAL-001", "severity": CriterionSeverity.BLOCKING.value, "description": f"The implementation satisfies: {objective}."},
+                    {"id": "GOAL-002", "severity": CriterionSeverity.BLOCKING.value, "description": "Relevant automated tests cover the delivered behavior."},
                 ], "blocking_criteria": ["Required checks fail", "Acceptance evidence is ambiguous"],
                 "requires_human_approval": self._needs_human_gate(objective),
             },
@@ -231,8 +232,8 @@ class Planner:
                 "depends_on": [f"02-{slug}"], "artifacts": ["docs/workflow/03-release-verification.md"],
                 "review_paths": list(dict.fromkeys([*review_paths, "README*", "docs/**/*"])), "required_commands": commands,
                 "acceptance_criteria": [
-                    {"id": "REL-001", "severity": "blocking", "description": "All deterministic checks pass from a clean verification run."},
-                    {"id": "REL-002", "severity": "blocking", "description": "User-facing and operational documentation is accurate."},
+                    {"id": "REL-001", "severity": CriterionSeverity.BLOCKING.value, "description": "All deterministic checks pass from a clean verification run."},
+                    {"id": "REL-002", "severity": CriterionSeverity.BLOCKING.value, "description": "User-facing and operational documentation is accurate."},
                 ], "blocking_criteria": ["Regression or release blocker remains"], "requires_human_approval": False,
             },
         ]
@@ -332,7 +333,7 @@ paths. Do not invent work unrelated to the stated goal.
             for criterion in criteria:
                 if not isinstance(criterion, dict) or set(criterion) != {"id", "severity", "description"}:
                     raise CwError("Planner acceptance criterion is invalid", ErrorCode.PLANNER_PROCESS_ERROR)
-                if criterion["severity"] not in {"blocking", "advisory"}:
+                if criterion["severity"] not in CANONICAL_CRITERION_SEVERITIES:
                     raise CwError("Planner criterion severity is invalid", ErrorCode.PLANNER_PROCESS_ERROR)
                 if not all(isinstance(criterion[key], str) and criterion[key] for key in ("id", "description")):
                     raise CwError("Planner acceptance criterion is invalid", ErrorCode.PLANNER_PROCESS_ERROR)
@@ -395,8 +396,8 @@ paths. Do not invent work unrelated to the stated goal.
                 "review_paths": list(dict.fromkeys([*inspection.evidence, *review_paths])),
                 "required_commands": commands if index == len(names) else [],
                 "acceptance_criteria": [
-                    {"id": f"PHASE-{index:02d}-001", "severity": "blocking", "description": f"The documented requirements for {name} are satisfied."},
-                    {"id": f"PHASE-{index:02d}-002", "severity": "blocking", "description": f"Verification evidence for {name} is recorded."},
+                    {"id": f"PHASE-{index:02d}-001", "severity": CriterionSeverity.BLOCKING.value, "description": f"The documented requirements for {name} are satisfied."},
+                    {"id": f"PHASE-{index:02d}-002", "severity": CriterionSeverity.BLOCKING.value, "description": f"Verification evidence for {name} is recorded."},
                 ],
                 "blocking_criteria": ["Documented phase requirements are unmet"],
                 "requires_human_approval": self._needs_human_gate(name),

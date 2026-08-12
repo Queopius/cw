@@ -19,6 +19,15 @@ All notable changes to CW are documented here.
 - Make `cw retry` perform deterministic recovery: reuse valid readiness or
   validate existing artifacts and regenerate only the readiness manifest before
   invoking the independent reviewer.
+- Centralize criterion severity as `blocking` and `advisory`, normalize the
+  documented prototype alias `non-blocking` to `advisory` during backup-first
+  repair, and keep unknown values fail-closed.
+- Preserve and strictly validate prototype review/gate evidence without rewriting
+  it, including hashes created before schema metadata was appended and archived
+  inactive gates.
+- Persist configured canonical severity in CW review records, reject reviewer
+  severity reinterpretation, and surface failed advisory criteria as non-blocking
+  observations.
 
 ## 0.1.3 — 2026-08-13
 

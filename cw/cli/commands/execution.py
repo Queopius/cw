@@ -15,6 +15,7 @@ from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
 from cw.core.initialize import backup_metadata
 from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
+from cw.core.severity import CriterionSeverity
 from cw.core.recovery import (
     mark_infrastructure_error,
     readiness_is_valid,
@@ -219,6 +220,15 @@ def render_review(console: Console, phase: Any, report: dict[str, Any], workflow
     console.line()
     if decision == "APPROVE" and not phase.requires_human_approval:
         console.item("✓", "APPROVED")
+        configured = {criterion.id: criterion for criterion in phase.acceptance_criteria}
+        advisory = [
+            result for result in report.get("criteria", [])
+            if result.get("status") != "PASS"
+            and configured.get(result.get("id")) is not None
+            and configured[result["id"]].severity == CriterionSeverity.ADVISORY
+        ]
+        for observation in advisory:
+            console.item("!", f"{observation['id']} · advisory observation")
         console.field("Gate", f".cw/gates/{phase.id}.approved.json")
         index = workflow.index(phase.id)
         if index + 1 < len(workflow.phases):

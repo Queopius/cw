@@ -14,6 +14,7 @@ from cw.core.models import Phase, ReviewDecision, Workflow, WorkflowState
 from cw.core.recovery import mark_infrastructure_error
 from cw.core.reviews import validate_reviewer_result
 from cw.core.schema import SCHEMA_VERSION
+from cw.core.severity import CriterionSeverity
 from cw.core.session import finish_session, readiness_path
 from cw.core.state import save_state, transition
 from cw.core.utils import atomic_json_new, utc_now
@@ -33,6 +34,8 @@ Evidence entries must begin with an allowed project-relative file path and may
 include a line suffix, for example `src/service.py:42 concrete observation`.
 Evaluate every acceptance and blocking criterion exactly once. A blocking
 criterion passes only when concrete evidence proves that condition is absent.
+An advisory acceptance failure is an observation, not a blocking issue, and
+must not change an otherwise valid APPROVE decision to REVISE.
 Cite concrete repository evidence.
 Ambiguous or missing evidence is not a pass. Do not invent criteria and do not review future phases.
 Return only the JSON object required by the supplied schema.
@@ -102,6 +105,11 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
         raise
 
     state["attempt"] = attempt
+    configured = {criterion.id: criterion for criterion in phase.acceptance_criteria}
+    criteria = [
+        {**criterion, "severity": configured[criterion["id"]].severity.value}
+        for criterion in criteria
+    ]
     report = {
         "schema_version": SCHEMA_VERSION, "workflow": workflow.id, "phase": phase.id, "attempt": attempt,
         "kind": "semantic_review", "decision": decision.value, "summary": response.payload["summary"],

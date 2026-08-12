@@ -6,6 +6,8 @@ from dataclasses import replace
 from cw.agents.reviewer import human_approve, run_review
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import validate_gate
+from cw.core.models import Criterion
+from cw.core.severity import CriterionSeverity
 from tests.helpers import FakeAdapter, TempRepo, result
 
 
@@ -26,6 +28,50 @@ class ReviewerTests(unittest.TestCase):
     def test_revise(self):
         self.assertEqual("REVISE", self.review(result(decision="REVISE", status="FAIL"))["decision"])
         self.assertEqual(1, self.repo.state()["attempt"])
+
+    def test_failed_blocking_criterion_prevents_approve(self):
+        report = self.review(result(decision="APPROVE", status="FAIL"))
+        self.assertEqual("REVISE", report["decision"])
+
+    def test_failed_advisory_criterion_does_not_prevent_approve(self):
+        phase = replace(
+            self.repo.workflow.phases[0],
+            acceptance_criteria=(
+                self.repo.workflow.phases[0].acceptance_criteria[0],
+                Criterion("P1-ADVISORY", "Document an optional observation", CriterionSeverity.ADVISORY),
+            ),
+        )
+        workflow = replace(self.repo.workflow, phases=(phase, *self.repo.workflow.phases[1:]))
+        payload = result()
+        payload["criteria"].append({
+            "id": "P1-ADVISORY",
+            "status": "FAIL",
+            "evidence": ["docs/phase-1.md:1 advisory evidence"],
+        })
+
+        report = run_review(self.repo.root, workflow, phase, self.repo.state(), FakeAdapter(payload))
+
+        self.assertEqual("APPROVE", report["decision"])
+        stored = {item["id"]: item for item in report["criteria"]}
+        self.assertEqual("blocking", stored["P1-001"]["severity"])
+        self.assertEqual("advisory", stored["P1-ADVISORY"]["severity"])
+        self.assertEqual("FAIL", stored["P1-ADVISORY"]["status"])
+
+    def test_reviewer_cannot_reinterpret_configured_severity(self):
+        phase = replace(
+            self.repo.workflow.phases[0],
+            acceptance_criteria=(
+                Criterion("P1-001", "Phase 1 is complete", CriterionSeverity.ADVISORY),
+            ),
+        )
+        workflow = replace(self.repo.workflow, phases=(phase, *self.repo.workflow.phases[1:]))
+        payload = result()
+        payload["criteria"][0]["severity"] = "blocking"
+
+        report = run_review(self.repo.root, workflow, phase, self.repo.state(), FakeAdapter(payload))
+
+        self.assertEqual("REVISE", report["decision"])
+        self.assertIn("Malformed criterion result", report["blocking_issues"])
 
     def test_human_review_required(self):
         payload = result(decision="HUMAN_REVIEW_REQUIRED")

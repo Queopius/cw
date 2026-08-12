@@ -6,9 +6,11 @@ from typing import Any
 
 from .errors import CwError, ErrorCode
 from .gates import validate_gate
+from .legacy_evidence import is_legacy_review, validate_legacy_review
 from .models import Workflow
 from .reviews import validate_reviewer_result
 from .schema import schema_version
+from .layout import validate_tree
 from .utils import load_json, safe_project_path
 
 
@@ -25,6 +27,11 @@ def _files(directory: Path, label: str) -> list[Path]:
         raise CwError(f"{label} directory is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
     files: list[Path] = []
     for entry in sorted(directory.iterdir()):
+        if entry.name == "archive" and entry.is_dir() and not entry.is_symlink():
+            # Prototype gate reopen operations retained superseded evidence in
+            # this repository-local archive. It is not an active approval set.
+            validate_tree(entry, f"{label} archive")
+            continue
         if entry.is_symlink() or not entry.is_file() or entry.suffix != ".json":
             raise CwError(f"Unexpected {label.lower()} entry: {entry.name}", ErrorCode.SCHEMA_VALIDATION_ERROR)
         files.append(entry)
@@ -35,13 +42,17 @@ def _audit_review(path: Path, workflow: Workflow) -> dict[str, Any]:
     data = load_json(path)
     schema_version(data, f"Review {path.name}")
     phase_id = data.get("phase")
-    if data.get("workflow") != workflow.id or phase_id not in {phase.id for phase in workflow.phases}:
+    workflow_id = data.get("workflow_id") if is_legacy_review(data) else data.get("workflow")
+    if workflow_id != workflow.id or phase_id not in {phase.id for phase in workflow.phases}:
         raise CwError(f"Review identity is invalid: {path.name}", ErrorCode.SCHEMA_VALIDATION_ERROR)
     phase = workflow.phase(str(phase_id))
     attempt = data.get("attempt")
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
         raise CwError(f"Review attempt is invalid: {path.name}", ErrorCode.SCHEMA_VALIDATION_ERROR)
     if not isinstance(data.get("created_at"), str) or not data["created_at"]:
+        if is_legacy_review(data):
+            validate_legacy_review(path.parents[2], workflow, phase, data)
+            return data
         raise CwError(f"Review timestamp is invalid: {path.name}", ErrorCode.SCHEMA_VALIDATION_ERROR)
     kind = data.get("kind")
     if kind == "infrastructure_error":
@@ -79,7 +90,8 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
         if phase_id is None:
             raise CwError(f"Gate targets an unknown phase: {path.name}", ErrorCode.INVALID_GATE)
         gate = validate_gate(root, workflow, phase_id)
-        if gate.get("review_reference") not in review_references:
+        review_reference = gate.get("review_reference") or gate.get("review_file")
+        if review_reference not in review_references:
             raise CwError(f"Gate review reference is missing: {path.name}", ErrorCode.INVALID_GATE)
         gate_references.add(path.relative_to(root).as_posix())
     for key, known in (("last_review", review_references), ("last_gate", gate_references)):

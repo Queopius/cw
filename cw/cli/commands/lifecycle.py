@@ -66,7 +66,7 @@ def _plan_payload(workflow: Any) -> dict[str, Any]:
                     criterion.__dict__ if hasattr(criterion, "__dict__") else {
                         "id": criterion.id,
                         "description": criterion.description,
-                        "severity": criterion.severity,
+                        "severity": criterion.severity.value,
                     }
                     for criterion in phase.acceptance_criteria
                 ],

@@ -59,6 +59,13 @@ Migration is backup-first and atomic. CW never rewrites a future schema as an
 older one. Project identity, state, workflow plans, reviews, gates, and runtime
 manifests participate in this check.
 
+Criterion severity has one Python domain model: `blocking` and `advisory`.
+The prototype-only `non-blocking` value is normalized to `advisory` in the raw
+workflow migration layer before strict loading. Unknown values remain errors.
+Schema synchronization tests prevent the serialized planner enum from drifting
+from the Python enum. Prototype reviews and gates are validated through a
+read-only compatibility adapter so approval evidence is preserved byte-for-byte.
+
 Repair uses the non-secret Git-local repository fingerprint as its identity
 boundary. Matching fingerprints permit a normal directory rename and retain the
 plan. A differing fingerprint means the metadata was copied from another repo:

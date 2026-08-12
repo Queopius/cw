@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from .severity import CriterionSeverity
+
 
 class WorkflowState(str, Enum):
     UNINITIALIZED = "UNINITIALIZED"
@@ -31,11 +33,15 @@ class ReviewDecision(str, Enum):
 class Criterion:
     id: str
     description: str
-    severity: str = "blocking"
+    severity: CriterionSeverity = CriterionSeverity.BLOCKING
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Criterion":
-        return cls(str(data["id"]), str(data["description"]), str(data.get("severity", "blocking")))
+        return cls(
+            str(data["id"]),
+            str(data["description"]),
+            CriterionSeverity(str(data.get("severity", CriterionSeverity.BLOCKING.value))),
+        )
 
 
 @dataclass(frozen=True, slots=True)

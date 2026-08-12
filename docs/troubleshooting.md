@@ -20,6 +20,10 @@ the independent diagnostic store and can still work if workflow state is corrupt
 - **Schema requires migration:** run `cw repair`. CW creates a metadata backup,
   upgrades known schema-less prototype records atomically, and leaves application
   source files untouched.
+- **Criterion severity `non-blocking`:** this is a recognized prototype value.
+  `cw repair` backs up the exact workflow and migrates it to the canonical
+  `advisory` value. Current plans accept only `blocking` and `advisory`; every
+  other value fails closed.
 - **Metadata created by a newer CW schema:** upgrade CW before continuing. Do not
   use repair to downgrade it; CW deliberately leaves the newer document intact.
 - **History integrity failure:** inspect `cw doctor --json` and the referenced

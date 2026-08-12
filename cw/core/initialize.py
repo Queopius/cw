@@ -9,6 +9,7 @@ from .errors import CwError, ErrorCode
 from .layout import MUTABLE_DIRECTORIES, safe_file, validate_project_layout, validate_tree
 from .project import Project, create_identity, load_project, project_id, repository_fingerprint
 from .schema import SCHEMA_VERSION, migrate_legacy_document, schema_version
+from .severity import normalize_legacy_workflow_severities
 from .state import initial_state
 from .utils import atomic_json, atomic_write, load_json, utc_now
 from .workflow import write_workflow
@@ -165,10 +166,11 @@ def _schema_documents(root: Path) -> list[tuple[Path, str, bool]]:
 
 
 def _migrate_metadata_schemas(root: Path, *, create_backup: bool) -> Path | None:
-    """Migrate schema-less v0 prototype documents after a complete compatibility pass."""
-    from .workflow import _read_document
+    """Normalize recognized prototype documents before strict current loading."""
+    from .workflow import _read_document, workflow_from_document
 
     staged: list[tuple[Path, dict, bool]] = []
+    workflow_documents: list[dict] = []
     for path, kind, is_workflow in _schema_documents(root):
         if not path.exists():
             continue
@@ -181,11 +183,17 @@ def _migrate_metadata_schemas(root: Path, *, create_backup: bool) -> Path | None
             # records remain untouched so doctor can report their corruption.
             continue
         migrated, changed = migrate_legacy_document(data, kind)
+        if is_workflow:
+            migrated, severity_changed = normalize_legacy_workflow_severities(migrated)
+            changed = changed or severity_changed
+            workflow_documents.append(migrated)
         if changed:
             staged.append((path, migrated, is_workflow))
-    if not staged:
-        return None
-    backup = backup_metadata(root) if create_backup else None
+    backup = backup_metadata(root) if create_backup and staged else None
+    # Validate the complete canonical workflow only after backup creation and
+    # before any staged document is persisted.
+    for document in workflow_documents:
+        workflow_from_document(root, document)
     for path, data, is_workflow in staged:
         if is_workflow:
             write_workflow(path, data)
@@ -275,11 +283,12 @@ def _rebind_same_repository_metadata(root: Path, project_id_value: str) -> None:
         data = load_json(path)
         if not isinstance(data, dict):
             raise CwError(f"Cannot rebind invalid metadata: {path.name}", ErrorCode.SCHEMA_VALIDATION_ERROR)
-        if "workflow" in data:
-            if not isinstance(data["workflow"], str) or not data["workflow"]:
+        workflow_key = "workflow" if "workflow" in data else "workflow_id" if "workflow_id" in data else None
+        if workflow_key is not None:
+            if not isinstance(data[workflow_key], str) or not data[workflow_key]:
                 raise CwError(f"Cannot rebind invalid metadata: {path.name}", ErrorCode.SCHEMA_VALIDATION_ERROR)
-            if data["workflow"] != project_id_value:
-                data["workflow"] = project_id_value
+            if data[workflow_key] != project_id_value:
+                data[workflow_key] = project_id_value
                 atomic_json(path, data)
 
 
