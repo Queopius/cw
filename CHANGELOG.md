@@ -46,6 +46,9 @@ All notable changes to CW are documented here.
 - Check repository fingerprints before init-time legacy migration, preventing
   schema-less metadata from a same-named foreign repository from being modified
   or adopted.
+- Preserve independently reviewed evidence across legitimate repository renames
+  by atomically rebinding workflow IDs in reviews, gates, and session metadata,
+  then validating the original hashes and history normally.
 
 ## 0.1.1 — 2026-08-12
 

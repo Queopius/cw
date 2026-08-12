@@ -54,6 +54,10 @@ boundary. Matching fingerprints permit a normal directory rename and retain the
 plan. A differing fingerprint means the metadata was copied from another repo:
 CW backs it up, then clears active plan, state, policy overrides, runtime,
 reviews, gates, logs, and legacy mutable paths instead of adopting them.
+For a matching fingerprint, repository rename migration atomically rebinds the
+workflow ID in retained reviews, gates, and an optional session after backup;
+criteria, decisions, artifact hashes, and approval history are unchanged and
+must still pass the full historical audit.
 
 `cw doctor` audits all retained review and gate files, not only the current
 phase. It validates review criteria and decisions, gate-to-review references,

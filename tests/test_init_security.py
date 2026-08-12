@@ -127,6 +127,35 @@ class InitAndSecurityTests(unittest.TestCase):
         finally:
             repo.close()
 
+    def test_repair_preserves_approved_evidence_after_same_repository_rename(self):
+        from tests.helpers import FakeAdapter, TempRepo, result
+        from cw.agents.reviewer import run_review
+        from cw.core.audit import audit_history
+        from cw.core.gates import validate_gate
+        from cw.core.state import load_state, validate_state
+        from cw.core.workflow import load_workflow
+
+        repo = TempRepo()
+        try:
+            repo.artifact(); repo.ready()
+            run_review(repo.root, repo.workflow, repo.workflow.phases[0], repo.state(), FakeAdapter(result()))
+            moved = repo.root.with_name("renamed-approved-app")
+            repo.root.rename(moved); repo.root = moved
+
+            repair(moved)
+
+            workflow = load_workflow(moved)
+            state = load_state(moved)
+            validate_state(moved, state, workflow)
+            validate_gate(moved, workflow, workflow.phases[0].id)
+            self.assertEqual({"reviews": 1, "gates": 1, "events": 1}, audit_history(moved, workflow, state))
+            review = json.loads((moved / state["last_review"]).read_text(encoding="utf-8"))
+            gate = json.loads((moved / state["last_gate"]).read_text(encoding="utf-8"))
+            self.assertEqual("renamed-approved-app", review["workflow"])
+            self.assertEqual("renamed-approved-app", gate["workflow"])
+        finally:
+            repo.close()
+
     def test_repair_never_adopts_foreign_repository_workflow(self):
         from tests.helpers import TempRepo
         from cw.core.gates import create_gate

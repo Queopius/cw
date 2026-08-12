@@ -262,6 +262,26 @@ def _reset_foreign_metadata(root: Path, project: Project) -> None:
     atomic_write(root / ".cw" / "config.toml", DEFAULT_CONFIG)
 
 
+def _rebind_same_repository_metadata(root: Path, project_id_value: str) -> None:
+    paths = [
+        *sorted((root / ".cw/reviews").glob("*.json")),
+        *sorted((root / ".cw/gates").glob("*.json")),
+        root / ".cw/runtime/implementer-session.json",
+    ]
+    for path in paths:
+        if not path.exists():
+            continue
+        safe_file(path, path.relative_to(root).as_posix())
+        data = load_json(path)
+        if not isinstance(data, dict):
+            raise CwError(f"Cannot rebind invalid metadata: {path.name}", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if "workflow" in data:
+            if not isinstance(data["workflow"], str) or not data["workflow"]:
+                raise CwError(f"Cannot rebind invalid metadata: {path.name}", ErrorCode.SCHEMA_VALIDATION_ERROR)
+            data["workflow"] = project_id_value
+            atomic_json(path, data)
+
+
 def initialize(root: Path) -> tuple[Project, bool]:
     validate_project_layout(root, create=True)
     cw = root / ".cw"
@@ -391,6 +411,7 @@ def repair(root: Path) -> Path:
     if not same_repository:
         _reset_foreign_metadata(root, project)
         return backup
+    _rebind_same_repository_metadata(root, current_id)
     # Repair identity in a same-repository plan/state without discarding phase history.
     plan_path = root / ".codex" / "workflow" / "phases.yaml"
     if plan_path.is_file():
