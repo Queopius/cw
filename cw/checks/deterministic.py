@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from cw.core.commands import command_arguments
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import artifact_hashes, validate_dependencies
 from cw.core.models import Phase, ValidationResult, Workflow
@@ -65,8 +66,9 @@ def validate_phase(root: Path, workflow: Workflow, phase: Phase) -> ValidationRe
         result.checks.append({"name": "Artifacts", "status": "passed", "count": len(result.artifact_hashes)})
         for command in phase.required_commands:
             timeout = command.timeout_seconds or workflow.command_timeout
+            arguments = command_arguments(command.command)
             completed = subprocess.run(
-                command.command, cwd=root, shell=True, executable="/bin/sh", text=True,
+                arguments, cwd=root, shell=False, text=True,
                 capture_output=True, timeout=timeout, env=_redacted_environment(), check=False,
             )
             check = {"name": "Required command", "command": command.command, "exit_code": completed.returncode}
@@ -75,8 +77,13 @@ def validate_phase(root: Path, workflow: Workflow, phase: Phase) -> ValidationRe
                 raise CwError(f"Required command failed: {command.command}", details=(completed.stderr or completed.stdout)[-4000:])
         result.checks.append({"name": "SHA-256 integrity", "status": "passed"})
         result.passed = True
-    except (CwError, subprocess.TimeoutExpired) as exc:
-        message = str(exc) if isinstance(exc, CwError) else f"Required command timed out: {exc.cmd}"
+    except (CwError, OSError, subprocess.TimeoutExpired) as exc:
+        if isinstance(exc, subprocess.TimeoutExpired):
+            message = f"Required command timed out: {exc.cmd}"
+        elif isinstance(exc, OSError):
+            message = f"Required command could not start: {exc}"
+        else:
+            message = str(exc)
         result.errors.append(message)
         result.checks.append({"name": "Validation", "status": "failed", "detail": message})
     return result

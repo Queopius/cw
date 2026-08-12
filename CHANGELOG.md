@@ -2,6 +2,14 @@
 
 All notable changes to CW are documented here.
 
+## Unreleased
+
+- Execute deterministic validation commands without a shell and reject shell
+  control syntax in workflow configuration.
+- Enforce global and project policy precedence for review attempts and command
+  and reviewer timeouts.
+- Validate policy types, unknown keys, and malformed TOML with concise errors.
+
 ## 0.1.0 — 2026-08-12
 
 - Licensed CW under Apache-2.0, copyright 2026 Fantomid LLC.
