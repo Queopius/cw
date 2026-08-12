@@ -53,8 +53,33 @@ def atomic_write(path: Path, content: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def atomic_write_new(path: Path, content: str) -> None:
+    """Atomically create *path* without replacing an existing file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, path)
+        temporary.unlink()
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def atomic_json(path: Path, payload: Any) -> None:
     atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=False) + "\n")
+
+
+def atomic_json_new(path: Path, payload: Any) -> None:
+    atomic_write_new(path, json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=False) + "\n")
 
 
 def safe_project_path(root: Path, value: str, *, must_exist: bool = False) -> Path:

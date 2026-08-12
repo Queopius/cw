@@ -109,7 +109,7 @@ class CodexAdapter:
     def smoke_test(self, root: Path, schema: Path, timeout: int = 60) -> CodexResult:
         return self.run_reviewer(
             root,
-            "Connectivity smoke test only. Do not inspect repository files. Return decision APPROVE, an empty criteria list, no blocking issues, and a short summary.",
+            "Connectivity smoke test only. Do not inspect repository files. Return decision APPROVE, empty criteria and blocking_criteria lists, no blocking issues, and a short summary.",
             schema,
             timeout,
         )

@@ -20,7 +20,7 @@ not claim unattended autonomy.
 ## Quick start
 
 ```bash
-git clone <cw-repository>
+git clone git@github.com:Queopius/cw.git
 cd cw
 ./install.sh
 
