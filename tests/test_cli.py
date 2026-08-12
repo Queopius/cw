@@ -254,7 +254,7 @@ class CliTests(unittest.TestCase):
     def test_version_json(self):
         code, output = self.invoke("version", "--json")
         payload = json.loads(output)
-        self.assertEqual("0.1.1", payload["version"])
+        self.assertEqual("0.1.2", payload["version"])
         self.assertEqual("CW by Queopius", payload["brand"])
 
     def test_no_color_environment(self):

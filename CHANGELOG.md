@@ -4,6 +4,8 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.1.2 — 2026-08-12
+
 - Add bounded, read-only Codex planning with strict structured output, local
   safety validation, and retryable infrastructure failures.
 - Prevent generated plans from targeting CW metadata or supplying project
