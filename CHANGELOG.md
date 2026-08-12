@@ -4,6 +4,9 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+- Preserve review evidence as append-only records with exclusive atomic creation,
+  including when an explicit phase reopen restarts semantic attempt numbering.
+
 ## 0.1.2 — 2026-08-12
 
 - Add bounded, read-only Codex planning with strict structured output, local

@@ -341,6 +341,37 @@ class CliTests(unittest.TestCase):
         self.assertEqual("01-phase-1", self.repo.state()["current_phase"])
         self.assertTrue(list((self.repo.root / ".cw/backups").glob("*/gates/01-phase-1.approved.json")))
 
+    def test_reopen_preserves_prior_review_when_attempt_number_restarts(self):
+        from cw.agents.reviewer import run_review
+        from cw.core.audit import audit_history
+        from cw.core.gates import validate_gate
+        from tests.helpers import FakeAdapter
+
+        self.repo.artifact()
+        self.repo.ready()
+        run_review(
+            self.repo.root, self.repo.workflow, self.repo.workflow.phases[0],
+            self.repo.state(), FakeAdapter(result()),
+        )
+        original_reference = self.repo.state()["last_review"]
+        original_path = self.repo.root / original_reference
+        original_bytes = original_path.read_bytes()
+
+        code, _ = self.invoke("repair", "--reopen", "01-phase-1")
+        self.assertEqual(0, code)
+        self.repo.ready()
+        run_review(
+            self.repo.root, self.repo.workflow, self.repo.workflow.phases[0],
+            self.repo.state(), FakeAdapter(result()),
+        )
+
+        current_reference = self.repo.state()["last_review"]
+        self.assertNotEqual(original_reference, current_reference)
+        self.assertEqual(original_bytes, original_path.read_bytes())
+        self.assertEqual(2, len(list((self.repo.root / ".cw/reviews").glob("*.json"))))
+        self.assertEqual(2, audit_history(self.repo.root, self.repo.workflow, self.repo.state())["reviews"])
+        validate_gate(self.repo.root, self.repo.workflow, "01-phase-1")
+
     def test_repair_backs_up_then_removes_corrupt_session(self):
         session = self.repo.root / ".cw/runtime/implementer-session.json"
         ready = self.repo.root / ".cw/runtime/READY_FOR_REVIEW.json"

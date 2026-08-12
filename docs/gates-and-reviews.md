@@ -1,5 +1,10 @@
 # Gates and reviews
 
+Review records are append-only. Each semantic or infrastructure result receives
+a unique timestamped name and is created atomically without replacing an existing
+file. Reopening a phase may restart its semantic attempt counter, but it never
+rewrites evidence from the earlier review cycle.
+
 Validation order is fixed:
 
 1. readiness structure and state;

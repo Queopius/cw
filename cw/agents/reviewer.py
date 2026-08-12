@@ -15,7 +15,7 @@ from cw.core.reviews import validate_reviewer_result
 from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import finish_session, readiness_path
 from cw.core.state import save_state, transition
-from cw.core.utils import atomic_json, load_json, utc_now
+from cw.core.utils import atomic_json_new, load_json, utc_now
 
 
 def reviewer_prompt(workflow: Workflow, phase: Phase) -> str:
@@ -35,6 +35,19 @@ Return only the JSON object required by the supplied schema.
 
 def _event(state: dict[str, Any], phase: str, action: str, **extra: Any) -> None:
     state.setdefault("history", []).append({"timestamp": utc_now(), "phase": phase, "action": action, **extra})
+
+
+def _persist_review(root: Path, phase: Phase, report: dict[str, Any], label: str) -> Path:
+    timestamp = str(report["created_at"]).replace(":", "").replace("-", "")
+    directory = root / ".cw" / "reviews"
+    for _ in range(10):
+        path = directory / f"{phase.id}-{label}-{timestamp}-{secrets.token_hex(8)}.json"
+        try:
+            atomic_json_new(path, report)
+        except FileExistsError:
+            continue
+        return path
+    raise CwError("Could not allocate an append-only review record", ErrorCode.WORKFLOW_ERROR)
 
 
 def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, Any], adapter: CodexAdapter | None = None) -> dict[str, Any]:
@@ -68,8 +81,7 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
             "attempt": attempt, "kind": "infrastructure_error", "error_code": exc.code.value,
             "error": redact(exc.message), "details": redact(exc.details), "created_at": utc_now(),
         }
-        path = root / ".cw" / "reviews" / f"{phase.id}-infrastructure-{utc_now().replace(':', '')}-{secrets.token_hex(4)}.json"
-        atomic_json(path, report)
+        path = _persist_review(root, phase, report, "infrastructure")
         state["last_review"] = path.relative_to(root).as_posix()
         save_state(root, state)
         raise
@@ -80,8 +92,7 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
         "kind": "semantic_review", "decision": decision.value, "criteria": criteria,
         "blocking_issues": issues, "artifact_hashes": validation.artifact_hashes, "created_at": utc_now(),
     }
-    path = root / ".cw" / "reviews" / f"{phase.id}-attempt-{attempt:02d}.json"
-    atomic_json(path, report)
+    path = _persist_review(root, phase, report, f"attempt-{attempt:02d}")
     state["last_review"] = path.relative_to(root).as_posix()
     state["last_error"] = None
 
