@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -8,7 +9,7 @@ from typing import Any
 from .errors import CwError, ErrorCode
 from .layout import safe_file
 from .models import Workflow
-from .utils import safe_project_path
+from .utils import atomic_write, safe_project_path
 
 try:
     import tomllib  # type: ignore[import-not-found]
@@ -126,8 +127,7 @@ def load_config(root: Path, *, workflow: Workflow | None = None) -> dict[str, An
     return config
 
 
-def load_policy(root: Path, *, workflow: Workflow | None = None) -> Policy:
-    config = load_config(root, workflow=workflow)
+def _policy_from_config(root: Path, config: dict[str, Any]) -> Policy:
     for key in ("max_review_attempts", "command_timeout", "review_timeout"):
         value = config[key]
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -164,6 +164,89 @@ def load_policy(root: Path, *, workflow: Workflow | None = None) -> Policy:
         command_timeout=config["command_timeout"],
         review_timeout=config["review_timeout"],
     )
+
+
+def load_policy(root: Path, *, workflow: Workflow | None = None) -> Policy:
+    return _policy_from_config(root, load_config(root, workflow=workflow))
+
+
+def _parse_setting(key: str, raw_value: str) -> Any:
+    if key not in DEFAULTS:
+        raise CwError(
+            f"Unknown configuration setting: {key}",
+            ErrorCode.USAGE_ERROR,
+            exit_code=2,
+        )
+    expected = DEFAULTS[key]
+    if isinstance(expected, bool):
+        normalized = raw_value.lower()
+        if normalized not in {"true", "false"}:
+            raise CwError(
+                f"Configuration setting {key} must be true or false",
+                ErrorCode.USAGE_ERROR,
+                exit_code=2,
+            )
+        return normalized == "true"
+    if isinstance(expected, int):
+        try:
+            return int(raw_value)
+        except ValueError as exc:
+            raise CwError(
+                f"Configuration setting {key} must be a positive integer",
+                ErrorCode.USAGE_ERROR,
+                exit_code=2,
+            ) from exc
+    if isinstance(expected, list):
+        try:
+            value = json.loads(raw_value)
+        except json.JSONDecodeError as exc:
+            raise CwError(
+                f"Configuration setting {key} must be a JSON string list",
+                ErrorCode.USAGE_ERROR,
+                exit_code=2,
+            ) from exc
+        return value
+    raise CwError(f"Configuration setting {key} cannot be changed", ErrorCode.USAGE_ERROR, exit_code=2)
+
+
+def _render_toml(config: dict[str, Any]) -> str:
+    lines = ["# CW project overrides"]
+    for key in DEFAULTS:
+        if key not in config:
+            continue
+        value = config[key]
+        if isinstance(value, bool):
+            rendered = "true" if value else "false"
+        elif isinstance(value, int):
+            rendered = str(value)
+        else:
+            rendered = json.dumps(value, ensure_ascii=False)
+        lines.append(f"{key} = {rendered}")
+    return "\n".join(lines) + "\n"
+
+
+def set_project_config(root: Path, workflow: Workflow, key: str, raw_value: str) -> tuple[Any, dict[str, Any]]:
+    global_path = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cw" / "config.toml"
+    project_path = root / ".cw" / "config.toml"
+    safe_file(project_path, ".cw/config.toml")
+    project = _toml(project_path)
+    _validate(project, project_path)
+    project[key] = _parse_setting(key, raw_value)
+
+    effective = dict(DEFAULTS)
+    effective.update({
+        "max_review_attempts": workflow.max_review_attempts,
+        "command_timeout": workflow.command_timeout,
+        "review_timeout": workflow.review_timeout,
+    })
+    global_config = _toml(global_path)
+    _validate(global_config, global_path)
+    effective.update(global_config)
+    effective.update(project)
+    _policy_from_config(root, effective)
+
+    atomic_write(project_path, _render_toml(project))
+    return project[key], effective
 
 
 def apply_policy(workflow: Workflow, policy: Policy) -> Workflow:

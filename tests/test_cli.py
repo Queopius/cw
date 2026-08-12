@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from cw import __version__
 from cw.adapters.codex import CodexResult
-from cw.cli.main import main
+from cw.cli.main import _context, main
 from cw.core.errors import CwError, ErrorCode
 from cw.core.models import WorkflowState
 from cw.core.state import save_state, transition
@@ -269,6 +269,56 @@ class CliTests(unittest.TestCase):
         payload = json.loads(output)
         self.assertEqual(__version__, payload["version"])
         self.assertEqual("CW by Queopius", payload["brand"])
+
+    def test_global_json_flag_before_command(self):
+        code, output = self.invoke("--json", "version")
+        self.assertEqual(0, code)
+        self.assertEqual("CW by Queopius", json.loads(output)["brand"])
+
+    def test_config_set_updates_project_policy_atomically(self):
+        code, output = self.invoke("config", "set", "allow_network", "true", "--json")
+        payload = json.loads(output)
+        self.assertEqual(0, code)
+        self.assertEqual("project", payload["scope"])
+        self.assertTrue(payload["value"])
+        self.assertIn("allow_network = true", (self.repo.root / ".cw/config.toml").read_text(encoding="utf-8"))
+        self.assertTrue(_context(self.repo.root)[2].allow_network)
+
+    def test_config_set_accepts_string_lists(self):
+        value = '["payments", "cryptography"]'
+        code, output = self.invoke("config", "set", "human_gate_categories", value, "--json")
+        self.assertEqual(0, code)
+        self.assertEqual(["payments", "cryptography"], json.loads(output)["value"])
+        self.assertEqual(("payments", "cryptography"), _context(self.repo.root)[2].human_gate_categories)
+
+    def test_config_set_rejects_unknown_key_without_modifying_file(self):
+        path = self.repo.root / ".cw/config.toml"
+        before = path.read_bytes()
+        code, output = self.invoke("config", "set", "secret_mode", "true")
+        self.assertEqual(2, code)
+        self.assertIn("Unknown configuration setting", output)
+        self.assertEqual(before, path.read_bytes())
+
+    def test_config_set_rejects_unsafe_path_without_modifying_file(self):
+        path = self.repo.root / ".cw/config.toml"
+        before = path.read_bytes()
+        code, output = self.invoke("config", "set", "protected_paths", '["../outside"]')
+        self.assertEqual(2, code)
+        self.assertIn("must be repository-relative", output)
+        self.assertEqual(before, path.read_bytes())
+
+    def test_config_set_rejects_non_positive_integer_without_modifying_file(self):
+        path = self.repo.root / ".cw/config.toml"
+        before = path.read_bytes()
+        code, output = self.invoke("config", "set", "review_timeout", "0")
+        self.assertEqual(2, code)
+        self.assertIn("must be a positive integer", output)
+        self.assertEqual(before, path.read_bytes())
+
+    def test_config_set_requires_key_and_value(self):
+        code, output = self.invoke("config", "set")
+        self.assertEqual(2, code)
+        self.assertIn("setting and value are required", output)
 
     def test_no_color_environment(self):
         stream = Tty()

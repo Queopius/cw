@@ -25,6 +25,8 @@ is the composition root and retains the command registry and compatibility
 wrappers. Command modules own bounded use cases and receive repository/context
 services explicitly. This keeps public dispatch stable while allowing commands
 to be extracted and tested without turning the entry point back into a monolith.
+Mutable configuration has its own command module; read-oriented status and
+diagnostic commands never acquire responsibility for configuration writes.
 
 `cw.core.layout` defines the trusted project filesystem topology. Validation is
 performed before init writes, lock acquisition, normal context loading, repair,

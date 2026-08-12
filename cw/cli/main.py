@@ -6,6 +6,7 @@ from typing import Any, Sequence
 
 from cw.adapters.codex import CodexAdapter
 from cw.agents.reviewer import human_approve, run_review
+from cw.cli.commands import config as config_commands
 from cw.cli.commands import execution as execution_commands
 from cw.cli.commands import lifecycle as lifecycle_commands
 from cw.cli.commands import read as read_commands
@@ -149,7 +150,7 @@ def command_repair(args: argparse.Namespace, console: Console) -> int:
 
 
 def command_config(args: argparse.Namespace, console: Console) -> int:
-    return read_commands.command_config(args, console, root_resolver=_root)
+    return config_commands.command_config(args, console, root_resolver=_root)
 
 
 def command_version(args: argparse.Namespace, console: Console) -> int:

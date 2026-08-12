@@ -11,6 +11,21 @@ first, then global and project files override them. A newly initialized project
 leaves its overrides commented out so it does not accidentally mask global
 preferences.
 
+Project overrides can be written safely through the CLI:
+
+```bash
+cw config set allow_network true
+cw config set max_review_attempts 5
+cw config set human_gate_categories '["payments", "cryptography"]'
+```
+
+The setter accepts only known settings, validates the complete effective policy
+before mutation, acquires the project operation lock, and atomically replaces
+`.cw/config.toml`. Invalid values leave the file unchanged. List values use JSON
+array syntax. Global preferences remain manually managed in
+`~/.config/cw/config.toml`; `cw config set` intentionally changes only the
+current repository.
+
 CW v0.1 enforces `max_review_attempts`, `command_timeout`, `review_timeout`,
 `allow_network`, and `human_gate_categories` at runtime. Positive integers are
 required. Network access is denied by default for implementer shell commands;

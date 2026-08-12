@@ -27,6 +27,13 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual("Ship subscriptions", args.goal)
         self.assertTrue(args.json)
 
+    def test_global_output_flags_work_before_or_after_command(self):
+        before = parse_args(["--json", "version"])
+        after = parse_args(["version", "--json"])
+        self.assertTrue(before.json)
+        self.assertTrue(after.json)
+        self.assertFalse(before.verbose)
+
 
 class CliRunnerTests(unittest.TestCase):
     def invoke(self, args, commands):

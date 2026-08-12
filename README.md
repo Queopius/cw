@@ -91,7 +91,7 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
 | `cw history` | Show the phase audit trail |
 | `cw doctor` | Diagnose environment and workflow integrity |
 | `cw repair` | Back up and repair CW metadata only |
-| `cw config` | Show effective non-secret configuration |
+| `cw config` | Show effective configuration or set a validated project override |
 | `cw error` | Show the complete stored failure |
 | `cw version` | Show the installed version |
 

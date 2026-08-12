@@ -37,7 +37,7 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(expected, json.loads(completed.stdout)["version"])
             modules = subprocess.run([
                 "python3", "-c",
-                "import cw.cli.commands.execution, cw.cli.commands.lifecycle, cw.cli.commands.read, cw.cli.parser, cw.cli.runner",
+                "import cw.cli.commands.config, cw.cli.commands.execution, cw.cli.commands.lifecycle, cw.cli.commands.read, cw.cli.parser, cw.cli.runner",
             ], cwd=home, env={**environment, "PYTHONPATH": str(home / ".local/share/cw")}, text=True, capture_output=True)
             self.assertEqual(0, modules.returncode, modules.stderr)
 

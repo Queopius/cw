@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shutil
 import subprocess
@@ -12,16 +11,13 @@ from cw import __version__
 from cw.adapters.codex import CodexAdapter
 from cw.checks.deterministic import load_readiness
 from cw.core.audit import audit_history
-from cw.core.config import load_config
 from cw.core.diagnostics import legacy_diagnostic, load_diagnostic, raw_diagnostic
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_gate
 from cw.core.integrity import snapshot_protected_paths
-from cw.core.project import load_project
 from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import load_session, process_is_alive, readiness_path
 from cw.core.utils import load_json
-from cw.core.workflow import load_workflow
 from cw.ui.console import Console, emit_json, error_summary
 
 
@@ -306,23 +302,6 @@ def command_error(args: argparse.Namespace, console: Console, *, root_resolver: 
         else:
             console.item("✓", "No stored workflow error")
     return 1 if record else 0
-
-
-def command_config(args: argparse.Namespace, console: Console, *, root_resolver: RootResolver) -> int:
-    root = root_resolver()
-    load_project(root)
-    workflow = load_workflow(root)
-    config = load_config(root, workflow=workflow)
-    if args.json:
-        emit_json(config)
-    else:
-        console.header("Configuration")
-        for key, value in config.items():
-            rendered = json.dumps(value) if isinstance(value, (list, dict)) else str(value).lower() if isinstance(value, bool) else value
-            console.field(key, rendered, 24)
-        console.line()
-        console.wrapped("Precedence: defaults < global (~/.config/cw/config.toml) < project (.cw/config.toml) < command-line flags")
-    return 0
 
 
 def command_version(args: argparse.Namespace, console: Console) -> int:

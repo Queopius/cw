@@ -91,7 +91,7 @@ Workflow:
 Maintenance:
   doctor      Check CW environment
   repair      Repair workflow metadata
-  config      Show configuration
+  config      Show or set project configuration
   error       Show last detailed error
   version     Show CW version
   help        Show help
