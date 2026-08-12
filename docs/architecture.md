@@ -3,7 +3,8 @@
 CW is a standard-library Python package with a console entry point.
 
 ```text
-cw.cli      argument parsing and command orchestration
+cw.cli      argument parsing and thin command orchestration
+cw.cli.commands  independently testable command implementations
 cw.ui       text/ANSI/JSON presentation
 cw.core     project identity, workflow, state, locks, config, gates, persistence
 cw.planning repository inspection and plan proposal
@@ -17,6 +18,12 @@ cw.schemas  reviewer/readiness contracts
 The shell installer and generated launcher contain no workflow business logic.
 The installed package owns runtime code; a project receives only static Codex
 integration. Runtime operations do not need `.codex` to be writable.
+
+`cw.cli.main` owns the public parser, command registry, compatibility wrappers,
+and top-level error boundary. Command modules own bounded use cases and receive
+repository/context services explicitly. This keeps public dispatch stable while
+allowing commands to be extracted and tested without turning the entry point
+back into a monolith.
 
 `cw.core.layout` defines the trusted project filesystem topology. Validation is
 performed before init writes, lock acquisition, normal context loading, repair,
