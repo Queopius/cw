@@ -1,22 +1,33 @@
 from __future__ import annotations
 
+GREEN = "32"
+CYAN = "36"
+YELLOW = "33"
+RED = "31"
+BOLD = "1"
+DIM = "2"
+
 MARKER_COLORS = {
-    "✓": "32",
-    "→": "36",
-    "·": "2",
-    "!": "33",
-    "✕": "31",
+    "✓": GREEN,
+    "→": CYAN,
+    "·": DIM,
+    "!": YELLOW,
+    "✕": RED,
 }
 
 STATE_COLORS = {
-    "APPROVED": "32",
-    "COMPLETED": "32",
-    "ACTIVE": "36",
-    "IN_PROGRESS": "36",
-    "READY_FOR_REVIEW": "36",
-    "PENDING": "2",
-    "NOT READY": "2",
-    "ERROR": "31",
-    "REVISION_REQUIRED": "33",
-    "HUMAN_REVIEW_REQUIRED": "33",
+    "APPROVED": GREEN,
+    "COMPLETED": GREEN,
+    "ACTIVE": CYAN,
+    "IN_PROGRESS": CYAN,
+    "IN PROGRESS": CYAN,
+    "READY_FOR_REVIEW": CYAN,
+    "READY FOR REVIEW": CYAN,
+    "PENDING": DIM,
+    "NOT READY": DIM,
+    "ERROR": RED,
+    "REVISION_REQUIRED": YELLOW,
+    "REVISION REQUIRED": YELLOW,
+    "HUMAN_REVIEW_REQUIRED": YELLOW,
+    "HUMAN REVIEW REQUIRED": YELLOW,
 }

@@ -16,7 +16,7 @@ the independent diagnostic store and can still work if workflow state is corrupt
   If the fingerprint proves this is the same Git repository under a new name,
   repair rebinds identity and preserves its plan. If the fingerprint belongs to
   another repository, repair quarantines that metadata in the backup and resets
-  the active project to `NOT_CREATED` / `UNINITIALIZED`; run `cw plan` next.
+  the active project to `NOT_CREATED` / `INITIALIZED`; run `cw plan` next.
 - **Schema requires migration:** run `cw repair`. CW creates a metadata backup,
   upgrades known schema-less prototype records atomically, and leaves application
   source files untouched.
@@ -54,6 +54,11 @@ the independent diagnostic store and can still work if workflow state is corrupt
   invocation. Inspect it, then restart the phase; do not copy runtime manifests
   between sessions or repositories. `cw repair` backs up and removes corrupt
   session/readiness pairs.
+- **Orphan readiness after a retained revision:** when a valid `REVISE` review
+  and protected-path stop prove the phase context, `cw repair` backs up the
+  original metadata, reruns only commands from the approved plan, binds a fresh
+  session, and returns that same phase to `READY_FOR_REVIEW`. It does not create
+  a gate, reuse the prior review as approval, or modify application files.
 - **Stale implementer session:** if no readiness exists, run `cw repair`; CW
   backs up metadata and removes the orphan lease. If readiness exists, run
   `cw review` so completed implementation is not restarted unnecessarily.
@@ -66,6 +71,19 @@ the independent diagnostic store and can still work if workflow state is corrupt
   managed file with a real repository-local directory/file. CW will not follow
   it or repair through it because doing so could modify data outside the repo.
 - **Plan goal unclear:** improve local documentation or pass `cw plan --goal`.
+- **Optional MCP returns HTTP 500:** run `cw integrations check`. CW reports the
+  normalized provider error and impact without printing response HTML. Optional
+  failures do not block unrelated phases.
+- **MCP authentication required:** authenticate through Codex/provider tooling;
+  CW does not own credentials. `invalid_token`/`AuthRequired` is classified
+  separately from a provider HTTP 500.
+- **Required MCP disabled or missing:** inspect `cw integrations` and the current
+  phase's `required_integrations`. CW fails closed before implementation and
+  never enables or edits global Codex configuration automatically.
+- **Update check unavailable:** continue normal workflow use. Checks are cached
+  and non-critical. Use `cw update --check` later for an explicit retry.
+- **Update checksum or smoke test failed:** the active version was not switched.
+  Inspect `cw error`; project data was not touched.
 
 Detailed local diagnostics live under `.cw/logs/`. CW never prints Python stack
 traces during normal daily commands. Common tokens, authorization headers,

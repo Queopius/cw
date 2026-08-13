@@ -1,0 +1,14 @@
+╭──────────────────────────────────────────────────────────────╮
+│ CW · Review                                                  │
+╰──────────────────────────────────────────────────────────────╯
+
+→ 02 · Build Authentication
+
+  ✓ Manifest
+  ✓ Deterministic checks
+  ✓ Dependency gates
+
+✓ APPROVED
+
+  Gate        02-build.approved.json
+  Next        03 · Release Verification

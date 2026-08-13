@@ -1,5 +1,19 @@
 # Architecture
 
+## Terminal presentation
+
+CW keeps terminal presentation separate from workflow behavior. Commands build
+structured domain payloads; `cw.ui` renders those payloads through a centralized
+console, semantic theme, bounded layout, progress model, and command renderers.
+JSON is emitted directly from domain payloads and never parsed from terminal
+text.
+
+The v0.1 CLI intentionally uses only the Python standard library. A dependency
+such as Rich was not added because the current visual system needs deterministic
+width handling, `NO_COLOR`, non-TTY fallbacks, and stable test fixtures rather
+than animation or a full-screen terminal UI. The canvas caps at 88 columns and
+adapts to narrower terminals.
+
 CW is a standard-library Python package with a console entry point.
 
 ```text
@@ -11,6 +25,8 @@ cw.planning repository inspection and plan proposal
 cw.checks   deterministic validation
 cw.agents   independent review policy and consistency checks
 cw.adapters isolated Codex subprocess integration
+cw.integrations optional/required capability health and diagnostic normalization
+cw.update    release providers, cache, verification, transactions, and rollback
 cw.templates project-installed static integration
 cw.schemas  reviewer/readiness contracts
 ```
@@ -56,8 +72,90 @@ both use ephemeral structured-output calls, while normal tests inject offline
 fakes. This allows future providers, presets, goal-scoped subworkflows, a
 dashboard, and a gated autopilot without weakening the existing gate invariant.
 
-No third-party CLI/UI framework is used in v0.1. This minimizes installation
+Codex-facing output schemas live under `cw/schemas/codex/` and deliberately use
+only the structured-output subset accepted by the installed Codex CLI. Richer
+internal contracts remain under `cw/schemas/`; constraints such as uniqueness,
+dependency ordering, safe paths, criterion identity, and cross-field consistency
+are revalidated in Python. A shared adapter rejects known unsupported keywords
+before starting a Codex child process, preventing schema drift from being
+misreported as a network failure.
+
+No third-party CLI/UI framework is used in v0.2. This minimizes installation
 cost, enables a self-contained global copy, and keeps behavior auditable.
+
+## Managed installation and updates
+
+```text
+GitHub release provider -> strict manifest -> download -> SHA-256
+                                                       |
+                                                       v
+~/.local/share/cw/                         safe extract + smoke test
+├── versions/0.1.6/                                    |
+├── versions/0.2.0/
+├── versions/0.3.0/ <----------------------------------+
+├── current -> versions/0.3.0  (atomic pointer switch)
+└── update-state.json
+```
+
+`~/.local/bin/cw` is a stable launcher that resolves `current`; it never points
+at the development checkout. Provider, downloader, cache, installation, and
+service layers are independently injected in tests. Strict release manifests
+describe platform artifacts, SHA-256, channel, publication data, project-schema
+compatibility, and a reserved future signature field. Production accepts only
+trusted HTTPS GitHub hosts.
+
+The global update lock covers download through switch. Extraction accepts only
+bounded regular files/directories and rejects absolute paths, traversal,
+duplicates, links, devices, and expansion limits. Failed or interrupted staging
+never changes `current`; stale staging is cleaned by the next transaction. The
+new command must pass `version --json` from staging before selection. Current
+plus two recent versions are retained, and the previous healthy version is
+protected for rollback.
+
+Update checks use public release metadata and a 24-hour global cache under
+`~/.config/cw/update.json`. They include no repository identity or content and
+failure is non-critical. Application updates never scan or migrate projects;
+project metadata migration remains an explicit backup-first `cw repair`.
+
+## Batch execution
+
+```text
+CLI request
+    ↓
+ExecutionBudget + BatchSession
+    ↓
+BatchRunner
+    ↓ repeated only while budgets permit
+canonical single-phase supervisor
+    ↓
+verified approval gate
+    ↓
+canonical workflow advancement
+```
+
+Batch state is an execution-session overlay under `.cw/runtime`; it is not a
+workflow state and cannot approve a phase. The runner uses an injected monotonic
+clock, verifies dependencies before each phase, validates the newly created gate
+before counting the phase, and rechecks every gate created by the session before
+reporting success. A separate project batch lock prevents concurrent batch
+mutations; the global updater lock remains independent.
+
+## Integration isolation
+
+Codex MCP configuration remains user-owned. Planner and reviewer subprocesses
+use supported `codex exec --ignore-user-config`, which retains authentication
+while excluding user MCP/plugin configuration; both remain ephemeral,
+read-only, and hook-disabled. The interactive implementer retains the normal
+authenticated environment and applies per-process
+`mcp_servers.<id>.enabled=false` overrides only to integrations not required by
+the project/current phase.
+
+`cw.integrations` normalizes configured, required, and health state and extracts
+bounded MCP diagnostics from captured stderr. Optional diagnostics cannot
+override exit code zero plus a valid structured result. Required integrations
+receive an active preflight and fail closed before implementation when missing,
+disabled, unauthenticated, or unavailable. Cached health contains normalized
+fields only—never raw HTML or credentials.
 
 ## Schema compatibility and historical audit
 

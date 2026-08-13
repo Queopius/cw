@@ -30,6 +30,17 @@ Use an explicit objective when documentation is ambiguous:
 cw plan --goal "Implement Stripe subscriptions"
 ```
 
+An initialized repository with no plan remains in the `INITIALIZED` runtime
+state. `cw`, `cw validate`, readiness, and gate operations are unavailable until
+a plan is proposed and approved. A README heading alone is not treated as a
+development objective.
+
+The planner runs as a direct external `codex exec` child of the global CW
+supervisor. It is ephemeral, read-only, hook-disabled, and uses the user's normal
+Codex authentication environment. CW captures stdout and stderr separately;
+diagnostic MCP startup noise does not override exit code zero and a valid
+structured result.
+
 Plan states are distinct:
 
 - `NOT_CREATED`: initialization completed but no work was inferred.

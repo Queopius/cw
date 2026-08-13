@@ -6,7 +6,10 @@ import traceback
 from collections.abc import Callable, Mapping
 
 from cw.core.errors import CwError, ErrorCode
-from cw.ui.console import Console, HELP, emit_json, error_summary
+from cw.ui.console import Console, emit_json, error_summary
+from cw.ui.renderers import render_help
+from cw.ui.renderers import render_update_notice
+from cw.update.service import automatic_update_notice
 
 
 Command = Callable[[argparse.Namespace, Console], int]
@@ -37,9 +40,13 @@ def _render_cw_error(
         })
     elif not args.quiet:
         title, detail = error_summary(error.code.value, error.message)
-        console.item("✕", title)
+        warning = error.code in {ErrorCode.PLAN_UNCLEAR, ErrorCode.PLAN_REQUIRED, ErrorCode.NOTHING_TO_VALIDATE} or error.exit_code == 3
+        console.item("!" if warning else "✕", title)
         console.wrapped(detail)
-        if error.details and (args.verbose or error.code is ErrorCode.WORKFLOW_PROJECT_MISMATCH):
+        if error.details and (
+            args.verbose
+            or error.code in {ErrorCode.WORKFLOW_PROJECT_MISMATCH, ErrorCode.BATCH_TOO_LARGE}
+        ):
             console.line()
             for line in error.details.splitlines():
                 console.wrapped(line)
@@ -94,10 +101,18 @@ def run(
         if args.json:
             emit_json({"commands": [*commands, "help"]})
         elif not args.quiet:
-            print(HELP, end="")
+            render_help(console)
         return 0
     try:
-        return commands[command](args, console)
+        result = commands[command](args, console)
+        if result == 0 and command == "status" and not args.json and not args.quiet:
+            notice = automatic_update_notice()
+            if notice is not None:
+                render_update_notice(console, {
+                    "latest": str(notice.latest), "installed": str(notice.installed),
+                    "level": notice.level,
+                })
+        return result
     except CwError as error:
         return _render_cw_error(
             args, console, error, command=command, record_error=record_error,

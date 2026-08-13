@@ -9,9 +9,10 @@ from typing import Any, Callable
 
 from cw import __version__
 from cw.adapters.codex import CodexAdapter
+from cw.adapters.structured_output import codex_schema
 from cw.checks.deterministic import load_readiness
 from cw.core.audit import audit_history
-from cw.core.diagnostics import legacy_diagnostic, load_diagnostic, raw_diagnostic
+from cw.core.diagnostics import legacy_diagnostic, load_diagnostic, load_global_diagnostic, raw_diagnostic
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_gate
 from cw.core.history import history_timeline
@@ -19,15 +20,27 @@ from cw.core.integrity import snapshot_protected_paths
 from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import load_session, process_is_alive, readiness_path
 from cw.core.utils import load_json
-from cw.ui.console import Console, emit_json, error_summary
-from cw.ui.renderers import render_doctor, render_history, render_status as render_status_view
+from cw.update.config import load_update_settings
+from cw.update.installation import ManagedInstallation
+from cw.integrations.config import project_requirements
+from cw.integrations.manager import IntegrationManager
+from cw.integrations.models import IntegrationHealth, Requirement
+from cw.execution.session import load_batch
+from cw.ui.console import Console, emit_json
+from cw.ui.renderers import (
+    render_doctor,
+    render_error,
+    render_history,
+    render_status as render_status_view,
+    render_integrations,
+)
 
 
 RootResolver = Callable[[], Path]
 ContextLoader = Callable[[Path], tuple[Any, dict[str, Any], Any]]
 CurrentResolver = Callable[[Any, dict[str, Any]], Any]
 ErrorRecorder = Callable[..., None]
-DoctorProvider = Callable[[Path | None, bool], list[dict[str, Any]]]
+DoctorProvider = Callable[[Path | None, bool, bool], list[dict[str, Any]]]
 
 
 def git_branch(root: Path) -> str:
@@ -63,6 +76,12 @@ def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
                 gate_error = str(exc)
                 gate_error_code = exc.code.value
                 gate_error_details = exc.details
+    batch = load_batch(root)
+    if (
+        batch and batch.get("status") == "RUNNING"
+        and (not isinstance(batch.get("pid"), int) or not process_is_alive(batch["pid"]))
+    ):
+        batch = {**batch, "status": "INTERRUPTED"}
     return {
         "schema_version": SCHEMA_VERSION, "project": project.project_id,
         "repository_root": str(root), "branch": git_branch(root),
@@ -81,12 +100,14 @@ def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
                 "id": phase.id,
                 "number": phase.id.split("-", 1)[0],
                 "name": phase.name,
+                "objective": phase.objective,
                 "depends_on": list(phase.depends_on),
             }
             for phase in workflow.phases
         ],
         "last_error": state.get("last_error"),
         "infrastructure_error": state.get("infrastructure_error"),
+        "batch": batch,
     }
 
 
@@ -141,11 +162,13 @@ def command_history(
 def doctor_checks(
     root: Path | None,
     reviewer: bool,
+    integrations: bool = False,
     *,
     context: ContextLoader,
     current_resolver: CurrentResolver,
 ) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
+    phase = None
     for name in ("git", "python3", "codex"):
         path = shutil.which(name)
         checks.append({
@@ -200,16 +223,51 @@ def doctor_checks(
             checks.append({"section": "Security", "name": "Readiness session", "status": "neutral", "detail": "none"})
         checks.append({"section": "Security", "name": ".codex runtime writes", "status": "neutral", "detail": "not required"})
         checks.append({"section": "Security", "name": "Hook trust", "status": "neutral", "detail": "managed by Codex; run /hooks if prompted"})
-        if reviewer:
-            adapter = CodexAdapter()
-            schema = Path(__file__).resolve().parents[2] / "schemas" / "phase-review.schema.json"
-            try:
-                adapter.smoke_test(root, schema)
-                checks.append({"section": "Workflow", "name": "Reviewer connectivity", "status": "pass", "detail": "independent read-only request succeeded"})
-            except CwError as exc:
-                checks.append({"section": "Workflow", "name": "Reviewer connectivity", "status": "error", "detail": f"{exc.code.value}: {exc.message}"})
+        hooks_file = root / ".codex/hooks.json"
+        hook_script = root / ".codex/hooks/phase_gate.py"
+        try:
+            hooks_document = load_json(hooks_file)
+            stop_configured = isinstance(hooks_document, dict) and bool(hooks_document.get("hooks", {}).get("Stop"))
+        except CwError:
+            stop_configured = False
+        checks.append({
+            "section": "Hooks", "name": "CW Stop hook",
+            "status": "pass" if stop_configured and hook_script.is_file() else "error",
+            "detail": "configured" if stop_configured and hook_script.is_file() else "missing or invalid",
+        })
+        checks.append({
+            "section": "Hooks", "name": "External lifecycle hooks",
+            "status": "neutral", "detail": "user-owned; not required by CW",
+        })
     except CwError as exc:
         checks.append({"section": "Workflow", "name": "Workflow integrity", "status": "error", "detail": f"{exc.code.value}: {exc.message}"})
+    if reviewer:
+        adapter = CodexAdapter()
+        schema = codex_schema("review-output.schema.json")
+        try:
+            adapter.smoke_test(root, schema)
+            checks.append({"section": "Workflow", "name": "Reviewer connectivity", "status": "pass", "detail": "independent read-only request succeeded"})
+        except CwError as exc:
+            checks.append({"section": "Workflow", "name": "Reviewer connectivity", "status": "error", "detail": f"{exc.code.value}: {exc.message}"})
+    if integrations:
+        try:
+            required = project_requirements(root)
+            if phase is not None:
+                required |= set(phase.required_integrations)
+            integration_check = IntegrationManager().check(root, required=required, force=True)
+            for integration in integration_check.integrations:
+                healthy = integration.health is IntegrationHealth.AVAILABLE
+                blocking = integration.required is Requirement.REQUIRED and not healthy
+                detail = f"{integration.health.value.replace('_', ' ').title()} · {'required' if blocking else 'optional'} · impact {integration.impact.lower()}"
+                if integration.http_status:
+                    detail += f" · HTTP {integration.http_status}"
+                checks.append({
+                    "section": "Integrations", "name": f"{integration.id.title()} MCP",
+                    "status": "pass" if healthy else "error" if blocking else "warning",
+                    "detail": detail,
+                })
+        except CwError as exc:
+            checks.append({"section": "Integrations", "name": "Integration health", "status": "error", "detail": f"{exc.code.value}: {exc.message}"})
     return checks
 
 
@@ -224,7 +282,7 @@ def command_doctor(
         root = root_resolver()
     except CwError:
         root = None
-    checks = checks_provider(root, args.reviewer)
+    checks = checks_provider(root, args.reviewer, args.integrations)
     errors = sum(item["status"] == "error" for item in checks)
     warnings = sum(item["status"] == "warning" for item in checks)
     passed = sum(item["status"] == "pass" for item in checks)
@@ -236,76 +294,119 @@ def command_doctor(
     return 1 if errors else 0
 
 
-def command_error(args: argparse.Namespace, console: Console, *, root_resolver: RootResolver) -> int:
+def command_integrations(
+    args: argparse.Namespace,
+    console: Console,
+    *,
+    root_resolver: RootResolver,
+    context: ContextLoader,
+) -> int:
     root = root_resolver()
-    record = load_diagnostic(root)
+    _, state, workflow = context(root)
+    required = project_requirements(root)
+    if workflow.phases and state.get("current_phase"):
+        required |= set(workflow.phase(str(state["current_phase"])).required_integrations)
+    manager = IntegrationManager()
+    result = manager.check(root, required=required, force=True) if args.action == "check" else None
+    integrations = result.integrations if result else manager.configured(required)
+    if args.action == "info":
+        if not args.name:
+            raise CwError("Integration name is required", ErrorCode.USAGE_ERROR, "Run: cw integrations info <name>", exit_code=2)
+        integrations = tuple(item for item in integrations if item.id == args.name)
+        if not integrations:
+            raise CwError(f"Integration is not configured: {args.name}", ErrorCode.MCP_NOT_CONFIGURED, exit_code=3)
+    payload = {
+        "project": workflow.id,
+        "checked": result is not None,
+        "integrations": [item.to_dict() for item in integrations],
+        "workflow_can_continue": all(item.impact != "BLOCKING" for item in integrations),
+    }
+    if args.json:
+        emit_json(payload)
+    else:
+        render_integrations(console, payload, verbose=args.verbose, raw=result.stderr if result else "")
+    return 0 if payload["workflow_can_continue"] else 3
+
+
+def command_error(args: argparse.Namespace, console: Console, *, root_resolver: RootResolver) -> int:
+    try:
+        root = root_resolver()
+    except CwError:
+        root = None
+    record = load_diagnostic(root) if root is not None else None
     state_data: dict[str, Any] = {}
-    if record is None:
+    if record is None and root is not None:
         try:
             loaded = load_json(root / ".cw/state.json")
             state_data = loaded if isinstance(loaded, dict) else {}
             record = legacy_diagnostic(state_data.get("last_error"))
         except CwError:
             record = None
-    elif (root / ".cw/state.json").is_file():
+    elif root is not None and (root / ".cw/state.json").is_file():
         try:
             loaded = load_json(root / ".cw/state.json")
             state_data = loaded if isinstance(loaded, dict) else {}
         except CwError:
             pass
+    global_record = load_global_diagnostic()
+    if global_record is not None and (
+        record is None or (
+            global_record.get("source") == "update"
+            and str(global_record.get("timestamp", "")) > str(record.get("timestamp", ""))
+        )
+    ):
+        record = global_record
     recovery = state_data.get("infrastructure_error") if isinstance(state_data, dict) else None
+    phase_id = recovery.get("phase") if isinstance(recovery, dict) else state_data.get("current_phase")
+    phase_label = phase_id
+    try:
+        from cw.core.workflow import load_workflow
+
+        if root is None:
+            raise CwError("No project context", ErrorCode.WORKFLOW_ERROR)
+        workflow = load_workflow(root)
+        if phase_id:
+            phase = workflow.phase(str(phase_id))
+            phase_label = f"{phase.id.split('-', 1)[0]} · {phase.name}"
+    except (CwError, KeyError):
+        pass
+    retryable_update_codes = {
+        ErrorCode.UPDATE_CHECK_ERROR.value, ErrorCode.UPDATE_DOWNLOAD_ERROR.value,
+        ErrorCode.UPDATE_CHECKSUM_ERROR.value, ErrorCode.UPDATE_INSTALL_ERROR.value,
+        ErrorCode.UPDATE_SMOKE_TEST_ERROR.value, ErrorCode.UPDATE_ROLLBACK_ERROR.value,
+    }
     context = {
-        "phase": recovery.get("phase") if isinstance(recovery, dict) else state_data.get("current_phase"),
-        "retryable": recovery.get("retryable") if isinstance(recovery, dict) else False,
+        "phase": phase_id,
+        "phase_label": phase_label,
+        "retryable": recovery.get("retryable") if isinstance(recovery, dict) else bool(record and record.get("code") in retryable_update_codes),
         "operation": recovery.get("operation") if isinstance(recovery, dict) else None,
         "attempt_consumed": False if isinstance(recovery, dict) else None,
+        "diagnostic": raw_diagnostic(record) if record else "",
+        "update_safety": bool(record and str(record.get("code", "")).startswith("UPDATE_")),
     }
     payload = {"error": record, "context": context}
     if args.json:
         emit_json(payload)
     else:
-        console.header("Error")
-        if record:
-            title, detail = error_summary(record["code"], record["message"])
-            console.item("✕", title)
-            console.field("Type", record["code"])
-            if context["phase"]:
-                console.field("Phase", context["phase"])
-            console.field("Retryable", "YES" if context["retryable"] else "NO")
-            if context["attempt_consumed"] is not None:
-                console.field("Attempt", "not consumed" if not context["attempt_consumed"] else "consumed")
-            if args.verbose:
-                console.field("When", record["timestamp"])
-                if context["operation"]:
-                    console.field("Operation", context["operation"])
-            console.line()
-            console.section("Summary")
-            console.wrapped(detail)
-            diagnostic = raw_diagnostic(record)
-            if args.raw or record.get("details"):
-                console.line()
-                console.section("Raw diagnostic")
-                console.line("─" * 72)
-                console.line(diagnostic)
-                console.line("─" * 72)
-            if args.verbose and record.get("traceback"):
-                console.line()
-                console.section("Traceback")
-                console.line(str(record["traceback"]))
-            if context["retryable"]:
-                console.run("cw retry")
-            elif record.get("hint"):
-                console.run(str(record["hint"]).removeprefix("Run: "))
-        else:
-            console.item("✓", "No stored workflow error")
+        render_error(console, record, context, verbose=args.verbose, raw=args.raw)
     return 1 if record else 0
 
 
 def command_version(args: argparse.Namespace, console: Console) -> int:
-    payload = {"name": "CW", "brand": "CW by Queopius", "product": "Codex Workflow", "version": __version__}
+    settings = load_update_settings()
+    installation = ManagedInstallation()
+    payload = {
+        "name": "CW", "brand": "CW by Queopius", "product": "Codex Workflow",
+        "version": __version__, "channel": settings.channel, "schema": SCHEMA_VERSION,
+        "install": installation.kind,
+    }
     if args.json:
         emit_json(payload)
     else:
-        console.line(f"CW by Queopius {__version__}")
-        console.line("Codex Workflow")
+        console.line(f"CW {__version__}")
+        console.line("Codex Workflow · by Queopius")
+        console.line()
+        console.field("Channel", settings.channel)
+        console.field("Schema", SCHEMA_VERSION)
+        console.field("Install", installation.kind)
     return 0

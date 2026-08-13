@@ -88,6 +88,16 @@ def validate_workflow(root: Path, workflow: Workflow) -> None:
             raise CwError(f"Phase ID is invalid: {phase.id}", ErrorCode.SCHEMA_VALIDATION_ERROR)
         if any(dep not in known for dep in phase.depends_on):
             raise CwError(f"Phase {phase.id} has a missing or future dependency", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if len(phase.depends_on) != len(set(phase.depends_on)):
+            raise CwError(f"Phase {phase.id} has duplicate dependencies", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if len(phase.artifacts) != len(set(phase.artifacts)):
+            raise CwError(f"Phase {phase.id} has duplicate artifacts", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if len(phase.review_paths) != len(set(phase.review_paths)):
+            raise CwError(f"Phase {phase.id} has duplicate review paths", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if len(phase.required_integrations) != len(set(phase.required_integrations)) or any(
+            not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", value) for value in phase.required_integrations
+        ):
+            raise CwError(f"Phase {phase.id} has invalid required integrations", ErrorCode.SCHEMA_VALIDATION_ERROR)
         for artifact in phase.artifacts:
             if any(char in artifact for char in "*?["):
                 raise CwError(f"Phase {phase.id} artifact cannot be a glob", ErrorCode.SCHEMA_VALIDATION_ERROR)

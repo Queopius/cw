@@ -55,6 +55,31 @@ class CodexAdapterTests(unittest.TestCase):
         self.assertEqual(ErrorCode.IMPLEMENTER_PROCESS_ERROR, raised.exception.code)
         self.assertIn("17", raised.exception.details or "")
 
+    def test_batch_interrupt_terminates_child_before_propagating(self):
+        class InterruptedProcess:
+            def __init__(self):
+                self.terminated = False
+
+            def wait(self, timeout=None):
+                if not self.terminated:
+                    raise KeyboardInterrupt
+                return 130
+
+            def terminate(self):
+                self.terminated = True
+
+            def kill(self):
+                self.terminated = True
+
+        process = InterruptedProcess()
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "cw.adapters.codex.shutil.which", return_value="/usr/bin/codex",
+        ), patch("cw.adapters.codex.IntegrationManager.configured", return_value=()), patch(
+            "cw.adapters.codex.subprocess.Popen", return_value=process,
+        ), self.assertRaises(KeyboardInterrupt):
+            CodexAdapter().run_implementer(Path(temporary), "implement", timeout=60)
+        self.assertTrue(process.terminated)
+
     def test_reviewer_is_read_only_ephemeral_and_hooks_disabled(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -66,7 +91,7 @@ class CodexAdapterTests(unittest.TestCase):
                 self.assertIn('web_search="disabled"', command)
                 self.assertIn("project_doc_max_bytes=0", command)
                 self.assertEqual("review", command[-1])
-                self.assertIsNone(kwargs["input"])
+                self.assertEqual(subprocess.DEVNULL, kwargs["stdin"])
                 output = Path(command[command.index("--output-last-message") + 1])
                 output.write_text(json.dumps({"decision": "APPROVE"}))
                 return subprocess.CompletedProcess(command, 0, "", "")
@@ -85,8 +110,8 @@ class CodexAdapterTests(unittest.TestCase):
                 self.assertEqual(command[command.index("--disable") + 1], "hooks")
                 self.assertIn('web_search="disabled"', command)
                 self.assertIn("project_doc_max_bytes=0", command)
-                self.assertEqual("-", command[-1])
-                self.assertEqual("plan", kwargs["input"])
+                self.assertEqual("plan", command[-1])
+                self.assertEqual(subprocess.DEVNULL, kwargs["stdin"])
                 output = Path(command[command.index("--output-last-message") + 1])
                 output.write_text(json.dumps({"phases": []}))
                 return subprocess.CompletedProcess(command, 0, "", "")
@@ -105,7 +130,7 @@ class CodexAdapterTests(unittest.TestCase):
                 "cw.adapters.codex.subprocess.run", return_value=failure
             ), self.assertRaises(CwError) as raised:
                 CodexAdapter().run_planner(root, "plan", schema, 10)
-            self.assertEqual(ErrorCode.PLANNER_NETWORK_ERROR, raised.exception.code)
+            self.assertEqual(ErrorCode.PLANNER_TRANSPORT_ERROR, raised.exception.code)
 
     def test_planner_timeout_is_classified_separately(self):
         with tempfile.TemporaryDirectory() as temporary:

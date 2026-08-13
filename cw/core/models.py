@@ -9,6 +9,7 @@ from .severity import CriterionSeverity
 
 class WorkflowState(str, Enum):
     UNINITIALIZED = "UNINITIALIZED"
+    INITIALIZED = "INITIALIZED"
     PLANNING = "PLANNING"
     PLAN_PROPOSED = "PLAN_PROPOSED"
     READY = "READY"
@@ -77,6 +78,7 @@ class Phase:
     acceptance_criteria: tuple[Criterion, ...] = ()
     blocking_criteria: tuple[str, ...] = ()
     requires_human_approval: bool = False
+    required_integrations: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Phase":
@@ -90,6 +92,7 @@ class Phase:
             acceptance_criteria=tuple(Criterion.from_dict(v) for v in data.get("acceptance_criteria", [])),
             blocking_criteria=tuple(map(str, data.get("blocking_criteria", []))),
             requires_human_approval=bool(data.get("requires_human_approval", False)),
+            required_integrations=tuple(map(str, data.get("required_integrations", []))),
         )
 
 

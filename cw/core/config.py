@@ -10,12 +10,7 @@ from .errors import CwError, ErrorCode
 from .layout import safe_file
 from .models import Workflow
 from .utils import atomic_write, safe_project_path
-
-try:
-    import tomllib  # type: ignore[import-not-found]
-except ImportError:  # Python 3.10 support without a runtime dependency.
-    tomllib = None  # type: ignore[assignment]
-
+from .toml import load_toml
 
 CORE_PROTECTED_PATHS = (
     ".cw/state.json",
@@ -53,41 +48,8 @@ class Policy:
 def _toml(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
-    if tomllib is not None:
-        try:
-            with path.open("rb") as stream:
-                value = tomllib.load(stream)
-        except Exception as exc:
-            raise CwError(
-                "Configuration file is invalid TOML",
-                ErrorCode.USAGE_ERROR,
-                details=f"{path}: {exc}",
-                exit_code=2,
-            ) from exc
-        return value if isinstance(value, dict) else {}
-    values: dict[str, Any] = {}
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-        for line_number, raw in enumerate(lines, 1):
-            line = raw.split("#", 1)[0].strip()
-            if not line:
-                continue
-            if "=" not in line or line.startswith("["):
-                raise ValueError(f"unsupported syntax on line {line_number}")
-            key, rendered = (part.strip() for part in line.split("=", 1))
-            if not key or key in values:
-                raise ValueError(f"invalid or duplicate key on line {line_number}")
-            if rendered in {"true", "false"}:
-                values[key] = rendered == "true"
-            elif rendered.lstrip("-").isdigit():
-                values[key] = int(rendered)
-            elif rendered.startswith("["):
-                import ast
-                values[key] = ast.literal_eval(rendered)
-            elif len(rendered) >= 2 and rendered[0] == rendered[-1] and rendered[0] in {'"', "'"}:
-                values[key] = rendered[1:-1]
-            else:
-                raise ValueError(f"unsupported value on line {line_number}")
+        return load_toml(path)
     except (OSError, SyntaxError, ValueError) as exc:
         raise CwError(
             "Configuration file is invalid TOML",
@@ -95,7 +57,6 @@ def _toml(path: Path) -> dict[str, Any]:
             details=f"{path}: {exc}",
             exit_code=2,
         ) from exc
-    return values
 
 
 def _validate(source: dict[str, Any], path: Path) -> None:
@@ -122,6 +83,10 @@ def load_config(root: Path, *, workflow: Workflow | None = None) -> dict[str, An
     safe_file(project_path, ".cw/config.toml")
     for path in (global_path, project_path):
         source = _toml(path)
+        if path == global_path:
+            source = {key: value for key, value in source.items() if key not in {"updates", "execution"}}
+        else:
+            source = {key: value for key, value in source.items() if key not in {"integrations", "execution"}}
         _validate(source, path)
         config.update(source)
     return config
@@ -222,6 +187,27 @@ def _render_toml(config: dict[str, Any]) -> str:
         else:
             rendered = json.dumps(value, ensure_ascii=False)
         lines.append(f"{key} = {rendered}")
+    integrations = config.get("integrations")
+    if isinstance(integrations, dict):
+        for name, settings in integrations.items():
+            if not isinstance(settings, dict):
+                continue
+            lines.extend(["", f"[integrations.{name}]"])
+            if "required" in settings:
+                lines.append(f"required = {'true' if settings['required'] else 'false'}")
+    execution = config.get("execution")
+    if isinstance(execution, dict):
+        lines.extend(["", "[execution]"])
+        for key in ("max_phases", "max_time", "max_semantic_revisions_per_phase", "require_clean_git"):
+            if key in execution:
+                value = execution[key]
+                if isinstance(value, bool):
+                    rendered = "true" if value else "false"
+                elif isinstance(value, int):
+                    rendered = str(value)
+                else:
+                    rendered = json.dumps(value)
+                lines.append(f"{key} = {rendered}")
     return "\n".join(lines) + "\n"
 
 
@@ -230,7 +216,7 @@ def set_project_config(root: Path, workflow: Workflow, key: str, raw_value: str)
     project_path = root / ".cw" / "config.toml"
     safe_file(project_path, ".cw/config.toml")
     project = _toml(project_path)
-    _validate(project, project_path)
+    _validate({key: value for key, value in project.items() if key not in {"integrations", "execution"}}, project_path)
     project[key] = _parse_setting(key, raw_value)
 
     effective = dict(DEFAULTS)
@@ -239,7 +225,7 @@ def set_project_config(root: Path, workflow: Workflow, key: str, raw_value: str)
         "command_timeout": workflow.command_timeout,
         "review_timeout": workflow.review_timeout,
     })
-    global_config = _toml(global_path)
+    global_config = {key: value for key, value in _toml(global_path).items() if key not in {"updates", "execution"}}
     _validate(global_config, global_path)
     effective.update(global_config)
     effective.update(project)

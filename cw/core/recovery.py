@@ -8,7 +8,7 @@ from .diagnostics import record_diagnostic, redact
 from .errors import CwError, ErrorCode
 from .models import Phase, ValidationResult, Workflow
 from .schema import SCHEMA_VERSION
-from .session import create_session, load_session, readiness_path
+from .session import create_session, load_session, readiness_path, session_path
 from .utils import atomic_json, load_json, utc_now
 
 
@@ -18,6 +18,7 @@ RETRYABLE_OPERATIONS: dict[ErrorCode, str] = {
     ErrorCode.REVIEW_TIMEOUT: "review",
     ErrorCode.IMPLEMENTER_PROCESS_ERROR: "implementation",
     ErrorCode.PLANNER_NETWORK_ERROR: "planning",
+    ErrorCode.PLANNER_TRANSPORT_ERROR: "planning",
     ErrorCode.PLANNER_PROCESS_ERROR: "planning",
     ErrorCode.PLAN_TIMEOUT: "planning",
     ErrorCode.CODEX_NOT_FOUND: "codex",
@@ -172,6 +173,87 @@ def regenerate_readiness(
     }
     atomic_json(readiness_path(root), manifest)
     return manifest
+
+
+def recover_orphan_revision_readiness(
+    root: Path,
+    workflow: Workflow,
+    state: dict[str, Any],
+) -> bool:
+    """Rebind completed revision work to a fresh authenticated session.
+
+    This deliberately narrow repair applies only after a retained semantic
+    REVISE decision and a protected-path stop. It never approves the phase and
+    never trusts commands from the orphan manifest.
+    """
+    if (
+        state.get("status") != "ERROR"
+        or not str(state.get("last_error") or "").startswith(f"{ErrorCode.PROTECTED_PATH_MODIFIED.value}:")
+        or session_path(root).exists()
+        or not readiness_path(root).is_file()
+    ):
+        return False
+    phase_id = state.get("current_phase")
+    try:
+        phase = workflow.phase(str(phase_id))
+    except KeyError:
+        return False
+    if (root / ".cw" / "gates" / f"{phase.id}.approved.json").exists():
+        return False
+
+    from cw.checks.deterministic import inspect_completed_work, load_readiness
+    from .reviews import validate_reviewer_result
+
+    try:
+        orphan = load_readiness(root, phase)
+    except CwError:
+        return False
+    if set(orphan.get("artifacts", [])) != set(phase.artifacts):
+        return False
+
+    revisions: list[tuple[int, str, Path]] = []
+    for path in sorted((root / ".cw" / "reviews").glob(f"{phase.id}-*.json")):
+        try:
+            review = load_json(path)
+            if (
+                not isinstance(review, dict)
+                or review.get("workflow") != workflow.id
+                or review.get("phase") != phase.id
+                or review.get("kind") != "semantic_review"
+                or review.get("decision") != "REVISE"
+            ):
+                continue
+            decision, _, _, _ = validate_reviewer_result(phase, review, root=root)
+            attempt = review.get("attempt")
+            created_at = review.get("created_at")
+            if decision.value != "REVISE" or not isinstance(attempt, int) or attempt < 1 or not isinstance(created_at, str):
+                continue
+            revisions.append((attempt, created_at, path))
+        except (CwError, TypeError, ValueError):
+            continue
+    if not revisions:
+        return False
+
+    validation = inspect_completed_work(root, workflow, phase)
+    if not validation.passed:
+        return False
+    attempt, _, review_path = max(revisions, key=lambda item: (item[0], item[1], item[2].name))
+    readiness_path(root).unlink()
+    regenerate_readiness(root, workflow, phase, validation)
+    state.update({
+        "status": "READY_FOR_REVIEW",
+        "attempt": max(int(state.get("attempt", 0)), attempt),
+        "last_review": review_path.relative_to(root).as_posix(),
+        "last_error": None,
+        "infrastructure_error": None,
+    })
+    state.setdefault("history", []).append({
+        "timestamp": utc_now(),
+        "phase": phase.id,
+        "action": "readiness_resume_started",
+        "operation": "repair",
+    })
+    return True
 
 
 def _legacy_review_error(data: dict[str, Any]) -> Any | None:

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "releases": [
+    {
+      "version": "0.3.0",
+      "changes": [
+        "Added bounded multi-phase execution with explicit phase and time budgets.",
+        "Added safe interruption, resume, hard caps, and gate verification.",
+        "Added optional-versus-required Codex integration isolation."
+      ]
+    },
+    {
+      "version": "0.2.0",
+      "changes": [
+        "Added verified, staged self-updates with rollback.",
+        "Fixed Codex planner structured-output compatibility.",
+        "Added intentional initialized/no-plan workflow UX."
+      ]
+    },
+    {
+      "version": "0.1.6",
+      "changes": [
+        "Added Codex-facing schema compatibility validation.",
+        "Improved clean-project planning and isolation tests."
+      ]
+    },
+    {
+      "version": "0.1.5",
+      "changes": [
+        "Introduced the professional CW terminal interface.",
+        "Improved workflow history and post-approval transitions."
+      ]
+    }
+  ]
+}

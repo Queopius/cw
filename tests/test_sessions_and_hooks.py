@@ -12,6 +12,8 @@ from cw.agents.reviewer import run_review
 from cw.checks.deterministic import validate_phase
 from cw.core.errors import CwError, ErrorCode
 from cw.core.session import create_session, session_path
+from cw.core.models import WorkflowState
+from cw.core.state import load_state, save_state, transition
 from tests.helpers import FakeAdapter, TempRepo, result
 
 
@@ -39,6 +41,12 @@ class SessionAndHookTests(unittest.TestCase):
         environment = {**os.environ, "CW_IMPLEMENTER_ACTIVE": "1", "CW_REVIEWER_ACTIVE": "1"}
         completed = self.hook(environment)
         self.assertEqual({}, json.loads(completed.stdout))
+
+    def test_phase_gate_never_launches_planning(self):
+        hook = Path(__file__).parents[1] / "cw/templates/.codex/hooks/phase_gate.py"
+        source = hook.read_text(encoding="utf-8")
+        self.assertNotIn('"plan"', source)
+        self.assertNotIn("run_planner", source)
 
     def test_hook_stops_recursive_delivery(self):
         environment = {**os.environ, "CW_IMPLEMENTER_ACTIVE": "1"}
@@ -92,6 +100,55 @@ class SessionAndHookTests(unittest.TestCase):
         validation = validate_phase(self.repo.root, self.repo.workflow, self.phase)
         self.assertFalse(validation.passed)
         self.assertIn("no active implementer session", validation.errors[0])
+
+    def test_repair_rebinds_orphan_readiness_after_retained_revision(self):
+        from cw.core.initialize import repair
+
+        self.repo.artifact(content="first version\n")
+        create_session(self.repo.root, self.repo.workflow, self.phase)
+        self.repo.ready()
+        report = run_review(
+            self.repo.root,
+            self.repo.workflow,
+            self.phase,
+            self.repo.state(),
+            FakeAdapter(result(decision="REVISE", status="FAIL")),
+        )
+        self.assertEqual("REVISE", report["decision"])
+        review_path = load_state(self.repo.root)["last_review"]
+        review_bytes = (self.repo.root / review_path).read_bytes()
+
+        self.repo.artifact(content="revised implementation\n")
+        self.repo.ready()
+        orphan = self.repo.root / ".cw/runtime/READY_FOR_REVIEW.json"
+        original_orphan = orphan.read_bytes()
+        session_path(self.repo.root).unlink()
+        state = load_state(self.repo.root)
+        state["last_error"] = "PROTECTED_PATH_MODIFIED: Semantic review evidence does not match repository state"
+        state.setdefault("history", []).append({
+            "timestamp": "2026-08-13T09:42:07Z",
+            "phase": self.phase.id,
+            "action": "protected_path_violation",
+        })
+        transition(self.repo.root, state, WorkflowState.ERROR)
+
+        backup = repair(self.repo.root)
+        repaired = load_state(self.repo.root)
+        readiness = json.loads(orphan.read_text(encoding="utf-8"))
+        session = json.loads(session_path(self.repo.root).read_text(encoding="utf-8"))
+        self.assertEqual("READY_FOR_REVIEW", repaired["status"])
+        self.assertEqual(1, repaired["attempt"])
+        self.assertIsNone(repaired["last_error"])
+        self.assertEqual(review_path, repaired["last_review"])
+        self.assertEqual(session["session_id"], readiness["session_id"])
+        self.assertNotEqual(original_orphan, orphan.read_bytes())
+        self.assertEqual(review_bytes, (self.repo.root / review_path).read_bytes())
+        self.assertEqual(original_orphan, (backup / "runtime/READY_FOR_REVIEW.json").read_bytes())
+        self.assertTrue(validate_phase(self.repo.root, self.repo.workflow, self.phase).passed)
+
+        session_before = session_path(self.repo.root).read_bytes()
+        repair(self.repo.root)
+        self.assertEqual(session_before, session_path(self.repo.root).read_bytes())
 
     def test_readiness_requires_schema_version(self):
         self.repo.artifact()

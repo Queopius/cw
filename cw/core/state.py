@@ -14,8 +14,9 @@ from .workflow import workflow_hash
 
 
 TRANSITIONS: dict[WorkflowState, set[WorkflowState]] = {
-    WorkflowState.UNINITIALIZED: {WorkflowState.PLANNING},
-    WorkflowState.PLANNING: {WorkflowState.PLAN_PROPOSED, WorkflowState.ERROR},
+    WorkflowState.UNINITIALIZED: {WorkflowState.INITIALIZED, WorkflowState.PLANNING},
+    WorkflowState.INITIALIZED: {WorkflowState.PLANNING},
+    WorkflowState.PLANNING: {WorkflowState.INITIALIZED, WorkflowState.PLAN_PROPOSED, WorkflowState.ERROR},
     WorkflowState.PLAN_PROPOSED: {WorkflowState.READY, WorkflowState.PLANNING},
     WorkflowState.READY: {WorkflowState.IN_PROGRESS},
     WorkflowState.IN_PROGRESS: {WorkflowState.READY_FOR_REVIEW, WorkflowState.ERROR, WorkflowState.PAUSED},
@@ -34,7 +35,7 @@ def initial_state(project_id: str) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION, "cw_version": __version__, "workflow_id": project_id,
         "workflow_version": None, "workflow_sha256": None, "current_phase": None,
-        "status": WorkflowState.UNINITIALIZED.value, "attempt": 0,
+        "status": WorkflowState.INITIALIZED.value, "attempt": 0,
         "last_review": None, "last_gate": None, "last_error": None,
         "infrastructure_error": None,
         "pending_goal": None,

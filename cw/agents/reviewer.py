@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from cw.adapters.codex import CodexAdapter
+from cw.adapters.structured_output import codex_schema
 from cw.checks.deterministic import validate_phase
 from cw.core.diagnostics import redact, state_error
 from cw.core.errors import CwError, ErrorCode, HumanActionRequired
@@ -78,7 +79,7 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
 
     attempt = int(state.get("attempt", 0)) + 1
     reviewer = adapter or CodexAdapter()
-    schema = Path(__file__).resolve().parents[1] / "schemas" / "phase-review.schema.json"
+    schema = codex_schema("review-output.schema.json")
     try:
         response = reviewer.run_reviewer(root, reviewer_prompt(workflow, phase), schema, workflow.review_timeout)
         decision, criteria, blocking_criteria, issues = validate_reviewer_result(

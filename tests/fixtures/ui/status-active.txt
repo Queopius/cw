@@ -1,0 +1,42 @@
+╭──────────────────────────────────────────────────────────────╮
+│ CW · Codex Workflow                                   v0.3.0 │
+│ by Queopius                                                  │
+╰──────────────────────────────────────────────────────────────╯
+
+  sample-app                                                 dev
+  ──────────────────────────────────────────────────────────────
+
+  WORKFLOW                                              ● ACTIVE
+
+  Progress    ##########--------------------   33%
+  Approved    1 / 3 phases
+  State       IN PROGRESS
+  Plan        APPROVED
+
+  CURRENT PHASE
+  ──────────────────────────────────────────────────────────────
+
+  → 02 · Build Authentication
+
+    Implement secure authentication.
+
+  Position      2 / 3
+  Attempt       0 / 3
+  Readiness     NOT READY
+  Gate          PENDING
+
+  DEVELOPMENT PLAN
+  ──────────────────────────────────────────────────────────────
+
+    ✓ 01  Repository Assessment
+
+    → 02  Build Authentication
+
+    · 03  Release Verification
+
+  ──────────────────────────────────────────────────────────────
+  1 approved · 1 active · 1 remaining
+
+  cw                Continue development
+  cw validate       Validate current phase
+  cw history        View audit trail

@@ -11,6 +11,8 @@ from cw.core.locking import operation_lock
 from cw.core.project import load_project
 from cw.core.workflow import load_workflow
 from cw.ui.console import Console, emit_json
+from cw.execution.config import load_execution_settings, set_execution_setting
+from cw.update.config import load_update_settings, set_update_setting
 
 
 RootResolver = Callable[[], Path]
@@ -38,6 +40,51 @@ def _render_value(value: Any) -> Any:
 
 
 def command_config(args: argparse.Namespace, console: Console, *, root_resolver: RootResolver) -> int:
+    if args.action == "set" and isinstance(args.key, str) and args.key.startswith("execution."):
+        if args.value is None:
+            raise CwError("Configuration value is required", ErrorCode.USAGE_ERROR, exit_code=2)
+        value, settings = set_execution_setting(args.key, args.value)
+        payload = {
+            "scope": "global", "setting": args.key, "value": value,
+            "execution": {
+                "default_phases": settings.default_phases,
+                "recommended_max_phases": settings.recommended_max_phases,
+                "hard_max_phases": settings.hard_max_phases,
+                "default_max_time_seconds": settings.default_max_time_seconds,
+                "max_semantic_revisions_per_phase": settings.max_semantic_revisions_per_phase,
+            },
+            "path": "~/.config/cw/config.toml",
+        }
+        if args.json:
+            emit_json(payload)
+        else:
+            console.header("Configuration")
+            console.item("✓", "Global execution setting updated")
+            console.field("Setting", args.key)
+            console.field("Value", _render_value(value))
+            console.field("File", "~/.config/cw/config.toml")
+        return 0
+    if args.action == "set" and isinstance(args.key, str) and args.key.startswith("updates."):
+        if args.value is None:
+            raise CwError("Configuration value is required", ErrorCode.USAGE_ERROR, exit_code=2)
+        value, settings = set_update_setting(args.key, args.value)
+        payload = {
+            "scope": "global", "setting": args.key, "value": value,
+            "updates": {
+                "channel": settings.channel, "check": settings.check,
+                "check_interval_hours": settings.check_interval_hours,
+            },
+            "path": "~/.config/cw/config.toml",
+        }
+        if args.json:
+            emit_json(payload)
+        else:
+            console.header("Configuration")
+            console.item("✓", "Global update setting updated")
+            console.field("Setting", args.key)
+            console.field("Value", _render_value(value))
+            console.field("File", "~/.config/cw/config.toml")
+        return 0
     root = root_resolver()
     workflow = _validate_identity(root)
     if args.action == "set":
@@ -67,6 +114,20 @@ def command_config(args: argparse.Namespace, console: Console, *, root_resolver:
             console.field("File", ".cw/config.toml")
         return 0
     config = load_config(root, workflow=workflow)
+    update_settings = load_update_settings()
+    config["updates"] = {
+        "channel": update_settings.channel,
+        "check": update_settings.check,
+        "check_interval_hours": update_settings.check_interval_hours,
+    }
+    execution = load_execution_settings(root)
+    config["execution"] = {
+        "default_phases": execution.default_phases,
+        "recommended_max_phases": execution.recommended_max_phases,
+        "hard_max_phases": execution.hard_max_phases,
+        "default_max_time_seconds": execution.default_max_time_seconds,
+        "max_semantic_revisions_per_phase": execution.max_semantic_revisions_per_phase,
+    }
     if args.json:
         emit_json(config)
     else:

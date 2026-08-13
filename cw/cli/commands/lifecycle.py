@@ -165,7 +165,7 @@ def command_plan(
         current = WorkflowState(state["status"])
         if current is WorkflowState.PLANNING:
             pass
-        elif current is not WorkflowState.UNINITIALIZED:
+        elif current not in {WorkflowState.UNINITIALIZED, WorkflowState.INITIALIZED}:
             if current is WorkflowState.PLAN_PROPOSED:
                 transition(root, state, WorkflowState.PLANNING)
             else:
@@ -190,6 +190,7 @@ def command_plan(
                 ErrorCode.CODEX_NOT_FOUND,
                 ErrorCode.PLAN_TIMEOUT,
                 ErrorCode.PLANNER_NETWORK_ERROR,
+                ErrorCode.PLANNER_TRANSPORT_ERROR,
                 ErrorCode.PLANNER_PROCESS_ERROR,
             }:
                 state["last_error"] = state_error(exc)
@@ -197,6 +198,11 @@ def command_plan(
                     state, exc, operation="planning", phase=None,
                 )
                 transition(root, state, WorkflowState.ERROR, force_error=True)
+            else:
+                state["pending_goal"] = None
+                state["last_error"] = None
+                state["infrastructure_error"] = None
+                transition(root, state, WorkflowState.INITIALIZED)
             raise
         write_workflow(root / ".codex" / "workflow" / "phases.yaml", payload)
         workflow = load_workflow(root)
@@ -211,6 +217,14 @@ def command_plan(
         console.field("Goal", workflow.goal)
         console.field("Phases", len(workflow.phases))
         console.run("cw plan show\n    cw plan approve")
+        if args.verbose and planner.last_stderr.strip():
+            console.line()
+            console.section("Planner diagnostics")
+            diagnostic = planner.last_stderr.strip()
+            if len(diagnostic) > 3000:
+                diagnostic = "… diagnostic truncated …\n" + diagnostic[-3000:]
+            for line in diagnostic.splitlines():
+                console.wrapped(line, 2)
     return 0
 
 

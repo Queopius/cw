@@ -24,7 +24,8 @@ def main() -> int:
     base = args.base.resolve()
     share = home / ".local/share/cw"
     launcher = home / ".local/bin/cw"
-    if not (share / "cw").is_dir() or not launcher.is_file():
+    current = share / "current"
+    if not current.is_symlink() or not (current / "cw").is_dir() or not launcher.is_file():
         raise SystemExit("CW is not installed under the supplied HOME")
     base.mkdir(parents=True, exist_ok=True)
     roots = {"a": base / "cw-demo-a", "b": base / "cw-demo-b"}
@@ -32,7 +33,7 @@ def main() -> int:
         raise SystemExit("Demo repositories already exist; choose an empty --base")
 
     # Import the copied installation explicitly, not the development checkout.
-    sys.path.insert(0, str(share))
+    sys.path.insert(0, str(current))
     from cw.adapters.codex import CodexResult
     from cw.agents.reviewer import run_review
     from cw.core.gates import validate_gate

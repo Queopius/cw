@@ -10,10 +10,13 @@ from cw.cli.commands import config as config_commands
 from cw.cli.commands import execution as execution_commands
 from cw.cli.commands import lifecycle as lifecycle_commands
 from cw.cli.commands import read as read_commands
+from cw.cli.commands import update as update_commands
+from cw.cli.commands import batch as batch_commands
+from cw.core.session import readiness_path
 from cw.cli.parser import build_parser, parse_args
 from cw.cli.runner import run
 from cw.core.config import apply_policy, load_policy
-from cw.core.diagnostics import record_diagnostic
+from cw.core.diagnostics import record_diagnostic, record_global_diagnostic
 from cw.core.errors import CwError, ErrorCode
 from cw.core.layout import validate_project_layout
 from cw.core.project import load_project, repository_root
@@ -130,8 +133,8 @@ def command_history(args: argparse.Namespace, console: Console) -> int:
     return read_commands.command_history(args, console, root_resolver=_root, context=_context)
 
 
-def _doctor(root: Path | None, reviewer: bool) -> list[dict[str, Any]]:
-    return read_commands.doctor_checks(root, reviewer, context=_context, current_resolver=_current)
+def _doctor(root: Path | None, reviewer: bool, integrations: bool = False) -> list[dict[str, Any]]:
+    return read_commands.doctor_checks(root, reviewer, integrations, context=_context, current_resolver=_current)
 
 
 def command_doctor(args: argparse.Namespace, console: Console) -> int:
@@ -158,20 +161,72 @@ def command_version(args: argparse.Namespace, console: Console) -> int:
     return read_commands.command_version(args, console)
 
 
+def command_update(args: argparse.Namespace, console: Console) -> int:
+    return update_commands.command_update(args, console)
+
+
+def command_changelog(args: argparse.Namespace, console: Console) -> int:
+    return update_commands.command_changelog(args, console)
+
+
+def command_integrations(args: argparse.Namespace, console: Console) -> int:
+    return read_commands.command_integrations(args, console, root_resolver=_root, context=_context)
+
+
+def command_run(args: argparse.Namespace, console: Console) -> int:
+    def execute_phase(phase_id: str, remaining_seconds: float) -> int:
+        root = _root()
+        _, state, _ = _context(root)
+        phase_args = argparse.Namespace(**vars(args))
+        phase_args.json = False
+        phase_args.hook = False
+        phase_args.human_approve = False
+        phase_args._batch_mode = True
+        phase_args._batch_agent_timeout = max(1, int(remaining_seconds))
+        if readiness_path(root).exists() and state.get("current_phase") == phase_id:
+            return command_review(phase_args, console)
+        code = command_start(phase_args, console)
+        _, after, _ = _context(root)
+        if (
+            code == 0 and readiness_path(root).exists()
+            and after.get("current_phase") == phase_id
+        ):
+            return command_review(phase_args, console)
+        return code
+
+    return batch_commands.command_run(
+        args, console, root_resolver=_root, context=_context, executor=execute_phase,
+    )
+
+
 COMMANDS = {
     "init": command_init, "plan": command_plan, "start": command_start, "status": command_status,
     "validate": command_validate, "review": command_review, "retry": command_retry,
     "history": command_history, "doctor": command_doctor, "error": command_error,
     "repair": command_repair, "config": command_config, "version": command_version,
+    "update": command_update, "changelog": command_changelog,
+    "integrations": command_integrations,
+    "run": command_run,
 }
 
 
 def _record_error(exc: CwError, *, source: str | None = None, traceback_text: str | None = None) -> None:
+    if source == "update":
+        try:
+            record_global_diagnostic(exc, source=source, traceback_text=traceback_text)
+        except Exception:
+            pass
+        return
     try:
         root = repository_root(Path.cwd())
-        record_diagnostic(root, exc, source=source, traceback_text=traceback_text)
+        record = record_diagnostic(root, exc, source=source, traceback_text=traceback_text)
+        if record is None:
+            record_global_diagnostic(exc, source=source, traceback_text=traceback_text)
     except Exception:
-        pass
+        try:
+            record_global_diagnostic(exc, source=source, traceback_text=traceback_text)
+        except Exception:
+            pass
 
 
 def main(argv: Sequence[str] | None = None) -> int:

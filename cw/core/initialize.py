@@ -342,6 +342,8 @@ def initialize(root: Path) -> tuple[Project, bool]:
         data.setdefault("updated_at", utc_now())
         if data.get("workflow_id") != project.project_id:
             raise CwError("Project workflow mismatch", ErrorCode.WORKFLOW_PROJECT_MISMATCH, "Run: cw repair")
+        if not workflow.phases and data.get("status") == "UNINITIALIZED":
+            data["status"] = "INITIALIZED"
         if workflow.phases and data.get("current_phase") in {phase.id for phase in workflow.phases}:
             data["workflow_version"] = workflow.version
             data["workflow_sha256"] = workflow_hash(plan)
@@ -454,14 +456,21 @@ def repair(root: Path) -> Path:
     state = load_json(state_path)
     from .progress import normalize_legacy_progress
     workflow, _ = normalize_legacy_progress(root, workflow, state)
+    if not workflow.phases and state.get("status") == "UNINITIALIZED":
+        state["status"] = "INITIALIZED"
     if workflow.phases and state.get("current_phase") in {phase.id for phase in workflow.phases}:
         state["workflow_version"] = workflow.version
         state["workflow_sha256"] = workflow_hash(plan_path)
     elif workflow.phases:
         state = initial_state(current_id)
         state.update({"workflow_version": workflow.version, "workflow_sha256": workflow_hash(plan_path), "current_phase": workflow.phases[0].id, "status": "PLAN_PROPOSED" if workflow.status == "PROPOSED" else "READY"})
-    from .recovery import migrate_legacy_reviewer_error, readiness_is_valid
+    from .recovery import (
+        migrate_legacy_reviewer_error,
+        readiness_is_valid,
+        recover_orphan_revision_readiness,
+    )
     migrated_error = migrate_legacy_reviewer_error(root, workflow, state)
+    recovered_revision = recover_orphan_revision_readiness(root, workflow, state)
     atomic_json(state_path, state)
     from .session import load_session, process_is_alive, readiness_path, session_path
     phase_id = state.get("current_phase")
@@ -488,5 +497,8 @@ def repair(root: Path) -> Path:
     if migrated_error is not None:
         state["last_error"] = None
         state["status"] = "READY_FOR_REVIEW" if valid_readiness else "ERROR"
+        atomic_json(state_path, state)
+    elif recovered_revision:
+        state["status"] = "READY_FOR_REVIEW"
         atomic_json(state_path, state)
     return backup

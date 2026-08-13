@@ -119,7 +119,7 @@ class LegacyReviewerRecoveryTests(unittest.TestCase):
 
         code, status_output = self.invoke("status")
         self.assertEqual(0, code)
-        self.assertIn("READY_FOR_REVIEW", status_output)
+        self.assertIn("READY FOR REVIEW", status_output)
         self.assertNotIn(OLD_TIMESTAMP, status_output)
 
         with patch("cw.cli.main.CodexAdapter.run_implementer") as implementer, patch(

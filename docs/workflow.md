@@ -3,7 +3,7 @@
 CW uses explicit states and rejects transitions outside the state graph:
 
 ```text
-UNINITIALIZED → PLANNING → PLAN_PROPOSED → READY → IN_PROGRESS
+UNINITIALIZED → INITIALIZED → PLANNING → PLAN_PROPOSED → READY → IN_PROGRESS
 IN_PROGRESS → READY_FOR_REVIEW → REVIEWING
 REVIEWING → REVISION_REQUIRED | APPROVED | HUMAN_REVIEW_REQUIRED | ERROR
 APPROVED → IN_PROGRESS | COMPLETED
@@ -72,6 +72,15 @@ projects an audit-oriented phase view from gates first, then reviews and
 structured events. It does not invent missing timestamps and treats the gate's
 linked review as the canonical final approval, avoiding duplicate prototype
 approval records.
+
+## Bounded multi-phase runs
+
+`cw run N` repeatedly invokes the canonical single-phase supervisor, not an
+alternate workflow engine. Each iteration must finish implementation,
+deterministic validation, independent review, gate creation, and the domain
+advance transition. Phase, time, semantic-revision, and agent-run budgets are
+checked before another iteration begins. See [Controlled batch
+execution](batch-execution.md).
 
 Automation receives the same model directly: `cw status --json` includes
 `position`, `approved_count`, `gate_states`, and the configured phase list;

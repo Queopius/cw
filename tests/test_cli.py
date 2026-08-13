@@ -45,7 +45,7 @@ class CliTests(unittest.TestCase):
     def test_status_healthy(self):
         code, output = self.invoke("status")
         self.assertEqual(0, code)
-        self.assertIn("IN_PROGRESS", output)
+        self.assertIn("IN PROGRESS", output)
         self.assertIn("01  Phase 1", output)
 
     def test_default_command_is_start(self):
@@ -357,7 +357,7 @@ class CliTests(unittest.TestCase):
         })
         save_state(self.repo.root, initial_state(project_id))
         code, output = self.invoke("plan")
-        self.assertEqual(1, code)
+        self.assertEqual(3, code)
         self.assertIn("Project goal is unclear", output)
         proposal = Planner().propose_plan(self.repo.root, project_id, "Build a webhook handler")
         with patch("cw.cli.main.CodexAdapter.run_planner", return_value=CodexResult({"phases": proposal["phases"]}, "")):

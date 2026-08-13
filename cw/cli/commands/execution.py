@@ -10,12 +10,11 @@ from typing import Any, Callable
 from cw.checks.deterministic import inspect_completed_work, validate_phase
 from cw.core.diagnostics import state_error
 from cw.core.errors import CwError, ErrorCode
-from cw.core.gates import validate_dependencies
+from cw.core.gates import gate_path, validate_dependencies
 from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
 from cw.core.initialize import backup_metadata
 from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
-from cw.core.severity import CriterionSeverity
 from cw.core.recovery import (
     mark_infrastructure_error,
     readiness_is_valid,
@@ -26,7 +25,19 @@ from cw.core.recovery import (
 from cw.core.session import create_session, finish_session, load_session, readiness_path
 from cw.core.state import advance_after_approval, load_state, save_state, transition
 from cw.core.utils import utc_now
+from cw.execution.session import active_batch
+from cw.integrations.config import project_requirements
+from cw.integrations.manager import IntegrationManager
 from cw.ui.console import Console, emit_json
+from cw.ui.renderers import (
+    render_review_result,
+    render_review_start,
+    render_start,
+    render_transition,
+    render_validation,
+    render_update_notice,
+)
+from cw.update.service import automatic_update_notice
 
 
 RootResolver = Callable[[], Path]
@@ -66,8 +77,19 @@ def command_start(
             exit_code=2,
         )
     root = root_resolver()
+    if active_batch(root, own_pid=os.getpid()) is not None:
+        raise CwError("Workflow batch is already running", ErrorCode.LOCKED, "Run: cw status")
     _, state, workflow = context(root)
+    if not workflow.phases:
+        raise CwError(
+            "Development plan required",
+            ErrorCode.PLAN_REQUIRED,
+            "Run: cw plan",
+            exit_code=3,
+        )
     phase = current_resolver(workflow, state)
+    required_integrations = project_requirements(root) | set(phase.required_integrations)
+    IntegrationManager().preflight(root, required_integrations)
     with operation_lock(root, "start"):
         if readiness_path(root).exists():
             raise CwError("A readiness manifest already exists", ErrorCode.INVALID_STATE, "Run: cw review")
@@ -106,16 +128,22 @@ Active implementation session: {session['session_id']}
 When complete, create .cw/runtime/READY_FOR_REVIEW.json matching the installed schema,
 including this exact session_id, and stop normally.
 """
-    console.header("Start")
-    console.item("→", f"{phase.id.split('-', 1)[0]} · {phase.name}")
-    console.line()
-    console.field("Attempt", f"{state.get('attempt', 0)} / {workflow.max_review_attempts}")
-    console.field("Sandbox", "workspace-write")
-    console.field("Reviewer", "read-only")
-    console.line()
-    console.item("✓", "Workflow ready")
-    console.line()
-    console.line("Starting Codex…")
+    approved = sum(gate_path(root, item.id).is_file() for item in workflow.phases)
+    render_start(console, {
+        "project": workflow.id,
+        "number": phase.id.split("-", 1)[0],
+        "name": phase.name,
+        "approved": approved,
+        "total": len(workflow.phases),
+        "attempt": state.get("attempt", 0),
+        "max_attempts": workflow.max_review_attempts,
+    })
+    notice = None if getattr(args, "_batch_mode", False) else automatic_update_notice()
+    if notice is not None:
+        render_update_notice(console, {
+            "latest": str(notice.latest), "installed": str(notice.installed),
+            "level": notice.level,
+        })
     failure: CwError | None = None
     result = 0
     try:
@@ -124,6 +152,8 @@ including this exact session_id, and stop normally.
             prompt,
             allow_network=workflow.allow_network,
             session_id=session["session_id"],
+            required_integrations=tuple(sorted(required_integrations)),
+            timeout=int(getattr(args, "_batch_agent_timeout", 0)) or None,
         )
     except CwError as exc:
         failure = exc
@@ -144,6 +174,7 @@ including this exact session_id, and stop normally.
         state["last_error"] = state_error(failure)
         if failure.code in {
             ErrorCode.IMPLEMENTER_PROCESS_ERROR, ErrorCode.CODEX_NOT_FOUND,
+            ErrorCode.BATCH_TIME_EXHAUSTED,
         }:
             mark_infrastructure_error(
                 state, failure, operation="implementation", phase=phase.id,
@@ -162,15 +193,8 @@ including this exact session_id, and stop normally.
         from cw.core.gates import validate_gate
 
         validate_gate(root, workflow, phase.id)
-        console.line()
-        console.item("✓", f"Phase {phase.id.split('-', 1)[0]} approved")
-        console.wrapped("Gate verified", 2)
-        if status is WorkflowState.COMPLETED:
-            console.item("✓", "Workflow completed")
-        else:
-            following = workflow.phase(str(state["current_phase"]))
-            console.line()
-            console.item("→", f"Phase {following.id.split('-', 1)[0]} · {following.name}")
+        following = None if status is WorkflowState.COMPLETED else workflow.phase(str(state["current_phase"]))
+        render_transition(console, phase, following)
         return result
     if status is WorkflowState.ERROR:
         raw_error = str(state.get("last_error") or "")
@@ -208,6 +232,13 @@ def command_validate(
 ) -> int:
     root = root_resolver()
     _, state, workflow = context(root)
+    if not workflow.phases:
+        raise CwError(
+            "Nothing to validate",
+            ErrorCode.NOTHING_TO_VALIDATE,
+            "Run: cw plan",
+            exit_code=3,
+        )
     phase = current_resolver(workflow, state)
     result = validate_phase(root, workflow, phase)
     payload = {
@@ -220,14 +251,7 @@ def command_validate(
     if args.json:
         emit_json(payload)
     else:
-        console.header("Validate")
-        console.item("→", f"{phase.id} · {phase.name}")
-        console.line()
-        for check in result.checks:
-            passed = check.get("status") != "failed" and check.get("exit_code", 0) == 0
-            console.item("✓" if passed else "✕", check["name"])
-        console.line()
-        console.line("Validation passed." if result.passed else "Validation failed.")
+        render_validation(console, phase, result, verbose=args.verbose)
     if not result.passed:
         record_error(
             CwError(
@@ -242,42 +266,8 @@ def command_validate(
 
 
 def render_review(console: Console, phase: Any, report: dict[str, Any], workflow: Any) -> None:
-    decision = report["decision"]
-    console.header("Review")
-    console.item("→", f"{phase.id.split('-', 1)[0]} · {phase.name}")
-    console.line()
-    console.item("✓", "Deterministic checks")
-    console.item("✓", "Independent reviewer completed")
-    console.line()
-    if decision == "APPROVE" and (not phase.requires_human_approval or report.get("human")):
-        console.item("✓", "APPROVED")
-        configured = {criterion.id: criterion for criterion in phase.acceptance_criteria}
-        advisory = [
-            result for result in report.get("criteria", [])
-            if result.get("status") != "PASS"
-            and configured.get(result.get("id")) is not None
-            and configured[result["id"]].severity == CriterionSeverity.ADVISORY
-        ]
-        for observation in advisory:
-            console.item("!", f"{observation['id']} · advisory observation")
-        console.line()
-        console.field("Gate", f"{phase.id}.approved.json")
-        next_id = report.get("next_phase")
-        if next_id:
-            following = workflow.phase(next_id)
-            console.field("Next", f"{following.id.split('-', 1)[0]} · {following.name}")
-        elif report.get("workflow_completed"):
-            console.field("State", "COMPLETED")
-    elif decision == "REVISE":
-        console.item("✕", "REVISION REQUIRED")
-        console.line()
-        console.field("Issues", len(report.get("blocking_issues", [])))
-        for issue in report.get("blocking_issues", []):
-            console.wrapped(issue)
-        console.line()
-        console.wrapped(f"Phase {phase.id.split('-', 1)[0]} remains active.")
-    else:
-        console.item("!", "HUMAN REVIEW REQUIRED")
+    """Compatibility seam retained for callers and tests."""
+    render_review_result(console, phase, report, workflow)
 
 
 def command_review(
@@ -306,6 +296,9 @@ def command_review(
         ):
             print("{}")
             return 0
+    show_live = not args.hook and not args.json and not args.human_approve
+    if show_live:
+        render_review_start(console, phase)
     with operation_lock(root, "review"):
         if args.human_approve:
             gate = human_approver(root, workflow, phase, state)
@@ -329,7 +322,7 @@ def command_review(
     if args.json:
         emit_json(report)
     else:
-        render_review(console, phase, report, workflow)
+        render_review_result(console, phase, report, workflow, include_header=not show_live)
     requires_human = (
         report.get("decision") == "HUMAN_REVIEW_REQUIRED"
         or phase.requires_human_approval and not args.human_approve

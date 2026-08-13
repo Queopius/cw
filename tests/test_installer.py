@@ -26,19 +26,23 @@ class InstallerTests(unittest.TestCase):
             launcher = home / ".local/bin/cw"
             self.assertTrue(launcher.is_file())
             self.assertFalse(launcher.is_symlink())
-            self.assertTrue((home / ".local/share/cw/LICENSE").is_file())
-            self.assertIn("Copyright 2026 Fantomid LLC", (home / ".local/share/cw/NOTICE").read_text())
-            self.assertIn("CW by Queopius", (home / ".local/share/cw/NOTICE").read_text())
+            share = home / ".local/share/cw"
+            current = share / "current"
+            self.assertTrue(current.is_symlink())
+            self.assertTrue((current / "LICENSE").is_file())
+            self.assertIn("Copyright 2026 Fantomid LLC", (current / "NOTICE").read_text())
+            self.assertIn("CW by Queopius", (current / "NOTICE").read_text())
             self.assertEqual(1, (home / ".zshrc").read_text().count('export PATH="$HOME/.local/bin:$PATH"'))
             self.assertEqual(1, (home / ".profile").read_text().count('export PATH="$HOME/.local/bin:$PATH"'))
             shutil.rmtree(source)
             completed = subprocess.run([str(launcher), "version", "--json"], env=environment, text=True, capture_output=True, check=True)
             expected = (project / "VERSION").read_text(encoding="utf-8").strip()
             self.assertEqual(expected, json.loads(completed.stdout)["version"])
+            self.assertTrue((share / "versions" / expected).is_dir())
             modules = subprocess.run([
                 "python3", "-c",
                 "import cw.cli.commands.config, cw.cli.commands.execution, cw.cli.commands.lifecycle, cw.cli.commands.read, cw.cli.parser, cw.cli.runner",
-            ], cwd=home, env={**environment, "PYTHONPATH": str(home / ".local/share/cw")}, text=True, capture_output=True)
+            ], cwd=home, env={**environment, "PYTHONPATH": str(current)}, text=True, capture_output=True)
             self.assertEqual(0, modules.returncode, modules.stderr)
 
 
