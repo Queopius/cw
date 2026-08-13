@@ -249,6 +249,22 @@ class CliTests(unittest.TestCase):
         code, output = self.invoke("doctor", "--json")
         self.assertIn("checks", json.loads(output))
 
+    def test_doctor_codex_verbose_shows_sanitized_argv_without_mcp_override(self):
+        path = self.repo.root / ".cw/logs/codex-invocations.jsonl"
+        path.write_text(json.dumps({
+            "timestamp": "2026-08-13T00:00:00Z",
+            "role": "implementer",
+            "command": "codex --strict-config exec '[PROMPT sha256:abc]'",
+            "environment": {"HOME": "/home/user"},
+        }) + "\n", encoding="utf-8")
+        with patch("cw.cli.commands.read.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"):
+            code, output = self.invoke("doctor", "--codex", "--verbose")
+        self.assertEqual(0, code)
+        self.assertIn("Sanitized argv", output)
+        self.assertIn("codex --strict-config exec", output)
+        self.assertIn("MCP overrides", output)
+        self.assertNotIn("mcp_servers.", output)
+
     def test_doctor_warning(self):
         checks = [{"section": "Security", "name": "Hook trust", "status": "warning", "detail": "review required"}]
         with patch("cw.cli.main._doctor", return_value=checks):

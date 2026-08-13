@@ -206,10 +206,11 @@ rollback. Source/editable installations are protected from self-update. See
 
 CW separates capabilities required by the current phase from optional Codex
 integrations. An unavailable deployment MCP does not block a domain phase that
-does not use it. Planner and reviewer children retain normal Codex authentication
-while loading no unrelated user MCP configuration; implementers preserve only
-explicitly required MCPs. CW never stores MCP credentials or silently changes
-`~/.codex/config.toml`. See [Integrations](docs/integrations.md).
+does not use it. Managed children retain the normal effective Codex
+configuration and capture optional MCP startup diagnostics without turning them
+into workflow failures. Required integrations are preflighted explicitly. CW
+never injects partial `mcp_servers.*` definitions, stores MCP credentials, or
+silently changes `~/.codex/config.toml`. See [Integrations](docs/integrations.md).
 
 ## Project layout
 

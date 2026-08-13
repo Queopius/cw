@@ -27,17 +27,22 @@ only required integrations and fails closed if one is missing, disabled,
 unauthenticated, or unavailable. Optional servers are not health-checked during
 `status`, `history`, or `help`.
 
-Planner and reviewer calls preserve the user's authentication while disabling
-optional plugins and hooks for that read-only child process. Implementers use
-Codex's effective `mcp list` as the source of truth rather than reconstructing
-servers from `~/.codex/config.toml`: optional plugin integrations are isolated
-with the supported process-scoped `--disable plugins` feature, while standalone
-optional MCPs may receive only `mcp_servers.<id>.enabled=false`. CW never creates
-or copies `url`, `command`, `type`, or unsupported `transport` fields.
+Planner, reviewer, and implementer calls preserve the user's normal effective
+Codex configuration. CW does not add `mcp_servers.<id>.enabled=false` or any
+other partial MCP override: effective definitions may originate from plugins,
+profiles, or other Codex-owned sources that CW must not reconstruct. Stdout and
+stderr are captured separately. Optional startup, authentication, HTTP, and
+transport diagnostics are deduplicated and retained as non-blocking warnings
+when Codex exits successfully with the expected result.
 
 If a phase requires an integration, CW leaves it enabled and preflights it
 before starting implementation. Project Stop hooks remain available to the
-implementer; disabling optional plugins does not disable those project hooks.
+implementer.
 CW does not edit global Codex configuration, auto-trust hooks, or store OAuth
 tokens, API keys, cookies, or MCP secrets. Authentication remains owned by Codex
 and the provider.
+
+Use `cw doctor --codex --verbose` to inspect the latest sanitized managed argv.
+It reports whether an unsupported `mcp_servers.*` override was present without
+exposing the prompt or credentials. Redacted raw child diagnostics are retained
+in `.cw/logs/codex-runs.jsonl` for deliberate troubleshooting.

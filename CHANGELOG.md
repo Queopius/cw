@@ -4,6 +4,19 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.3.3 — 2026-08-13
+
+- Remove all optional-MCP `mcp_servers.*` and plugin-disable overrides from
+  managed Codex processes; use the user's normal effective configuration.
+- Add a shared `CodexRunResult` for implementer, planner, and reviewer with
+  separately captured stdout/stderr, structured payload, deduplicated optional
+  integration diagnostics, and terminal-error precedence.
+- Run the implementer through captured `codex exec`, retain redacted diagnostic
+  logs, and add `cw doctor --codex --verbose` for sanitized argv inspection.
+- Preserve explicit required-integration preflight while ensuring optional MCP
+  authentication, HTTP, startup, or transport warnings cannot override a
+  successful Codex result or consume semantic review attempts.
+
 ## 0.3.2 — 2026-08-13
 
 - Fix managed Codex integration isolation for plugin-provided MCP servers by

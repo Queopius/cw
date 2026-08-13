@@ -147,7 +147,7 @@ including this exact session_id, and stop normally.
     failure: CwError | None = None
     result = 0
     try:
-        result = adapter_factory().run_implementer(
+        run_result = adapter_factory().run_implementer(
             root,
             prompt,
             allow_network=workflow.allow_network,
@@ -155,6 +155,7 @@ including this exact session_id, and stop normally.
             required_integrations=tuple(sorted(required_integrations)),
             timeout=int(getattr(args, "_batch_agent_timeout", 0)) or None,
         )
+        result = int(getattr(run_result, "exit_code", run_result or 0))
     except CwError as exc:
         failure = exc
     try:

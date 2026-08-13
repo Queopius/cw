@@ -81,11 +81,13 @@ no project name, remote, workflow, or source content. Application update state
 is global; project migration remains a separate explicit `cw repair` process.
 
 CW never writes MCP credentials or silently changes the user's global Codex
-configuration. Planner/reviewer isolation uses Codex's supported
-`--ignore-user-config` plus process-scoped plugin isolation, which preserves authentication. Normalized health caches
-omit raw stderr, HTML, headers, and tokens. Optional integration failures do not
-approve, reject, or block unrelated workflow phases; required failures stop
-before implementation.
+configuration. Managed planner, reviewer, and implementer processes load the
+user's normal effective Codex configuration without adding `mcp_servers.*`
+overrides. Their stdout and stderr are captured separately; optional MCP startup
+or authentication diagnostics never override exit code zero plus a valid CW
+result. Redacted diagnostics are retained under `.cw/logs/`, while normalized
+health caches omit raw stderr, HTML, headers, and tokens. Required integrations
+are checked explicitly before implementation and fail closed when unavailable.
 
 Multi-phase execution never bypasses validation, review, protected-path,
 integration, or gate controls. The default hard cap is ten phases and there is

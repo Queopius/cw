@@ -144,13 +144,12 @@ mutations; the global updater lock remains independent.
 
 Codex MCP configuration remains user-owned. CW discovers effective servers with
 `codex mcp list`; it does not assume that `~/.codex/config.toml` is the only
-source because plugins can contribute MCP definitions. Planner and reviewer
-subprocesses retain authentication but use `--disable plugins`,
-`--ignore-user-config`, and `--disable hooks` for a minimal ephemeral read-only
-surface. The implementer retains project hooks and applies `--disable plugins`
-when no plugin-provided integration is required. Standalone optional servers
-receive only an `enabled=false` process override. CW never reconstructs MCP
-definitions or emits an unsupported `transport` property.
+source because plugins can contribute MCP definitions. Planner, reviewer, and
+implementer subprocesses retain the normal effective configuration and never
+inject `mcp_servers.*` overrides. Planner and reviewer remain ephemeral,
+read-only, and disable hooks; the implementer retains the project Stop hook.
+CW never reconstructs MCP definitions or emits an unsupported `transport`
+property.
 
 Before opening an interactive implementer CW runs a local Codex configuration
 preflight with the same global arguments. A rejected effective MCP configuration
@@ -158,11 +157,12 @@ becomes non-retryable `CODEX_CONFIG_ERROR`, not a generic implementer crash.
 Sanitized invocation records under `.cw/logs/` retain exact flags and a small
 environment allowlist; prompts are represented by SHA-256 identifiers.
 
-`cw.integrations` normalizes configured, required, and health state and extracts
-bounded MCP diagnostics from captured stderr. Optional diagnostics cannot
-override exit code zero plus a valid structured result. Required integrations
-receive an active preflight and fail closed before implementation when missing,
-disabled, unauthenticated, or unavailable. Cached health contains normalized
+`CodexRunResult` is the canonical process result shared by planner, reviewer,
+and implementer. It carries exit code, separately captured stdout/stderr,
+structured payload, deduplicated integration diagnostics, and the terminal
+error. A valid expected result with exit code zero wins over optional MCP noise.
+Required integrations receive an active preflight and fail closed before
+implementation when missing, disabled, unauthenticated, or unavailable. Cached health contains normalized
 fields only—never raw HTML or credentials.
 
 ## Schema compatibility and historical audit

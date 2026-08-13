@@ -47,11 +47,14 @@ the independent diagnostic store and can still work if workflow state is corrupt
   restarts the implementer rather than the reviewer. If the implementer already
   produced valid readiness, retry continues directly with review instead.
 - **Codex configuration invalid:** inspect `cw error` and
-  `.cw/logs/codex-invocations.jsonl`. CW classifies errors such as `invalid
+  `cw doctor --codex --verbose`. CW classifies errors such as `invalid
   transport in mcp_servers.<id>` as deterministic `CODEX_CONFIG_ERROR`; blind
   retry is not offered. `cw version --verbose` shows the executable, runtime,
   build commit, and source comparison so an outdated managed install is visible.
-  CW never writes a `transport` field or edits global Codex configuration.
+  CW never writes a `transport` field, injects a partial `mcp_servers.*`
+  override, or edits global Codex configuration. Redacted child stdout/stderr
+  is retained in `.cw/logs/codex-runs.jsonl`; optional MCP warnings are
+  diagnostic only when the Codex operation succeeds.
 - **Approval gate invalidated:** do not overwrite the gate; run
   `cw repair --reopen <phase>`. CW backs up metadata and invalidates dependent
   gates before returning that phase to implementation.

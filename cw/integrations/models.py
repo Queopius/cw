@@ -27,10 +27,16 @@ class IntegrationDiagnostic:
     http_status: int | None = None
     occurrences: int = 1
     summary: str = ""
+    required: bool = False
+
+    @property
+    def impact(self) -> str:
+        return "BLOCKING" if self.required else "NONE"
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value["status"] = self.status.value
+        value["impact"] = self.impact
         return value
 
 

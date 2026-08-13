@@ -33,15 +33,11 @@ class IntegrationManager:
         self.runner = runner
         self.cache_path = cache_path or config_dir() / "integrations.json"
 
-    def configured(
-        self, required: set[str] | None = None, *, disable_plugins: bool = False,
-    ) -> tuple[Integration, ...]:
+    def configured(self, required: set[str] | None = None) -> tuple[Integration, ...]:
         required = required or set()
         if shutil.which(self.command) is None and self.command == "codex":
             raise CwError("Codex CLI was not found", ErrorCode.CODEX_NOT_FOUND)
         command = [self.command, "mcp"]
-        if disable_plugins:
-            command.extend(["--disable", "plugins"])
         command.append("list")
         completed = self.runner(
             command, text=True, capture_output=True,

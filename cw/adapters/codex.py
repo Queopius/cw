@@ -4,28 +4,18 @@ import json
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from cw.core.errors import CwError, ErrorCode
 from cw.adapters.structured_output import validate_codex_output_schema
 from cw.integrations.diagnostics import parse_mcp_diagnostics
-from cw.integrations.manager import IntegrationManager
-from cw.integrations.models import IntegrationDiagnostic
 from cw.adapters.invocation import (
     invocation_details,
     managed_codex_environment,
     record_invocation,
+    record_run_result,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class CodexResult:
-    payload: dict[str, Any]
-    stderr: str
-    stdout: str = ""
-    mcp_diagnostics: tuple[IntegrationDiagnostic, ...] = ()
+from cw.adapters.result import CodexResult, CodexRunResult
 
 
 class CodexAdapter:
@@ -39,31 +29,61 @@ class CodexAdapter:
         if not self.check_availability():
             raise CwError("Codex CLI was not found", ErrorCode.CODEX_NOT_FOUND, "Install Codex and run: cw doctor")
 
-    def _integration_arguments(self, required: tuple[str, ...]) -> list[str]:
-        """Return process-only isolation flags without reconstructing MCP definitions."""
+    def _result(
+        self,
+        root: Path,
+        role: str,
+        completed: subprocess.CompletedProcess[str],
+        *,
+        payload: dict | None = None,
+    ) -> CodexRunResult:
+        """Build and persist the canonical result without promoting MCP noise."""
 
-        manager = IntegrationManager(self.command)
-        required_set = set(required)
-        try:
-            effective = manager.configured(required_set)
-            standalone = manager.configured(required_set, disable_plugins=True)
-        except CwError:
-            # Discovery of optional integrations cannot break a managed agent.
-            # Required integrations have already passed command-level preflight.
-            return ["--disable", "plugins"] if not required_set else []
-        effective_ids = {item.id for item in effective}
-        standalone_ids = {item.id for item in standalone}
-        plugin_ids = effective_ids - standalone_ids
-        arguments: list[str] = []
-        if plugin_ids & required_set:
-            # Codex has no safe per-plugin MCP disable flag.  Keep the effective
-            # configuration intact when a plugin capability is required rather
-            # than adding any mcp_servers overlay that can corrupt plugin data.
-            return arguments
-        arguments.extend(["--disable", "plugins"])
-        for integration_id in sorted(standalone_ids - required_set):
-            arguments.extend(["--config", f"mcp_servers.{integration_id}.enabled=false"])
-        return arguments
+        diagnostics = parse_mcp_diagnostics(completed.stderr)
+        terminal_error = None
+        if completed.returncode != 0:
+            error_role = "implementer" if role.startswith("implementer") else role
+            terminal_error = self.classify_process_error(
+                completed.stderr, completed.stdout, role=error_role,
+            )
+        result = CodexRunResult(
+            payload,
+            completed.stderr,
+            completed.stdout,
+            completed.returncode,
+            diagnostics,
+            terminal_error,
+        )
+        record_run_result(
+            root,
+            role,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            diagnostics=tuple(item.to_dict() for item in diagnostics),
+        )
+        return result
+
+    def _run_captured(
+        self,
+        root: Path,
+        role: str,
+        command: list[str],
+        environment: dict[str, str],
+        *,
+        timeout: int | None,
+    ) -> CodexRunResult:
+        completed = subprocess.run(
+            command,
+            cwd=root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=timeout,
+            check=False,
+        )
+        return self._result(root, role, completed)
 
     def _validate_implementer_configuration(
         self,
@@ -73,15 +93,14 @@ class CodexAdapter:
     ) -> None:
         command = [self.command, *global_arguments, "--cd", str(root), "doctor", "--json"]
         invocation = record_invocation(root, "implementer-config", command, environment)
-        completed = subprocess.run(
-            command, cwd=root, env=environment, text=True, capture_output=True,
-            stdin=subprocess.DEVNULL, timeout=30, check=False,
+        result = self._run_captured(
+            root, "implementer-config", command, environment, timeout=30,
         )
-        if completed.returncode == 0:
+        if result.exit_code == 0:
             return
-        code = self.classify_process_error(completed.stderr, completed.stdout, role="implementer")
+        code = self.classify_process_error(result.stderr, result.stdout, role="implementer")
         if code is ErrorCode.CODEX_CONFIG_ERROR:
-            diagnostic = self._diagnostic(completed.stdout, completed.stderr)
+            diagnostic = self._diagnostic(result.stdout, result.stderr)
             raise CwError(
                 "Codex configuration invalid",
                 code,
@@ -98,7 +117,7 @@ class CodexAdapter:
         session_id: str | None = None,
         required_integrations: tuple[str, ...] = (),
         timeout: int | None = None,
-    ) -> int:
+    ) -> CodexRunResult:
         self._require()
         environment = managed_codex_environment("implementer", session_id=session_id)
         global_arguments = [
@@ -107,50 +126,42 @@ class CodexAdapter:
         ]
         if not allow_network:
             global_arguments.extend(["--config", 'web_search="disabled"'])
-        global_arguments.extend(self._integration_arguments(required_integrations))
+        # Required integrations are checked by the workflow preflight. Optional
+        # integrations remain part of Codex's normal effective configuration;
+        # CW never writes or overlays mcp_servers.* definitions.
         self._validate_implementer_configuration(root, global_arguments, environment)
         command = [self.command, *global_arguments]
         command.extend([
             "--cd", str(root), "--sandbox", "workspace-write",
-            "--ask-for-approval", "never", "--no-alt-screen", prompt,
+            "--ask-for-approval", "never", "exec", "--color", "never", prompt,
         ])
         invocation = record_invocation(root, "implementer", command, environment, prompt=prompt)
-        if timeout is None:
-            return_code = subprocess.call(command, cwd=root, env=environment)
-        else:
-            process = subprocess.Popen(command, cwd=root, env=environment)
-            try:
-                return_code = process.wait(timeout=timeout)
-            except KeyboardInterrupt:
-                process.terminate()
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                raise
-            except subprocess.TimeoutExpired as exc:
-                process.terminate()
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                raise CwError(
-                    "Batch time limit reached during implementation",
-                    ErrorCode.BATCH_TIME_EXHAUSTED,
-                    "Run: cw status",
-                    details=f"Hard agent timeout: {timeout}s",
-                    exit_code=4,
-                ) from exc
-        if return_code:
-            raise CwError(
-                "Codex implementer exited unexpectedly",
-                ErrorCode.IMPLEMENTER_PROCESS_ERROR,
-                "Run: cw retry",
-                details=f"Codex exit code: {return_code}\n{invocation_details(invocation)}",
+        try:
+            result = self._run_captured(
+                root, "implementer", command, environment, timeout=timeout,
             )
-        return 0
+        except subprocess.TimeoutExpired as exc:
+            raise CwError(
+                "Batch time limit reached during implementation",
+                ErrorCode.BATCH_TIME_EXHAUSTED,
+                "Run: cw status",
+                details=f"Hard agent timeout: {timeout}s",
+                exit_code=4,
+            ) from exc
+        if result.exit_code:
+            code = result.terminal_error or ErrorCode.IMPLEMENTER_PROCESS_ERROR
+            config_error = code is ErrorCode.CODEX_CONFIG_ERROR
+            raise CwError(
+                "Codex configuration invalid" if config_error else "Codex implementer exited unexpectedly",
+                code,
+                "Run: cw error" if config_error else "Run: cw retry",
+                details=(
+                    f"Codex exit code: {result.exit_code}\n"
+                    f"{self._diagnostic(result.stdout, result.stderr)}\n\n"
+                    f"{invocation_details(invocation)}"
+                ),
+            )
+        return result
 
     def _run_structured(
         self, root: Path, prompt: str, schema: Path, timeout: int, *, role: str
@@ -163,28 +174,29 @@ class CodexAdapter:
             command = [
                 self.command, "--strict-config", "--config", 'web_search="disabled"',
                 "--config", "project_doc_max_bytes=0",
-                "--ask-for-approval", "never", "exec", "--ephemeral", "--ignore-user-config",
-                "--disable", "plugins", "--disable", "hooks", "--sandbox", "read-only",
+                "--ask-for-approval", "never", "exec", "--ephemeral",
+                "--disable", "hooks", "--sandbox", "read-only",
                 "--ignore-rules", "--color", "never", "--output-schema", str(schema),
                 "--output-last-message", str(output), "--cd", str(root), prompt,
             ]
             invocation = record_invocation(root, role, command, environment, prompt=prompt)
             try:
-                completed = subprocess.run(
-                    command, cwd=root, env=environment, text=True, capture_output=True,
-                    stdin=subprocess.DEVNULL, timeout=timeout, check=False,
+                result = self._run_captured(
+                    root, role, command, environment, timeout=timeout,
                 )
             except subprocess.TimeoutExpired as exc:
                 code = ErrorCode.REVIEW_TIMEOUT if role == "reviewer" else ErrorCode.PLAN_TIMEOUT
                 label = "Independent reviewer" if role == "reviewer" else "Codex planner"
                 raise CwError(f"{label} timed out", code, "Run: cw retry", details=str(exc)) from exc
-            if completed.returncode:
-                code = self.classify_process_error(completed.stderr, completed.stdout, role=role)
+            if result.exit_code:
+                code = result.terminal_error or self.classify_process_error(
+                    result.stderr, result.stdout, role=role,
+                )
                 label = "Independent reviewer" if role == "reviewer" else "Codex planner"
                 hint = "Run: cw error" if code in {
                     ErrorCode.PLANNER_SCHEMA_ERROR, ErrorCode.CODEX_CONFIG_ERROR,
                 } else "Run: cw retry"
-                diagnostic = self._diagnostic(completed.stdout, completed.stderr)
+                diagnostic = self._diagnostic(result.stdout, result.stderr)
                 raise CwError(
                     f"{label} unavailable", code, hint,
                     details=f"{diagnostic}\n\n{invocation_details(invocation)}",
@@ -199,9 +211,9 @@ class CodexAdapter:
                 code = ErrorCode.REVIEWER_PROCESS_ERROR if role == "reviewer" else ErrorCode.PLANNER_SCHEMA_ERROR
                 hint = "Run: cw retry" if role == "reviewer" else "Run: cw error"
                 raise CwError(f"{role.title()} returned an invalid result", code, hint)
-            return CodexResult(
-                payload, completed.stderr, completed.stdout,
-                parse_mcp_diagnostics(completed.stderr),
+            return CodexRunResult(
+                payload, result.stderr, result.stdout, result.exit_code,
+                result.integration_diagnostics, result.terminal_error,
             )
 
     def run_reviewer(self, root: Path, prompt: str, schema: Path, timeout: int) -> CodexResult:
@@ -240,12 +252,28 @@ class CodexAdapter:
         )):
             return ErrorCode.PLANNER_SCHEMA_ERROR
         if any(term in text for term in ("unauthorized", "authentication", "invalid api key", "login required")):
-            return ErrorCode.REVIEWER_PROCESS_ERROR if role == "reviewer" else ErrorCode.PLANNER_PROCESS_ERROR
+            if role == "reviewer":
+                return ErrorCode.REVIEWER_PROCESS_ERROR
+            if role == "implementer":
+                return ErrorCode.IMPLEMENTER_PROCESS_ERROR
+            return ErrorCode.PLANNER_PROCESS_ERROR
         if any(term in text for term in ("websocket", "wss://", "transport channel closed", "transport error")):
-            return ErrorCode.REVIEWER_NETWORK_ERROR if role == "reviewer" else ErrorCode.PLANNER_TRANSPORT_ERROR
+            if role == "reviewer":
+                return ErrorCode.REVIEWER_NETWORK_ERROR
+            if role == "implementer":
+                return ErrorCode.IMPLEMENTER_PROCESS_ERROR
+            return ErrorCode.PLANNER_TRANSPORT_ERROR
         if any(term in text for term in ("network unavailable", "connection refused", "connection failed", "dns", "timed out connecting")):
-            return ErrorCode.REVIEWER_NETWORK_ERROR if role == "reviewer" else ErrorCode.PLANNER_NETWORK_ERROR
-        return ErrorCode.REVIEWER_PROCESS_ERROR if role == "reviewer" else ErrorCode.PLANNER_PROCESS_ERROR
+            if role == "reviewer":
+                return ErrorCode.REVIEWER_NETWORK_ERROR
+            if role == "implementer":
+                return ErrorCode.IMPLEMENTER_PROCESS_ERROR
+            return ErrorCode.PLANNER_NETWORK_ERROR
+        if role == "reviewer":
+            return ErrorCode.REVIEWER_PROCESS_ERROR
+        if role == "implementer":
+            return ErrorCode.IMPLEMENTER_PROCESS_ERROR
+        return ErrorCode.PLANNER_PROCESS_ERROR
 
     @staticmethod
     def classify_transport_error(text: str, *, role: str = "reviewer") -> ErrorCode:

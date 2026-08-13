@@ -2,6 +2,13 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.3.3",
+      "changes": [
+        "Removed unsafe optional MCP configuration overrides from managed Codex processes.",
+        "Unified captured Codex results and optional integration diagnostic precedence."
+      ]
+    },
+    {
       "version": "0.3.2",
       "changes": [
         "Fixed process-scoped isolation for plugin-provided Codex MCP integrations.",

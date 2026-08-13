@@ -95,3 +95,47 @@ def record_invocation(
 def invocation_details(record: Mapping[str, object]) -> str:
     environment = json.dumps(record.get("environment", {}), ensure_ascii=False, sort_keys=True)
     return f"Codex argv: {record.get('command', '')}\nSanitized environment: {environment}"
+
+
+def record_run_result(
+    root: Path,
+    role: str,
+    *,
+    exit_code: int,
+    stdout: str,
+    stderr: str,
+    diagnostics: Sequence[Mapping[str, object]],
+) -> None:
+    """Retain redacted child diagnostics without streaming them to normal UI."""
+
+    logs = root / ".cw" / "logs"
+    if not logs.is_dir() or logs.is_symlink():
+        return
+    record = {
+        "timestamp": utc_now(),
+        "role": role,
+        "exit_code": exit_code,
+        "stdout": redact(stdout),
+        "stderr": redact(stderr),
+        "integration_diagnostics": list(diagnostics),
+    }
+    path = logs / "codex-runs.jsonl"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.write(descriptor, (json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n").encode())
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def latest_invocation(root: Path) -> dict[str, object] | None:
+    path = root / ".cw" / "logs" / "codex-invocations.jsonl"
+    if not path.is_file() or path.is_symlink():
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        value = json.loads(lines[-1]) if lines else None
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None

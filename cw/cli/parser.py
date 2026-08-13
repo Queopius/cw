@@ -35,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     _common(doctor, suppress_defaults=True)
     doctor.add_argument("--reviewer", action="store_true", help="Include a live reviewer connectivity check")
     doctor.add_argument("--integrations", action="store_true", help="Check configured Codex integrations")
+    doctor.add_argument("--codex", action="store_true", help="Show the latest sanitized managed Codex invocation")
     error = subcommands.add_parser("error", add_help=True)
     _common(error, suppress_defaults=True)
     error.add_argument("--raw", action="store_true")

@@ -27,6 +27,10 @@ unexpected server response: HTTP 500 Internal Server Error
 <html><body><script>large diagnostic content</script></body></html>
 ⚠ MCP startup incomplete (failed: vercel)
 """
+VERCEL_AUTH = """MCP client for `vercel` failed to start:
+AuthRequired: invalid_token: No authorization provided
+MCP startup incomplete (failed: vercel)
+"""
 
 
 class FakeRunner:
@@ -168,7 +172,7 @@ class IntegrationManagerTests(unittest.TestCase):
 
 
 class CodexIntegrationIsolationTests(unittest.TestCase):
-    def test_planner_uses_user_auth_but_ignores_optional_user_config(self):
+    def test_planner_uses_normal_effective_config_and_captures_optional_noise(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name); schema = root / "schema.json"; output = {"phases": []}
             schema.write_text('{"type":"object"}', encoding="utf-8")
@@ -180,8 +184,9 @@ class CodexIntegrationIsolationTests(unittest.TestCase):
             ) as invoked:
                 result = CodexAdapter().run_planner(root, "plan", schema, 10)
             command = invoked.call_args.args[0]
-            self.assertIn("--ignore-user-config", command)
-            self.assertIn(["--disable", "plugins"], [command[index:index + 2] for index in range(len(command) - 1)])
+            self.assertNotIn("--ignore-user-config", command)
+            self.assertNotIn(["--disable", "plugins"], [command[index:index + 2] for index in range(len(command) - 1)])
+            self.assertFalse(any("mcp_servers." in value for value in command))
             self.assertNotIn("CODEX_HOME", invoked.call_args.kwargs["env"])
             self.assertEqual(1, len(result.mcp_diagnostics))
             self.assertEqual(output, result.payload)
@@ -199,48 +204,40 @@ class CodexIntegrationIsolationTests(unittest.TestCase):
                 result = CodexAdapter().run_reviewer(root, "review", schema, 10)
             self.assertEqual(payload, result.payload)
 
-    def test_implementer_disables_optional_plugins_without_reconstructing_definition(self):
-        effective = (
-            Integration("vercel", "mcp", True, Requirement.OPTIONAL, IntegrationHealth.UNKNOWN),
-        )
-        with tempfile.TemporaryDirectory() as name, patch(
-            "cw.adapters.codex.shutil.which", return_value="/usr/bin/codex",
-        ), patch(
-            "cw.adapters.codex.IntegrationManager.configured", side_effect=(effective, ()),
-        ), patch(
-            "cw.adapters.codex.CodexAdapter._validate_implementer_configuration"
-        ), patch(
-            "cw.adapters.codex.subprocess.call", return_value=0,
-        ) as invoked:
-            CodexAdapter().run_implementer(Path(name), "work")
+    def test_implementer_preserves_optional_effective_config_and_captures_auth_warning(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / ".cw/logs").mkdir(parents=True)
+            with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.CodexAdapter._validate_implementer_configuration"
+            ), patch(
+                "cw.adapters.codex.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "implementation complete", VERCEL_AUTH),
+            ) as invoked:
+                result = CodexAdapter().run_implementer(root, "work")
+            retained = (root / ".cw/logs/codex-runs.jsonl").read_text(encoding="utf-8")
         command = invoked.call_args.args[0]
-        self.assertIn(["--disable", "plugins"], [command[index:index + 2] for index in range(len(command) - 1)])
-        self.assertFalse(any("mcp_servers.vercel" in value for value in command))
+        self.assertIn("exec", command)
+        self.assertFalse(any("mcp_servers." in value for value in command))
         self.assertFalse(any("transport" in value for value in command))
+        self.assertEqual(0, result.exit_code)
+        self.assertEqual("MCP_AUTH_REQUIRED", result.integration_diagnostics[0].error_code)
+        self.assertIsNone(result.terminal_error)
+        self.assertIn("AuthRequired", retained)
 
-    def test_standalone_optional_mcp_receives_only_enabled_false(self):
-        standalone = (Integration(
-            "figma", "mcp", True, Requirement.OPTIONAL, IntegrationHealth.UNKNOWN,
-        ),)
-        with patch("cw.adapters.codex.IntegrationManager.configured", side_effect=(standalone, standalone)):
-            arguments = CodexAdapter()._integration_arguments(())
-        rendered = " ".join(arguments)
-        self.assertIn("--disable plugins", rendered)
-        self.assertIn("mcp_servers.figma.enabled=false", rendered)
-        self.assertNotIn("transport", rendered)
+    def test_optional_mcp_never_receives_a_config_override(self):
+        source = Path("cw/adapters/codex.py").read_text(encoding="utf-8")
+        self.assertNotIn('f"mcp_servers.', source)
+        self.assertNotIn("_integration_arguments", source)
 
     def test_implementer_preserves_effective_config_when_plugin_is_required(self):
-        effective = (
-            Integration("vercel", "mcp", True, Requirement.REQUIRED, IntegrationHealth.AVAILABLE),
-            Integration("figma", "mcp", True, Requirement.OPTIONAL, IntegrationHealth.UNKNOWN),
-        )
-        standalone = (effective[1],)
         with tempfile.TemporaryDirectory() as name, patch(
             "cw.adapters.codex.shutil.which", return_value="/usr/bin/codex",
-        ), patch("cw.adapters.codex.IntegrationManager.configured", side_effect=(effective, standalone)), patch(
+        ), patch(
             "cw.adapters.codex.CodexAdapter._validate_implementer_configuration"
         ), patch(
-            "cw.adapters.codex.subprocess.call", return_value=0,
+            "cw.adapters.codex.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, "done", ""),
         ) as invoked:
             CodexAdapter().run_implementer(Path(name), "work", required_integrations=("vercel",))
         command = invoked.call_args.args[0]
@@ -255,11 +252,13 @@ class CodexIntegrationIsolationTests(unittest.TestCase):
             config = Path(name) / "config.toml"
             config.write_text("[plugins.vercel]\nenabled = true\n", encoding="utf-8")
             before = config.read_bytes()
-            effective = (Integration(
-                "vercel", "mcp", True, Requirement.OPTIONAL, IntegrationHealth.UNKNOWN,
-            ),)
-            with patch("cw.adapters.codex.IntegrationManager.configured", side_effect=(effective, ())):
-                CodexAdapter()._integration_arguments(())
+            with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.CodexAdapter._validate_implementer_configuration",
+            ), patch(
+                "cw.adapters.codex.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "done", VERCEL_AUTH),
+            ):
+                CodexAdapter().run_implementer(Path(name), "work")
             self.assertEqual(before, config.read_bytes())
 
 

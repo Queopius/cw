@@ -295,8 +295,9 @@ class StructuredOutputCompatibilityTests(unittest.TestCase):
                 self.assertIn("exec", command)
                 self.assertIn("read-only", command)
                 disable_pairs = [command[index:index + 2] for index in range(len(command) - 1)]
-                self.assertIn(["--disable", "plugins"], disable_pairs)
+                self.assertNotIn(["--disable", "plugins"], disable_pairs)
                 self.assertIn(["--disable", "hooks"], disable_pairs)
+                self.assertFalse(any("mcp_servers." in value for value in command))
                 self.assertNotIn("phase_gate.py", " ".join(command))
                 self.assertEqual("1", kwargs["env"]["CW_PLANNER_ACTIVE"])
                 self.assertNotIn("CW_IMPLEMENTER_ACTIVE", kwargs["env"])

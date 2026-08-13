@@ -133,8 +133,12 @@ def command_history(args: argparse.Namespace, console: Console) -> int:
     return read_commands.command_history(args, console, root_resolver=_root, context=_context)
 
 
-def _doctor(root: Path | None, reviewer: bool, integrations: bool = False) -> list[dict[str, Any]]:
-    return read_commands.doctor_checks(root, reviewer, integrations, context=_context, current_resolver=_current)
+def _doctor(
+    root: Path | None, reviewer: bool, integrations: bool = False, codex: bool = False,
+) -> list[dict[str, Any]]:
+    return read_commands.doctor_checks(
+        root, reviewer, integrations, codex, context=_context, current_resolver=_current,
+    )
 
 
 def command_doctor(args: argparse.Namespace, console: Console) -> int:

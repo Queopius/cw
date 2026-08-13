@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from cw import __version__
 from cw.adapters.codex import CodexAdapter
+from cw.adapters.invocation import latest_invocation
 from cw.adapters.structured_output import codex_schema
 from cw.checks.deterministic import load_readiness
 from cw.core.audit import audit_history
@@ -40,7 +41,7 @@ RootResolver = Callable[[], Path]
 ContextLoader = Callable[[Path], tuple[Any, dict[str, Any], Any]]
 CurrentResolver = Callable[[Any, dict[str, Any]], Any]
 ErrorRecorder = Callable[..., None]
-DoctorProvider = Callable[[Path | None, bool, bool], list[dict[str, Any]]]
+DoctorProvider = Callable[[Path | None, bool, bool, bool], list[dict[str, Any]]]
 
 
 def git_branch(root: Path) -> str:
@@ -163,6 +164,7 @@ def doctor_checks(
     root: Path | None,
     reviewer: bool,
     integrations: bool = False,
+    codex: bool = False,
     *,
     context: ContextLoader,
     current_resolver: CurrentResolver,
@@ -268,6 +270,25 @@ def doctor_checks(
                 })
         except CwError as exc:
             checks.append({"section": "Integrations", "name": "Integration health", "status": "error", "detail": f"{exc.code.value}: {exc.message}"})
+    if codex:
+        invocation = latest_invocation(root)
+        if invocation is None:
+            checks.append({
+                "section": "Managed Codex", "name": "Latest invocation",
+                "status": "neutral", "detail": "none recorded",
+            })
+        else:
+            command = str(invocation.get("command", ""))
+            unsafe = "mcp_servers." in command
+            checks.append({
+                "section": "Managed Codex", "name": "Sanitized argv",
+                "status": "error" if unsafe else "pass", "detail": command,
+            })
+            checks.append({
+                "section": "Managed Codex", "name": "MCP overrides",
+                "status": "error" if unsafe else "pass",
+                "detail": "unsupported mcp_servers.* override detected" if unsafe else "none",
+            })
     return checks
 
 
@@ -282,7 +303,7 @@ def command_doctor(
         root = root_resolver()
     except CwError:
         root = None
-    checks = checks_provider(root, args.reviewer, args.integrations)
+    checks = checks_provider(root, args.reviewer, args.integrations, args.codex)
     errors = sum(item["status"] == "error" for item in checks)
     warnings = sum(item["status"] == "warning" for item in checks)
     passed = sum(item["status"] == "pass" for item in checks)
