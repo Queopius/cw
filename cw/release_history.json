@@ -2,6 +2,12 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.3.1",
+      "changes": [
+        "Allowed GitHub's official release-asset redirect origin for verified updates."
+      ]
+    },
+    {
       "version": "0.3.0",
       "changes": [
         "Added bounded multi-phase execution with explicit phase and time budgets.",
