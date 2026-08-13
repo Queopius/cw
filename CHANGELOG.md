@@ -4,6 +4,20 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.5.0 — 2026-08-13
+
+- Add a reproducible real-workflow recording pipeline for the future public CW
+  landing-page hero, using a disposable Git repository and the installed CW
+  product through normal planning, implementation, validation, independent
+  review, gate, and completion behavior.
+- Add a small stable public event schema, strict offline narrative/security
+  validation, transactional last-known-good replacement, private-path and
+  secret redaction, and deterministic fixture tests without exposing Codex
+  reasoning or optional MCP diagnostics.
+- Add explicit maintainer recording/dry-run commands and a network-free CI
+  quality gate for the committed public artifact; ordinary tests never invoke
+  Codex or require authentication.
+
 ## 0.4.2 — 2026-08-13
 
 - Centralize gate-derived workflow truth in `EffectiveWorkflowState`, including

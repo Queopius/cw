@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.5.0",
+      "changes": [
+        "Added a reproducible real-workflow hero demo recording pipeline.",
+        "Added a stable sanitized public event contract and offline CI validation.",
+        "Preserved the last-known-good recording unless real review and gate evidence completes."
+      ]
+    },
+    {
       "version": "0.4.2",
       "changes": [
         "Centralized gate-derived workflow state and completion counters.",
