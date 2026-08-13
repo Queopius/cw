@@ -27,8 +27,17 @@ only required integrations and fails closed if one is missing, disabled,
 unauthenticated, or unavailable. Optional servers are not health-checked during
 `status`, `history`, or `help`.
 
-Planner and reviewer calls use a minimal Codex configuration while preserving
-the user's authentication. Implementers disable unrequired configured MCPs only
-for that child process. CW does not edit `~/.codex/config.toml`, auto-trust hooks,
-or store OAuth tokens, API keys, cookies, or MCP secrets. Authentication remains
-owned by Codex and the provider.
+Planner and reviewer calls preserve the user's authentication while disabling
+optional plugins and hooks for that read-only child process. Implementers use
+Codex's effective `mcp list` as the source of truth rather than reconstructing
+servers from `~/.codex/config.toml`: optional plugin integrations are isolated
+with the supported process-scoped `--disable plugins` feature, while standalone
+optional MCPs may receive only `mcp_servers.<id>.enabled=false`. CW never creates
+or copies `url`, `command`, `type`, or unsupported `transport` fields.
+
+If a phase requires an integration, CW leaves it enabled and preflights it
+before starting implementation. Project Stop hooks remain available to the
+implementer; disabling optional plugins does not disable those project hooks.
+CW does not edit global Codex configuration, auto-trust hooks, or store OAuth
+tokens, API keys, cookies, or MCP secrets. Authentication remains owned by Codex
+and the provider.

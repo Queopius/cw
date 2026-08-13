@@ -82,7 +82,7 @@ is global; project migration remains a separate explicit `cw repair` process.
 
 CW never writes MCP credentials or silently changes the user's global Codex
 configuration. Planner/reviewer isolation uses Codex's supported
-`--ignore-user-config`, which preserves authentication. Normalized health caches
+`--ignore-user-config` plus process-scoped plugin isolation, which preserves authentication. Normalized health caches
 omit raw stderr, HTML, headers, and tokens. Optional integration failures do not
 approve, reject, or block unrelated workflow phases; required failures stop
 before implementation.

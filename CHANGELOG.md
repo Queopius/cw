@@ -4,6 +4,20 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.3.2 — 2026-08-13
+
+- Fix managed Codex integration isolation for plugin-provided MCP servers by
+  disabling optional plugins process-locally instead of reconstructing their
+  effective definitions as `mcp_servers.*` overlays.
+- Preserve user-owned Codex authentication/configuration, project Stop hooks,
+  and required integrations while ensuring CW never emits an MCP `transport`
+  property or modifies global Codex configuration.
+- Classify rejected Codex MCP configuration as non-retryable
+  `CODEX_CONFIG_ERROR`, preflight implementer configuration, and retain
+  redacted argv/environment diagnostics without exposing prompts or secrets.
+- Add managed build metadata and `cw version --verbose` paths/fingerprints so a
+  stale installed runtime can be distinguished from the development source.
+
 ## 0.3.1 — 2026-08-13
 
 - Trust GitHub's official `release-assets.githubusercontent.com` redirect host

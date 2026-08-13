@@ -2,6 +2,13 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.3.2",
+      "changes": [
+        "Fixed process-scoped isolation for plugin-provided Codex MCP integrations.",
+        "Added deterministic Codex configuration errors and build fingerprints."
+      ]
+    },
+    {
       "version": "0.3.1",
       "changes": [
         "Allowed GitHub's official release-asset redirect origin for verified updates."

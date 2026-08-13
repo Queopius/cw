@@ -26,6 +26,21 @@ def copy_runtime(source: Path, destination: Path) -> None:
     )
     for name in ("VERSION", "LICENSE", "NOTICE", "CHANGELOG.md"):
         shutil.copy2(source / name, destination / name)
+    completed = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=source, text=True,
+        capture_output=True, timeout=5, check=False,
+    )
+    commit = completed.stdout.strip() if completed.returncode == 0 else "unknown"
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=source,
+        text=True, capture_output=True, timeout=5, check=False,
+    )
+    if commit != "unknown" and dirty.returncode == 0 and dirty.stdout.strip():
+        commit += "-dirty"
+    (destination / "BUILD.json").write_text(
+        json.dumps({"schema_version": 1, "commit": commit, "source": "source-install"}, indent=2) + "\n",
+        encoding="utf-8",
+    )
     (destination / "entrypoint.py").write_text(
         "#!/usr/bin/env python3\nfrom cw.cli.main import main\nraise SystemExit(main())\n",
         encoding="utf-8",

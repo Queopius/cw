@@ -38,7 +38,7 @@ class FakeRunner:
 
     def __call__(self, command, **_kwargs):
         self.calls.append(command)
-        if command[1:3] == ["mcp", "list"]:
+        if len(command) > 2 and command[1] == "mcp" and command[-1] == "list":
             return subprocess.CompletedProcess(command, 0, f"Name Url Status Auth\nvercel https://mcp.vercel.com {self.status} Unknown\n", "")
         return subprocess.CompletedProcess(command, self.exit_code, "INTEGRATIONS_OK\n", self.stderr)
 
@@ -138,6 +138,13 @@ class IntegrationManagerTests(unittest.TestCase):
         })
         self.assertEqual(("vercel",), phase.required_integrations)
 
+    def test_effective_mcp_discovery_does_not_depend_on_config_toml(self):
+        config = self.root / "config.toml"
+        config.write_text("model = 'gpt-5'\n", encoding="utf-8")
+        manager = self.manager(FakeRunner())
+        self.assertEqual("vercel", manager.configured()[0].id)
+        self.assertNotIn("mcp_servers", config.read_text(encoding="utf-8"))
+
     def test_doctor_keeps_independent_checks_visible_after_workflow_error(self):
         available = Integration(
             "vercel", "mcp", True, Requirement.OPTIONAL, IntegrationHealth.AVAILABLE,
@@ -174,6 +181,7 @@ class CodexIntegrationIsolationTests(unittest.TestCase):
                 result = CodexAdapter().run_planner(root, "plan", schema, 10)
             command = invoked.call_args.args[0]
             self.assertIn("--ignore-user-config", command)
+            self.assertIn(["--disable", "plugins"], [command[index:index + 2] for index in range(len(command) - 1)])
             self.assertNotIn("CODEX_HOME", invoked.call_args.kwargs["env"])
             self.assertEqual(1, len(result.mcp_diagnostics))
             self.assertEqual(output, result.payload)
@@ -191,21 +199,68 @@ class CodexIntegrationIsolationTests(unittest.TestCase):
                 result = CodexAdapter().run_reviewer(root, "review", schema, 10)
             self.assertEqual(payload, result.payload)
 
-    def test_implementer_disables_unrequired_mcp_and_preserves_required(self):
-        configured = (
-            Integration("vercel", "mcp", True, Requirement.REQUIRED, IntegrationHealth.AVAILABLE),
-            Integration("figma", "mcp", True, Requirement.OPTIONAL, IntegrationHealth.UNKNOWN),
+    def test_implementer_disables_optional_plugins_without_reconstructing_definition(self):
+        effective = (
+            Integration("vercel", "mcp", True, Requirement.OPTIONAL, IntegrationHealth.UNKNOWN),
         )
         with tempfile.TemporaryDirectory() as name, patch(
             "cw.adapters.codex.shutil.which", return_value="/usr/bin/codex",
-        ), patch("cw.adapters.codex.IntegrationManager.configured", return_value=configured), patch(
+        ), patch(
+            "cw.adapters.codex.IntegrationManager.configured", side_effect=(effective, ()),
+        ), patch(
+            "cw.adapters.codex.CodexAdapter._validate_implementer_configuration"
+        ), patch(
+            "cw.adapters.codex.subprocess.call", return_value=0,
+        ) as invoked:
+            CodexAdapter().run_implementer(Path(name), "work")
+        command = invoked.call_args.args[0]
+        self.assertIn(["--disable", "plugins"], [command[index:index + 2] for index in range(len(command) - 1)])
+        self.assertFalse(any("mcp_servers.vercel" in value for value in command))
+        self.assertFalse(any("transport" in value for value in command))
+
+    def test_standalone_optional_mcp_receives_only_enabled_false(self):
+        standalone = (Integration(
+            "figma", "mcp", True, Requirement.OPTIONAL, IntegrationHealth.UNKNOWN,
+        ),)
+        with patch("cw.adapters.codex.IntegrationManager.configured", side_effect=(standalone, standalone)):
+            arguments = CodexAdapter()._integration_arguments(())
+        rendered = " ".join(arguments)
+        self.assertIn("--disable plugins", rendered)
+        self.assertIn("mcp_servers.figma.enabled=false", rendered)
+        self.assertNotIn("transport", rendered)
+
+    def test_implementer_preserves_effective_config_when_plugin_is_required(self):
+        effective = (
+            Integration("vercel", "mcp", True, Requirement.REQUIRED, IntegrationHealth.AVAILABLE),
+            Integration("figma", "mcp", True, Requirement.OPTIONAL, IntegrationHealth.UNKNOWN),
+        )
+        standalone = (effective[1],)
+        with tempfile.TemporaryDirectory() as name, patch(
+            "cw.adapters.codex.shutil.which", return_value="/usr/bin/codex",
+        ), patch("cw.adapters.codex.IntegrationManager.configured", side_effect=(effective, standalone)), patch(
+            "cw.adapters.codex.CodexAdapter._validate_implementer_configuration"
+        ), patch(
             "cw.adapters.codex.subprocess.call", return_value=0,
         ) as invoked:
             CodexAdapter().run_implementer(Path(name), "work", required_integrations=("vercel",))
         command = invoked.call_args.args[0]
         rendered = " ".join(command)
-        self.assertIn("mcp_servers.figma.enabled=false", rendered)
+        self.assertNotIn("mcp_servers.figma.enabled=false", rendered)
         self.assertNotIn("mcp_servers.vercel.enabled=false", rendered)
+        self.assertNotIn("--disable plugins", rendered)
+        self.assertNotIn("transport", rendered)
+
+    def test_process_isolation_never_modifies_user_config(self):
+        with tempfile.TemporaryDirectory() as name:
+            config = Path(name) / "config.toml"
+            config.write_text("[plugins.vercel]\nenabled = true\n", encoding="utf-8")
+            before = config.read_bytes()
+            effective = (Integration(
+                "vercel", "mcp", True, Requirement.OPTIONAL, IntegrationHealth.UNKNOWN,
+            ),)
+            with patch("cw.adapters.codex.IntegrationManager.configured", side_effect=(effective, ())):
+                CodexAdapter()._integration_arguments(())
+            self.assertEqual(before, config.read_bytes())
 
 
 if __name__ == "__main__":

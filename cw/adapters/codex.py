@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import tempfile
@@ -14,6 +13,11 @@ from cw.adapters.structured_output import validate_codex_output_schema
 from cw.integrations.diagnostics import parse_mcp_diagnostics
 from cw.integrations.manager import IntegrationManager
 from cw.integrations.models import IntegrationDiagnostic
+from cw.adapters.invocation import (
+    invocation_details,
+    managed_codex_environment,
+    record_invocation,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +39,56 @@ class CodexAdapter:
         if not self.check_availability():
             raise CwError("Codex CLI was not found", ErrorCode.CODEX_NOT_FOUND, "Install Codex and run: cw doctor")
 
+    def _integration_arguments(self, required: tuple[str, ...]) -> list[str]:
+        """Return process-only isolation flags without reconstructing MCP definitions."""
+
+        manager = IntegrationManager(self.command)
+        required_set = set(required)
+        try:
+            effective = manager.configured(required_set)
+            standalone = manager.configured(required_set, disable_plugins=True)
+        except CwError:
+            # Discovery of optional integrations cannot break a managed agent.
+            # Required integrations have already passed command-level preflight.
+            return ["--disable", "plugins"] if not required_set else []
+        effective_ids = {item.id for item in effective}
+        standalone_ids = {item.id for item in standalone}
+        plugin_ids = effective_ids - standalone_ids
+        arguments: list[str] = []
+        if plugin_ids & required_set:
+            # Codex has no safe per-plugin MCP disable flag.  Keep the effective
+            # configuration intact when a plugin capability is required rather
+            # than adding any mcp_servers overlay that can corrupt plugin data.
+            return arguments
+        arguments.extend(["--disable", "plugins"])
+        for integration_id in sorted(standalone_ids - required_set):
+            arguments.extend(["--config", f"mcp_servers.{integration_id}.enabled=false"])
+        return arguments
+
+    def _validate_implementer_configuration(
+        self,
+        root: Path,
+        global_arguments: list[str],
+        environment: dict[str, str],
+    ) -> None:
+        command = [self.command, *global_arguments, "--cd", str(root), "doctor", "--json"]
+        invocation = record_invocation(root, "implementer-config", command, environment)
+        completed = subprocess.run(
+            command, cwd=root, env=environment, text=True, capture_output=True,
+            stdin=subprocess.DEVNULL, timeout=30, check=False,
+        )
+        if completed.returncode == 0:
+            return
+        code = self.classify_process_error(completed.stderr, completed.stdout, role="implementer")
+        if code is ErrorCode.CODEX_CONFIG_ERROR:
+            diagnostic = self._diagnostic(completed.stdout, completed.stderr)
+            raise CwError(
+                "Codex configuration invalid",
+                code,
+                "Run: cw error",
+                details=f"{diagnostic}\n\n{invocation_details(invocation)}",
+            )
+
     def run_implementer(
         self,
         root: Path,
@@ -46,30 +100,21 @@ class CodexAdapter:
         timeout: int | None = None,
     ) -> int:
         self._require()
-        environment = os.environ.copy()
-        environment["CW_IMPLEMENTER_ACTIVE"] = "1"
-        if session_id:
-            environment["CW_IMPLEMENTER_SESSION"] = session_id
-        command = [
-            self.command, "--strict-config",
+        environment = managed_codex_environment("implementer", session_id=session_id)
+        global_arguments = [
+            "--strict-config",
             "--config", f"sandbox_workspace_write.network_access={str(allow_network).lower()}",
         ]
         if not allow_network:
-            command.extend(["--config", 'web_search="disabled"'])
-        try:
-            configured = IntegrationManager(self.command).configured(set(required_integrations))
-            for integration in configured:
-                if integration.id not in required_integrations:
-                    command.extend(["--config", f"mcp_servers.{integration.id}.enabled=false"])
-        except CwError:
-            # Optional-integration discovery cannot turn a healthy implementer
-            # into a workflow failure. Required integrations are preflighted by
-            # the execution command before this point.
-            pass
+            global_arguments.extend(["--config", 'web_search="disabled"'])
+        global_arguments.extend(self._integration_arguments(required_integrations))
+        self._validate_implementer_configuration(root, global_arguments, environment)
+        command = [self.command, *global_arguments]
         command.extend([
             "--cd", str(root), "--sandbox", "workspace-write",
             "--ask-for-approval", "never", "--no-alt-screen", prompt,
         ])
+        invocation = record_invocation(root, "implementer", command, environment, prompt=prompt)
         if timeout is None:
             return_code = subprocess.call(command, cwd=root, env=environment)
         else:
@@ -103,7 +148,7 @@ class CodexAdapter:
                 "Codex implementer exited unexpectedly",
                 ErrorCode.IMPLEMENTER_PROCESS_ERROR,
                 "Run: cw retry",
-                details=f"Codex exit code: {return_code}",
+                details=f"Codex exit code: {return_code}\n{invocation_details(invocation)}",
             )
         return 0
 
@@ -114,16 +159,16 @@ class CodexAdapter:
         validate_codex_output_schema(schema, role=role)
         with tempfile.TemporaryDirectory(prefix=f"cw-{role}-") as temporary:
             output = Path(temporary) / "result.json"
-            environment = os.environ.copy()
-            environment[f"CW_{role.upper()}_ACTIVE"] = "1"
+            environment = managed_codex_environment(role)
             command = [
                 self.command, "--strict-config", "--config", 'web_search="disabled"',
                 "--config", "project_doc_max_bytes=0",
                 "--ask-for-approval", "never", "exec", "--ephemeral", "--ignore-user-config",
-                "--disable", "hooks", "--sandbox", "read-only",
+                "--disable", "plugins", "--disable", "hooks", "--sandbox", "read-only",
                 "--ignore-rules", "--color", "never", "--output-schema", str(schema),
                 "--output-last-message", str(output), "--cd", str(root), prompt,
             ]
+            invocation = record_invocation(root, role, command, environment, prompt=prompt)
             try:
                 completed = subprocess.run(
                     command, cwd=root, env=environment, text=True, capture_output=True,
@@ -136,9 +181,14 @@ class CodexAdapter:
             if completed.returncode:
                 code = self.classify_process_error(completed.stderr, completed.stdout, role=role)
                 label = "Independent reviewer" if role == "reviewer" else "Codex planner"
-                hint = "Run: cw error" if code is ErrorCode.PLANNER_SCHEMA_ERROR else "Run: cw retry"
+                hint = "Run: cw error" if code in {
+                    ErrorCode.PLANNER_SCHEMA_ERROR, ErrorCode.CODEX_CONFIG_ERROR,
+                } else "Run: cw retry"
                 diagnostic = self._diagnostic(completed.stdout, completed.stderr)
-                raise CwError(f"{label} unavailable", code, hint, details=diagnostic)
+                raise CwError(
+                    f"{label} unavailable", code, hint,
+                    details=f"{diagnostic}\n\n{invocation_details(invocation)}",
+                )
             try:
                 payload = json.loads(output.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
@@ -176,6 +226,14 @@ class CodexAdapter:
     def classify_process_error(stderr: str, stdout: str = "", *, role: str = "reviewer") -> ErrorCode:
         """Classify the terminal cause, not earlier unrelated MCP noise."""
         text = f"{stdout}\n{stderr}".lower()
+        if (
+            any(term in text for term in (
+                "error loading config.toml", "invalid transport", "invalid configuration",
+            )) and ("mcp_servers." in text or "config.toml" in text)
+        ) or any(term in text for term in (
+            '"config.load"', "config could not be loaded", "failed to load codex config",
+        )):
+            return ErrorCode.CODEX_CONFIG_ERROR
         if role == "planner" and any(term in text for term in (
             "invalid_json_schema", "invalid schema for response_format",
             "structured output schema", "text.format.schema",

@@ -151,6 +151,7 @@ def error_summary(code: str, message: str) -> tuple[str, str]:
         "INVALID_GATE": ("Approval gate invalid", message),
         "PROTECTED_PATH_MODIFIED": ("Protected workflow metadata changed", "CW detected an unauthorized metadata change and stopped safely."),
         "CODEX_NOT_FOUND": ("Codex not found", "The Codex CLI is required for planning and agent operations."),
+        "CODEX_CONFIG_ERROR": ("Codex configuration invalid", "CW could not start Codex because its effective configuration was rejected."),
         "SCHEMA_VALIDATION_ERROR": ("Workflow data invalid", message),
         "SCHEMA_VERSION_ERROR": ("Workflow schema incompatible", message),
         "INTERNAL_ERROR": ("CW encountered an internal error", "The operation stopped safely. Run: cw error"),

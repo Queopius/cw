@@ -393,6 +393,8 @@ def command_error(args: argparse.Namespace, console: Console, *, root_resolver: 
 
 
 def command_version(args: argparse.Namespace, console: Console) -> int:
+    from cw.core.build import version_diagnostics
+
     settings = load_update_settings()
     installation = ManagedInstallation()
     payload = {
@@ -400,6 +402,8 @@ def command_version(args: argparse.Namespace, console: Console) -> int:
         "version": __version__, "channel": settings.channel, "schema": SCHEMA_VERSION,
         "install": installation.kind,
     }
+    diagnostics = version_diagnostics()
+    payload.update(diagnostics)
     if args.json:
         emit_json(payload)
     else:
@@ -409,4 +413,11 @@ def command_version(args: argparse.Namespace, console: Console) -> int:
         console.field("Channel", settings.channel)
         console.field("Schema", SCHEMA_VERSION)
         console.field("Install", installation.kind)
+        if args.verbose:
+            console.field("Executable", diagnostics["executable"])
+            console.field("Runtime", diagnostics["runtime"])
+            console.field("Build", diagnostics["build"])
+            if diagnostics["source_build"]:
+                console.field("Source", diagnostics["source_build"])
+                console.field("Source match", "YES" if diagnostics["source_match"] else "NO · stale installation")
     return 0

@@ -142,13 +142,21 @@ mutations; the global updater lock remains independent.
 
 ## Integration isolation
 
-Codex MCP configuration remains user-owned. Planner and reviewer subprocesses
-use supported `codex exec --ignore-user-config`, which retains authentication
-while excluding user MCP/plugin configuration; both remain ephemeral,
-read-only, and hook-disabled. The interactive implementer retains the normal
-authenticated environment and applies per-process
-`mcp_servers.<id>.enabled=false` overrides only to integrations not required by
-the project/current phase.
+Codex MCP configuration remains user-owned. CW discovers effective servers with
+`codex mcp list`; it does not assume that `~/.codex/config.toml` is the only
+source because plugins can contribute MCP definitions. Planner and reviewer
+subprocesses retain authentication but use `--disable plugins`,
+`--ignore-user-config`, and `--disable hooks` for a minimal ephemeral read-only
+surface. The implementer retains project hooks and applies `--disable plugins`
+when no plugin-provided integration is required. Standalone optional servers
+receive only an `enabled=false` process override. CW never reconstructs MCP
+definitions or emits an unsupported `transport` property.
+
+Before opening an interactive implementer CW runs a local Codex configuration
+preflight with the same global arguments. A rejected effective MCP configuration
+becomes non-retryable `CODEX_CONFIG_ERROR`, not a generic implementer crash.
+Sanitized invocation records under `.cw/logs/` retain exact flags and a small
+environment allowlist; prompts are represented by SHA-256 identifiers.
 
 `cw.integrations` normalizes configured, required, and health state and extracts
 bounded MCP diagnostics from captured stderr. Optional diagnostics cannot

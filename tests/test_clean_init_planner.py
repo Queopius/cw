@@ -294,7 +294,9 @@ class StructuredOutputCompatibilityTests(unittest.TestCase):
             def fake_run(command, **kwargs):
                 self.assertIn("exec", command)
                 self.assertIn("read-only", command)
-                self.assertEqual("hooks", command[command.index("--disable") + 1])
+                disable_pairs = [command[index:index + 2] for index in range(len(command) - 1)]
+                self.assertIn(["--disable", "plugins"], disable_pairs)
+                self.assertIn(["--disable", "hooks"], disable_pairs)
                 self.assertNotIn("phase_gate.py", " ".join(command))
                 self.assertEqual("1", kwargs["env"]["CW_PLANNER_ACTIVE"])
                 self.assertNotIn("CW_IMPLEMENTER_ACTIVE", kwargs["env"])
