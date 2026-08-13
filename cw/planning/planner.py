@@ -9,6 +9,8 @@ from typing import Any, Protocol
 
 from cw.core.errors import CwError, ErrorCode
 from cw.core.schema import SCHEMA_VERSION
+from cw.core.severity import CANONICAL_CRITERION_SEVERITIES, CriterionSeverity
+from cw.adapters.structured_output import codex_schema
 
 
 def _read_text_prefix(path: Path, limit: int) -> str:
@@ -60,6 +62,8 @@ class Planner:
         )
         self.backend = backend
         self.timeout = timeout
+        self.last_stdout = ""
+        self.last_stderr = ""
 
     def inspect_project(self, root: Path) -> ProjectInspection:
         stacks: list[str] = []
@@ -172,8 +176,12 @@ class Planner:
             purpose = re.search(r"(?:goal|objective|purpose)\s*:\s*(.+)", text, re.IGNORECASE)
             if purpose:
                 return purpose.group(1).strip()[:200]
-            if match and len(match.group(1).strip()) > 3:
-                return f"Deliver the documented {match.group(1).strip()} project"
+            # A heading alone (for example "# Demo project") identifies a
+            # repository but does not establish a reliable development goal.
+            body = re.sub(r"^#.*$", "", text, flags=re.MULTILINE).strip()
+            meaningful = " ".join(body.split())
+            if match and len(match.group(1).strip()) > 3 and len(meaningful) >= 40:
+                return f"Deliver the documented {match.group(1).strip()} project: {meaningful[:140]}"
         return None
 
     def select_context(self, root: Path, inspection: ProjectInspection) -> dict[str, str]:
@@ -193,7 +201,12 @@ class Planner:
         inspection = self.inspect_project(root)
         objective = goal or inspection.inferred_goal
         if not objective:
-            raise CwError("Project goal is unclear", ErrorCode.PLAN_UNCLEAR, 'Add project documentation or run: cw plan --goal "..."')
+            raise CwError(
+                "CW could not derive a reliable development objective",
+                ErrorCode.PLAN_UNCLEAR,
+                'Run: cw plan --goal "Describe what you want to build"',
+                exit_code=3,
+            )
         if self.backend is not None:
             return self._propose_with_backend(root, project_id, objective, inspection)
         explicit = self._explicit_phase_names(root, inspection.evidence)
@@ -211,8 +224,8 @@ class Planner:
                 "depends_on": [], "artifacts": ["docs/workflow/01-repository-assessment.md"],
                 "review_paths": list(dict.fromkeys([*inspection.evidence, *review_paths])), "required_commands": [],
                 "acceptance_criteria": [
-                    {"id": "BASE-001", "severity": "blocking", "description": "Current architecture and constraints are documented."},
-                    {"id": "BASE-002", "severity": "blocking", "description": "The existing verification baseline is recorded."},
+                    {"id": "BASE-001", "severity": CriterionSeverity.BLOCKING.value, "description": "Current architecture and constraints are documented."},
+                    {"id": "BASE-002", "severity": CriterionSeverity.BLOCKING.value, "description": "The existing verification baseline is recorded."},
                 ], "blocking_criteria": ["Unknown baseline risks"], "requires_human_approval": False,
             },
             {
@@ -220,8 +233,8 @@ class Planner:
                 "depends_on": ["01-repository-assessment"], "artifacts": [f"docs/workflow/02-{slug}.md"],
                 "review_paths": review_paths, "required_commands": commands,
                 "acceptance_criteria": [
-                    {"id": "GOAL-001", "severity": "blocking", "description": f"The implementation satisfies: {objective}."},
-                    {"id": "GOAL-002", "severity": "blocking", "description": "Relevant automated tests cover the delivered behavior."},
+                    {"id": "GOAL-001", "severity": CriterionSeverity.BLOCKING.value, "description": f"The implementation satisfies: {objective}."},
+                    {"id": "GOAL-002", "severity": CriterionSeverity.BLOCKING.value, "description": "Relevant automated tests cover the delivered behavior."},
                 ], "blocking_criteria": ["Required checks fail", "Acceptance evidence is ambiguous"],
                 "requires_human_approval": self._needs_human_gate(objective),
             },
@@ -231,8 +244,8 @@ class Planner:
                 "depends_on": [f"02-{slug}"], "artifacts": ["docs/workflow/03-release-verification.md"],
                 "review_paths": list(dict.fromkeys([*review_paths, "README*", "docs/**/*"])), "required_commands": commands,
                 "acceptance_criteria": [
-                    {"id": "REL-001", "severity": "blocking", "description": "All deterministic checks pass from a clean verification run."},
-                    {"id": "REL-002", "severity": "blocking", "description": "User-facing and operational documentation is accurate."},
+                    {"id": "REL-001", "severity": CriterionSeverity.BLOCKING.value, "description": "All deterministic checks pass from a clean verification run."},
+                    {"id": "REL-002", "severity": CriterionSeverity.BLOCKING.value, "description": "User-facing and operational documentation is accurate."},
                 ], "blocking_criteria": ["Regression or release blocker remains"], "requires_human_approval": False,
             },
         ]
@@ -262,24 +275,26 @@ every acceptance criterion independently, and use deterministic commands without
 shell operators. Never target .git, .codex, or .cw as phase artifacts or review
 paths. Do not invent work unrelated to the stated goal.
 """
-        schema = Path(__file__).resolve().parents[1] / "schemas" / "plan-proposal.schema.json"
+        schema = codex_schema("plan-output.schema.json")
         response = self.backend.run_planner(root, prompt, schema, self.timeout)
+        self.last_stdout = getattr(response, "stdout", "")
+        self.last_stderr = getattr(response, "stderr", "")
         payload = response.payload
         if not isinstance(payload, dict) or set(payload) != {"phases"} or not isinstance(payload["phases"], list):
-            raise CwError("Planner result schema is invalid", ErrorCode.PLANNER_PROCESS_ERROR, "Run: cw retry")
+            raise CwError("Planner result schema is invalid", ErrorCode.PLANNER_SCHEMA_ERROR, "Run: cw error")
         try:
             self._validate_backend_shape(payload["phases"])
         except CwError as exc:
             raise CwError(
                 "Planner returned an unsafe or invalid plan",
-                ErrorCode.PLANNER_PROCESS_ERROR,
-                "Run: cw retry",
+                ErrorCode.PLANNER_SCHEMA_ERROR,
+                "Run: cw error",
                 details=str(exc),
             ) from exc
         phases: list[dict[str, Any]] = []
         for raw in payload["phases"]:
             if not isinstance(raw, dict):
-                raise CwError("Planner result schema is invalid", ErrorCode.PLANNER_PROCESS_ERROR, "Run: cw retry")
+                raise CwError("Planner result schema is invalid", ErrorCode.PLANNER_SCHEMA_ERROR, "Run: cw error")
             phase = dict(raw)
             text = " ".join((objective, str(phase.get("name", "")), str(phase.get("objective", ""))))
             phase["requires_human_approval"] = bool(phase.get("requires_human_approval")) or self._needs_human_gate(text)
@@ -290,8 +305,8 @@ paths. Do not invent work unrelated to the stated goal.
         except CwError as exc:
             raise CwError(
                 "Planner returned an unsafe or invalid plan",
-                ErrorCode.PLANNER_PROCESS_ERROR,
-                "Run: cw retry",
+                ErrorCode.PLANNER_SCHEMA_ERROR,
+                "Run: cw error",
                 details=str(exc),
             ) from exc
         return workflow
@@ -304,38 +319,38 @@ paths. Do not invent work unrelated to the stated goal.
             "requires_human_approval",
         }
         if not 1 <= len(phases) <= 20:
-            raise CwError("Planner result must contain between 1 and 20 phases", ErrorCode.PLANNER_PROCESS_ERROR)
+            raise CwError("Planner result must contain between 1 and 20 phases", ErrorCode.PLANNER_SCHEMA_ERROR)
         for phase in phases:
             if not isinstance(phase, dict) or set(phase) != phase_fields:
-                raise CwError("Planner phase fields are invalid", ErrorCode.PLANNER_PROCESS_ERROR)
+                raise CwError("Planner phase fields are invalid", ErrorCode.PLANNER_SCHEMA_ERROR)
             if not all(isinstance(phase[key], str) and phase[key] for key in ("id", "name", "objective")):
-                raise CwError("Planner phase text fields are invalid", ErrorCode.PLANNER_PROCESS_ERROR)
+                raise CwError("Planner phase text fields are invalid", ErrorCode.PLANNER_SCHEMA_ERROR)
             for key in ("depends_on", "artifacts", "review_paths", "blocking_criteria"):
                 values = phase[key]
                 if not isinstance(values, list) or not all(isinstance(value, str) and value for value in values):
-                    raise CwError(f"Planner phase {key} is invalid", ErrorCode.PLANNER_PROCESS_ERROR)
+                    raise CwError(f"Planner phase {key} is invalid", ErrorCode.PLANNER_SCHEMA_ERROR)
                 if len(values) != len(set(values)):
-                    raise CwError(f"Planner phase {key} contains duplicates", ErrorCode.PLANNER_PROCESS_ERROR)
+                    raise CwError(f"Planner phase {key} contains duplicates", ErrorCode.PLANNER_SCHEMA_ERROR)
             if not phase["artifacts"] or not phase["review_paths"] or not isinstance(phase["requires_human_approval"], bool):
-                raise CwError("Planner phase safety fields are invalid", ErrorCode.PLANNER_PROCESS_ERROR)
+                raise CwError("Planner phase safety fields are invalid", ErrorCode.PLANNER_SCHEMA_ERROR)
             commands = phase["required_commands"]
             if not isinstance(commands, list):
-                raise CwError("Planner required commands are invalid", ErrorCode.PLANNER_PROCESS_ERROR)
+                raise CwError("Planner required commands are invalid", ErrorCode.PLANNER_SCHEMA_ERROR)
             for command in commands:
                 if not isinstance(command, dict) or set(command) != {"command"}:
-                    raise CwError("Planner required command is invalid", ErrorCode.PLANNER_PROCESS_ERROR)
+                    raise CwError("Planner required command is invalid", ErrorCode.PLANNER_SCHEMA_ERROR)
                 if not isinstance(command["command"], str) or not command["command"]:
-                    raise CwError("Planner required command is invalid", ErrorCode.PLANNER_PROCESS_ERROR)
+                    raise CwError("Planner required command is invalid", ErrorCode.PLANNER_SCHEMA_ERROR)
             criteria = phase["acceptance_criteria"]
             if not isinstance(criteria, list) or not criteria:
-                raise CwError("Planner acceptance criteria are invalid", ErrorCode.PLANNER_PROCESS_ERROR)
+                raise CwError("Planner acceptance criteria are invalid", ErrorCode.PLANNER_SCHEMA_ERROR)
             for criterion in criteria:
                 if not isinstance(criterion, dict) or set(criterion) != {"id", "severity", "description"}:
-                    raise CwError("Planner acceptance criterion is invalid", ErrorCode.PLANNER_PROCESS_ERROR)
-                if criterion["severity"] not in {"blocking", "advisory"}:
-                    raise CwError("Planner criterion severity is invalid", ErrorCode.PLANNER_PROCESS_ERROR)
+                    raise CwError("Planner acceptance criterion is invalid", ErrorCode.PLANNER_SCHEMA_ERROR)
+                if criterion["severity"] not in CANONICAL_CRITERION_SEVERITIES:
+                    raise CwError("Planner criterion severity is invalid", ErrorCode.PLANNER_SCHEMA_ERROR)
                 if not all(isinstance(criterion[key], str) and criterion[key] for key in ("id", "description")):
-                    raise CwError("Planner acceptance criterion is invalid", ErrorCode.PLANNER_PROCESS_ERROR)
+                    raise CwError("Planner acceptance criterion is invalid", ErrorCode.PLANNER_SCHEMA_ERROR)
 
     def _workflow(
         self,
@@ -395,8 +410,8 @@ paths. Do not invent work unrelated to the stated goal.
                 "review_paths": list(dict.fromkeys([*inspection.evidence, *review_paths])),
                 "required_commands": commands if index == len(names) else [],
                 "acceptance_criteria": [
-                    {"id": f"PHASE-{index:02d}-001", "severity": "blocking", "description": f"The documented requirements for {name} are satisfied."},
-                    {"id": f"PHASE-{index:02d}-002", "severity": "blocking", "description": f"Verification evidence for {name} is recorded."},
+                    {"id": f"PHASE-{index:02d}-001", "severity": CriterionSeverity.BLOCKING.value, "description": f"The documented requirements for {name} are satisfied."},
+                    {"id": f"PHASE-{index:02d}-002", "severity": CriterionSeverity.BLOCKING.value, "description": f"Verification evidence for {name} is recorded."},
                 ],
                 "blocking_criteria": ["Documented phase requirements are unmet"],
                 "requires_human_approval": self._needs_human_gate(name),

@@ -1,0 +1,18 @@
+╭──────────────────────────────────────────────────────────────╮
+│ CW · Codex Workflow                                   v0.3.0 │
+│ by Queopius                                                  │
+╰──────────────────────────────────────────────────────────────╯
+
+  clean-project                                              dev
+  ──────────────────────────────────────────────────────────────
+
+  WORKFLOW                                         ○ INITIALIZED
+
+  Plan        NOT CREATED
+
+  No development plan exists yet.
+
+  NEXT STEP
+  ──────────────────────────────────────────────────────────────
+
+  cw plan           Analyze this project and create a plan

@@ -6,6 +6,7 @@ from typing import Any
 
 from cw import __version__
 from .errors import CwError, ErrorCode
+from .legacy_evidence import is_legacy_gate, is_legacy_review, validate_legacy_gate, validate_legacy_review
 from .models import Phase, Workflow
 from .reviews import validate_reviewer_result
 from .schema import SCHEMA_VERSION, schema_version
@@ -34,6 +35,11 @@ def validate_approval_review(root: Path, workflow: Workflow, phase: Phase, refer
         raise CwError(f"Gate has an invalid review reference: {phase.id}", ErrorCode.INVALID_GATE)
     review = load_json(review_path)
     schema_version(review, f"Review evidence for {phase.id}")
+    if is_legacy_review(review):
+        try:
+            return validate_legacy_review(root, workflow, phase, review, require_approval=True)
+        except CwError as exc:
+            raise CwError(f"Gate review evidence is invalid: {phase.id}", ErrorCode.INVALID_GATE) from exc
     if (
         not isinstance(review, dict)
         or review.get("workflow") != workflow.id
@@ -91,6 +97,12 @@ def validate_gate(root: Path, workflow: Workflow, phase_id: str) -> dict[str, An
         raise CwError(f"Missing dependency gate: {phase_id}", ErrorCode.INVALID_GATE)
     data = load_json(path)
     schema_version(data, f"Approval gate {phase_id}")
+    try:
+        phase = workflow.phase(phase_id)
+    except KeyError as exc:
+        raise CwError(f"Invalid approval gate: {phase_id}", ErrorCode.INVALID_GATE) from exc
+    if is_legacy_gate(data):
+        return validate_legacy_gate(root, workflow, phase, data)
     if (
         data.get("workflow") != workflow.id
         or data.get("workflow_version") != workflow.version
@@ -100,10 +112,6 @@ def validate_gate(root: Path, workflow: Workflow, phase_id: str) -> dict[str, An
         or not isinstance(data.get("git"), dict)
     ):
         raise CwError(f"Invalid approval gate: {phase_id}", ErrorCode.INVALID_GATE)
-    try:
-        phase = workflow.phase(phase_id)
-    except KeyError as exc:
-        raise CwError(f"Invalid approval gate: {phase_id}", ErrorCode.INVALID_GATE) from exc
     expected = data.get("artifact_hashes")
     if not isinstance(expected, dict) or set(expected) != set(phase.artifacts):
         raise CwError(f"Gate has no artifact hashes: {phase_id}", ErrorCode.INVALID_GATE)

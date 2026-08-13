@@ -1,0 +1,9 @@
+╭──────────────────────────────────────────────────────────────╮
+│ CW · History                                                 │
+╰──────────────────────────────────────────────────────────────╯
+
+  ✓ 01 · Repository Assessment
+      Approved · attempt 1
+
+  → 02 · Build Authentication
+      Current

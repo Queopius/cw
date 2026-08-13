@@ -6,15 +6,17 @@ from typing import Any
 from cw import __version__
 from .errors import CwError, ErrorCode
 from .layout import safe_file
-from .models import Workflow, WorkflowState
+from .gates import validate_gate
+from .models import Phase, Workflow, WorkflowState
 from .schema import SCHEMA_VERSION, schema_version
 from .utils import atomic_json, load_json, utc_now
 from .workflow import workflow_hash
 
 
 TRANSITIONS: dict[WorkflowState, set[WorkflowState]] = {
-    WorkflowState.UNINITIALIZED: {WorkflowState.PLANNING},
-    WorkflowState.PLANNING: {WorkflowState.PLAN_PROPOSED, WorkflowState.ERROR},
+    WorkflowState.UNINITIALIZED: {WorkflowState.INITIALIZED, WorkflowState.PLANNING},
+    WorkflowState.INITIALIZED: {WorkflowState.PLANNING},
+    WorkflowState.PLANNING: {WorkflowState.INITIALIZED, WorkflowState.PLAN_PROPOSED, WorkflowState.ERROR},
     WorkflowState.PLAN_PROPOSED: {WorkflowState.READY, WorkflowState.PLANNING},
     WorkflowState.READY: {WorkflowState.IN_PROGRESS},
     WorkflowState.IN_PROGRESS: {WorkflowState.READY_FOR_REVIEW, WorkflowState.ERROR, WorkflowState.PAUSED},
@@ -33,8 +35,9 @@ def initial_state(project_id: str) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION, "cw_version": __version__, "workflow_id": project_id,
         "workflow_version": None, "workflow_sha256": None, "current_phase": None,
-        "status": WorkflowState.UNINITIALIZED.value, "attempt": 0,
+        "status": WorkflowState.INITIALIZED.value, "attempt": 0,
         "last_review": None, "last_gate": None, "last_error": None,
+        "infrastructure_error": None,
         "pending_goal": None,
         "history": [], "updated_at": utc_now(),
     }
@@ -71,6 +74,7 @@ def bind_plan(root: Path, state: dict[str, Any], workflow: Workflow) -> None:
         "workflow_sha256": workflow_hash(path),
         "current_phase": workflow.phases[0].id if workflow.phases else None,
         "attempt": 0, "last_review": None, "last_gate": None, "last_error": None,
+        "infrastructure_error": None,
         "pending_goal": None,
     })
     save_state(root, state)
@@ -83,3 +87,89 @@ def validate_state(root: Path, state: dict[str, Any], workflow: Workflow) -> Non
         raise CwError("Workflow changed after state was created", ErrorCode.INVALID_STATE, "Run: cw plan rebuild")
     if workflow.phases and state.get("current_phase") not in {phase.id for phase in workflow.phases}:
         raise CwError("Current phase is not in the workflow", ErrorCode.INVALID_STATE)
+    infrastructure = state.get("infrastructure_error")
+    if infrastructure is not None:
+        required = {"error_code", "retryable", "operation", "phase", "occurred_at"}
+        allowed = required | {"legacy", "retry_started_at"}
+        valid_codes = {code.value for code in ErrorCode}
+        valid_phases = {phase.id for phase in workflow.phases} | {None}
+        if (
+            not isinstance(infrastructure, dict)
+            or not required.issubset(infrastructure)
+            or set(infrastructure) - allowed
+            or infrastructure.get("error_code") not in valid_codes
+            or not isinstance(infrastructure.get("retryable"), bool)
+            or infrastructure.get("operation") not in {"review", "implementation", "planning", "codex"}
+            or infrastructure.get("phase") not in valid_phases
+            or not isinstance(infrastructure.get("occurred_at"), str)
+            or not infrastructure["occurred_at"]
+            or ("legacy" in infrastructure and not isinstance(infrastructure["legacy"], bool))
+            or (
+                "retry_started_at" in infrastructure
+                and (
+                    not isinstance(infrastructure["retry_started_at"], str)
+                    or not infrastructure["retry_started_at"]
+                )
+            )
+        ):
+            raise CwError("Infrastructure error metadata is invalid", ErrorCode.INVALID_STATE, "Run: cw repair")
+
+
+def advance_after_approval(
+    root: Path,
+    state: dict[str, Any],
+    workflow: Workflow,
+    phase: Phase,
+    gate_reference: str,
+    *,
+    attempt: int,
+    action: str = "approved",
+    timestamp: str | None = None,
+    record_event: bool = True,
+) -> Phase | None:
+    """Commit the operational state produced by a verified phase gate.
+
+    Reviews and gates are append-only evidence. This is the single state
+    operation that turns that evidence into either the next executable phase or
+    a completed workflow.
+    """
+    if state.get("current_phase") != phase.id:
+        raise CwError("Approval does not target the current phase", ErrorCode.INVALID_STATE)
+    if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
+        raise CwError("Approval attempt is invalid", ErrorCode.INVALID_STATE)
+    expected_reference = f".cw/gates/{phase.id}.approved.json"
+    if gate_reference != expected_reference:
+        raise CwError("Approval gate reference is invalid", ErrorCode.INVALID_GATE)
+    validate_gate(root, workflow, phase.id)
+
+    state["last_gate"] = gate_reference
+    state["last_error"] = None
+    state["infrastructure_error"] = None
+    if record_event:
+        event: dict[str, Any] = {
+            "timestamp": timestamp or utc_now(),
+            "phase": phase.id,
+            "action": action,
+            "gate": gate_reference,
+        }
+        if action == "approved":
+            event["attempt"] = attempt
+        state.setdefault("history", []).append(event)
+
+    index = workflow.index(phase.id)
+    next_phase = workflow.phases[index + 1] if index + 1 < len(workflow.phases) else None
+    if next_phase is None:
+        state["status"] = WorkflowState.COMPLETED.value
+        state["attempt"] = attempt
+    else:
+        state["current_phase"] = next_phase.id
+        state["status"] = WorkflowState.IN_PROGRESS.value
+        state["attempt"] = 0
+    save_state(root, state)
+
+    # Runtime evidence belongs to the approved phase and cannot cross the gate.
+    from .session import finish_session, readiness_path
+
+    readiness_path(root).unlink(missing_ok=True)
+    finish_session(root)
+    return next_phase

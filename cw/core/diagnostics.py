@@ -113,6 +113,37 @@ def record_diagnostic(
     return record
 
 
+def global_diagnostic_path() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cw" / "last-error.json"
+
+
+def record_global_diagnostic(
+    error: CwError, *, source: str | None = None, traceback_text: str | None = None,
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "timestamp": utc_now(),
+        "code": error.code.value,
+        "message": redact(error.message),
+        "hint": redact(error.hint),
+        "details": redact(error.details),
+        "source": redact(source),
+        "traceback": redact(traceback_text),
+    }
+    atomic_json(global_diagnostic_path(), record)
+    return record
+
+
+def load_global_diagnostic() -> dict[str, Any] | None:
+    path = global_diagnostic_path()
+    if not path.is_file() or path.is_symlink():
+        return None
+    try:
+        return _valid_record(load_json(path))
+    except CwError:
+        return None
+
+
 def legacy_diagnostic(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, str) or not value.strip():
         return None

@@ -6,15 +6,18 @@ from pathlib import Path
 from typing import Any
 
 from cw.adapters.codex import CodexAdapter
+from cw.adapters.structured_output import codex_schema
 from cw.checks.deterministic import validate_phase
 from cw.core.diagnostics import redact, state_error
 from cw.core.errors import CwError, ErrorCode, HumanActionRequired
 from cw.core.gates import artifact_hashes, create_gate, validate_approval_review
 from cw.core.models import Phase, ReviewDecision, Workflow, WorkflowState
+from cw.core.recovery import mark_infrastructure_error
 from cw.core.reviews import validate_reviewer_result
 from cw.core.schema import SCHEMA_VERSION
+from cw.core.severity import CriterionSeverity
 from cw.core.session import finish_session, readiness_path
-from cw.core.state import save_state, transition
+from cw.core.state import advance_after_approval, save_state, transition
 from cw.core.utils import atomic_json_new, utc_now
 
 
@@ -32,6 +35,8 @@ Evidence entries must begin with an allowed project-relative file path and may
 include a line suffix, for example `src/service.py:42 concrete observation`.
 Evaluate every acceptance and blocking criterion exactly once. A blocking
 criterion passes only when concrete evidence proves that condition is absent.
+An advisory acceptance failure is an observation, not a blocking issue, and
+must not change an otherwise valid APPROVE decision to REVISE.
 Cite concrete repository evidence.
 Ambiguous or missing evidence is not a pass. Do not invent criteria and do not review future phases.
 Return only the JSON object required by the supplied schema.
@@ -74,7 +79,7 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
 
     attempt = int(state.get("attempt", 0)) + 1
     reviewer = adapter or CodexAdapter()
-    schema = Path(__file__).resolve().parents[1] / "schemas" / "phase-review.schema.json"
+    schema = codex_schema("review-output.schema.json")
     try:
         response = reviewer.run_reviewer(root, reviewer_prompt(workflow, phase), schema, workflow.review_timeout)
         decision, criteria, blocking_criteria, issues = validate_reviewer_result(
@@ -82,6 +87,13 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
         )
     except CwError as exc:
         state["last_error"] = state_error(exc)
+        metadata = mark_infrastructure_error(
+            state, exc, operation="review", phase=phase.id,
+        )
+        _event(
+            state, phase.id, "infrastructure_error",
+            operation="review", error_code=metadata["error_code"],
+        )
         transition(root, state, WorkflowState.ERROR, force_error=True)
         report = {
             "schema_version": SCHEMA_VERSION, "workflow": workflow.id, "phase": phase.id,
@@ -94,6 +106,11 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
         raise
 
     state["attempt"] = attempt
+    configured = {criterion.id: criterion for criterion in phase.acceptance_criteria}
+    criteria = [
+        {**criterion, "severity": configured[criterion["id"]].severity.value}
+        for criterion in criteria
+    ]
     report = {
         "schema_version": SCHEMA_VERSION, "workflow": workflow.id, "phase": phase.id, "attempt": attempt,
         "kind": "semantic_review", "decision": decision.value, "summary": response.payload["summary"],
@@ -103,6 +120,7 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
     path = _persist_review(root, phase, report, f"attempt-{attempt:02d}")
     state["last_review"] = path.relative_to(root).as_posix()
     state["last_error"] = None
+    state["infrastructure_error"] = None
 
     if decision is ReviewDecision.APPROVE:
         if phase.requires_human_approval:
@@ -112,11 +130,16 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
             finish_session(root)
             return report
         gate = create_gate(root, workflow, phase, state["last_review"])
-        state["last_gate"] = gate.relative_to(root).as_posix()
-        _event(state, phase.id, "approved", attempt=attempt, gate=state["last_gate"])
-        transition(root, state, WorkflowState.APPROVED)
-        readiness_path(root).unlink(missing_ok=True)
-        finish_session(root)
+        gate_reference = gate.relative_to(root).as_posix()
+        next_phase = advance_after_approval(
+            root, state, workflow, phase, gate_reference, attempt=attempt,
+        )
+        report = {
+            **report,
+            "gate": gate_reference,
+            "next_phase": next_phase.id if next_phase else None,
+            "workflow_completed": next_phase is None,
+        }
     elif decision is ReviewDecision.HUMAN_REVIEW_REQUIRED:
         _event(state, phase.id, "human_review_required", attempt=attempt)
         transition(root, state, WorkflowState.HUMAN_REVIEW_REQUIRED)
@@ -143,9 +166,14 @@ def human_approve(root: Path, workflow: Workflow, phase: Phase, state: dict[str,
     if not isinstance(expected, dict) or expected != current:
         raise CwError("Artifacts changed after semantic review", ErrorCode.INVALID_GATE, "Reopen and review the phase again.")
     gate = create_gate(root, workflow, phase, str(state["last_review"]), human_approved=True)
-    state["last_gate"] = gate.relative_to(root).as_posix()
-    _event(state, phase.id, "human_approved", gate=state["last_gate"])
-    transition(root, state, WorkflowState.APPROVED)
-    readiness_path(root).unlink(missing_ok=True)
-    finish_session(root)
+    gate_reference = gate.relative_to(root).as_posix()
+    advance_after_approval(
+        root,
+        state,
+        workflow,
+        phase,
+        gate_reference,
+        attempt=int(review["attempt"]),
+        action="human_approved",
+    )
     return gate

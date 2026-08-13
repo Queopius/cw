@@ -1,0 +1,21 @@
+╭──────────────────────────────────────────────────────────────╮
+│ CW · Review                                                  │
+╰──────────────────────────────────────────────────────────────╯
+
+→ 02 · Build Authentication
+
+  ✓ Manifest
+  ✓ Deterministic checks
+  ✓ Dependency gates
+
+✕ REVISION REQUIRED
+
+  Phase       02 · Build Authentication
+  Issues      1 blocking
+
+  AUTH-001 Authentication tests are incomplete.
+
+Phase 02 remains active.
+
+  Run:
+    cw

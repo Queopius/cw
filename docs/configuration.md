@@ -11,7 +11,68 @@ first, then global and project files override them. A newly initialized project
 leaves its overrides commented out so it does not accidentally mask global
 preferences.
 
-CW v0.1 enforces `max_review_attempts`, `command_timeout`, `review_timeout`,
+Project overrides can be written safely through the CLI:
+
+```bash
+cw config set allow_network true
+cw config set max_review_attempts 5
+cw config set human_gate_categories '["payments", "cryptography"]'
+```
+
+The setter accepts only known settings, validates the complete effective policy
+before mutation, acquires the project operation lock, and atomically replaces
+`.cw/config.toml`. Invalid values leave the file unchanged. List values use JSON
+array syntax. Project policy settings change only the current repository.
+Update preferences are explicitly global:
+
+```bash
+cw config set updates.channel stable
+cw config set updates.check false
+cw config set updates.check_interval_hours 24
+```
+
+Equivalent `[updates]` keys live in `~/.config/cw/config.toml`. The supported
+environment surface is `CW_NO_UPDATE_CHECK=1` and
+`CW_UPDATE_CHANNEL=stable|beta|dev`; CI suppresses automatic checks by default.
+Stable never selects prereleases.
+
+Integration requirements are project metadata, not connection configuration:
+
+```toml
+[integrations.vercel]
+required = false
+```
+
+CW stores no MCP URLs, tokens, or provider credentials. A phase may additionally
+declare `required_integrations`; only required capabilities participate in its
+start preflight.
+
+Bounded execution preferences are global:
+
+```toml
+[execution]
+default_phases = 1
+recommended_max_phases = 3
+hard_max_phases = 10
+default_max_time = "2h"
+max_semantic_revisions_per_phase = 3
+```
+
+They can also be set with `cw config set execution.<key> <value>`. Project
+configuration may only reduce the global ceilings:
+
+```toml
+[execution]
+max_phases = 4
+max_time = "90m"
+max_semantic_revisions_per_phase = 2
+```
+
+Command-line phase/time requests remain subject to the effective cap. This
+prevents a repository from silently raising a user's global unattended-execution
+limits.
+
+CW v0.3 enforces `max_review_attempts`, `command_timeout`, `review_timeout`,
 `allow_network`, and `human_gate_categories` at runtime. Positive integers are
 required. Network access is denied by default for implementer shell commands;
 when denied, live web search is disabled for that Codex invocation as well.

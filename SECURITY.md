@@ -8,3 +8,8 @@ CW runs implementers with `workspace-write` and independent reviewers with
 `read-only`. It never bypasses Codex hook trust or uses unrestricted sandbox mode
 in normal operation. Validation commands come only from the approved workflow,
 not from readiness manifests.
+
+CW self-updates are explicit, staged, SHA-256 verified, smoke-tested, and
+atomically selected. The prior healthy version is retained for rollback. CW does
+not store MCP credentials or silently mutate the user's Codex integration
+configuration.

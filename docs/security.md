@@ -68,5 +68,31 @@ in plans, prompts, artifacts, or diagnostic logs.
 CW inspects Git metadata but never automatically pushes, merges, rebases, cleans,
 or resets a repository.
 
+CW may check for releases but never silently installs them. A managed update
+requires explicit user action, downloads through the trusted release provider,
+enforces SHA-256, rejects unsafe archive members, stages outside the active
+version, smoke-tests the staged command, and switches atomically. A checksum or
+smoke-test failure leaves the prior version active. Normal installation and
+rollback require no `sudo`. Signing metadata is reserved in the manifest;
+cryptographic signature verification is not yet implemented or claimed.
+
+Update traffic fetches only public release metadata and artifacts. It includes
+no project name, remote, workflow, or source content. Application update state
+is global; project migration remains a separate explicit `cw repair` process.
+
+CW never writes MCP credentials or silently changes the user's global Codex
+configuration. Planner/reviewer isolation uses Codex's supported
+`--ignore-user-config`, which preserves authentication. Normalized health caches
+omit raw stderr, HTML, headers, and tokens. Optional integration failures do not
+approve, reject, or block unrelated workflow phases; required failures stop
+before implementation.
+
+Multi-phase execution never bypasses validation, review, protected-path,
+integration, or gate controls. The default hard cap is ten phases and there is
+no unlimited override. Large runs require explicit acknowledgement; human
+approval remains non-bypassable. Batch interruption preserves existing gates
+and never marks an unfinished phase approved. A batch pins its CW version, and
+the updater refuses to switch installations while that batch process is active.
+
 Codex sandbox configuration follows the official
 [OpenAI configuration reference](https://developers.openai.com/codex/config-reference/).

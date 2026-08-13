@@ -42,8 +42,9 @@ class ReleaseHygieneTests(unittest.TestCase):
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
         package = (ROOT / "cw/__init__.py").read_text(encoding="utf-8")
         metadata = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-        self.assertIn(f'__version__ = "{version}"', package)
-        self.assertIn(f'version = "{version}"', metadata)
+        self.assertIn('parent.parent / "VERSION"', package)
+        self.assertIn('version = {file = ["VERSION"]}', metadata)
+        self.assertEqual(version, __import__("cw").__version__)
 
 
 if __name__ == "__main__":
