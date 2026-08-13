@@ -27,7 +27,10 @@ def valid_artifact() -> dict:
         "product": "CW",
         "cw_version": (ROOT / "VERSION").read_text(encoding="utf-8").strip(),
         "recording_kind": "real-workflow-recording",
-        "goal": "Add a /health endpoint with automated tests in one development phase",
+        "goal": (
+            "Add a /health endpoint with automated tests in one development phase using Python 3; "
+            "this local dependency-free demo is non-production, non-security-sensitive, and does not require human approval"
+        ),
         "brand": {
             "name": "CW", "product_name": "Codex Workflow", "maker": "Queopius",
         },

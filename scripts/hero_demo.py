@@ -23,7 +23,10 @@ from cw.core.diagnostics import redact
 
 SCHEMA_VERSION = 1
 RECORDING_KIND = "real-workflow-recording"
-GOAL = "Add a /health endpoint with automated tests in one development phase"
+GOAL = (
+    "Add a /health endpoint with automated tests in one development phase using Python 3; "
+    "this local dependency-free demo is non-production, non-security-sensitive, and does not require human approval"
+)
 EVENT_TYPES = {
     "prompt", "command", "info", "active", "success", "warning",
     "phase", "validation", "review", "gate", "complete",
@@ -318,6 +321,8 @@ def record_real_workflow(
         phase = phases[0]
         if not isinstance(phase, dict) or not isinstance(phase.get("id"), str) or not isinstance(phase.get("name"), str):
             raise HeroDemoError("Planner returned invalid phase presentation data")
+        if phase.get("requires_human_approval") is not False:
+            raise HeroDemoError("Planner marked the harmless local demo as requiring human approval")
         events.append(public_event("phase", f"{phase['id']} · {phase['name']}"))
 
         approved = invoke(["plan", "approve", "--json"], "Plan approval", "cw plan approve", 60)
