@@ -1,12 +1,11 @@
-# Demo API
+# Demo utility
 
-This is a tiny, dependency-free Python application used only by CW's disposable
+This is a tiny, dependency-free Python utility used only by CW's disposable
 hero-demo recorder.
 
-The recording goal is to add a `GET /health` endpoint that returns HTTP 200 and
-the JSON object `{"status": "ok"}`, together with automated tests. This is a
-local, dependency-free demonstration: it is not deployed, security-sensitive,
-or a public API compatibility change, and it does not require human approval.
+The recording goal is to add a deterministic `greet(name)` function that returns
+`Hello, {name}!`, together with automated tests. This local utility is not
+deployed and has no external services or dependencies.
 
 Run the test suite with:
 

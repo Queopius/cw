@@ -27,10 +27,7 @@ def valid_artifact() -> dict:
         "product": "CW",
         "cw_version": (ROOT / "VERSION").read_text(encoding="utf-8").strip(),
         "recording_kind": "real-workflow-recording",
-        "goal": (
-            "Add a /health endpoint with automated tests in one development phase using Python 3; "
-            "this local dependency-free demo is non-production, non-security-sensitive, and does not require human approval"
-        ),
+        "goal": "Add a deterministic greeting function with automated tests in one development phase using Python 3",
         "brand": {
             "name": "CW", "product_name": "Codex Workflow", "maker": "Queopius",
         },
@@ -71,8 +68,8 @@ class DemoWorkspaceTests(unittest.TestCase):
         template = ROOT / "demo/hero/project"
         before = sha256_tree(template)
         with DemoWorkspace(template) as project:
-            self.assertTrue((project / "health_app.py").is_file())
-            (project / "health_app.py").write_text("changed\n", encoding="utf-8")
+            self.assertTrue((project / "greeting.py").is_file())
+            (project / "greeting.py").write_text("changed\n", encoding="utf-8")
             parent = project.parent
         self.assertEqual(before, sha256_tree(template))
         self.assertFalse(parent.exists())

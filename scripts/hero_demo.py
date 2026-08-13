@@ -23,10 +23,7 @@ from cw.core.diagnostics import redact
 
 SCHEMA_VERSION = 1
 RECORDING_KIND = "real-workflow-recording"
-GOAL = (
-    "Add a /health endpoint with automated tests in one development phase using Python 3; "
-    "this local dependency-free demo is non-production, non-security-sensitive, and does not require human approval"
-)
+GOAL = "Add a deterministic greeting function with automated tests in one development phase using Python 3"
 EVENT_TYPES = {
     "prompt", "command", "info", "active", "success", "warning",
     "phase", "validation", "review", "gate", "complete",
