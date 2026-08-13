@@ -39,6 +39,14 @@ the state/history delta, every configured criterion, the gate-to-review link,
 the required human-approval type, and the complete artifact hash set. A mismatch
 sets `PROTECTED_PATH_MODIFIED` and fails closed; it is not automatically retryable.
 
+The immutable phase-contract fingerprint contains the current phase definition,
+criteria, dependencies, relevant policy, and human/integration requirements. It
+does not include mutable operational fields such as metadata writer versions or
+timestamps. CW-managed project/state files remain a separate protected class, so
+an implementation agent still cannot edit them. Trusted migration and repair
+write those documents backup-first outside an implementation session; the next
+session establishes its baseline from the committed metadata.
+
 Readiness manifests are bound to the random ID of the current `cw start`
 invocation. This prevents accidental reuse or replay across sessions. The Stop
 hook checks the implementer and session environment before invoking review, so

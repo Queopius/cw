@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.3.4",
+      "changes": [
+        "Added strict workflow consistency derivation and fail-closed status rendering.",
+        "Reconciled stale state and history from validated contiguous approval gates.",
+        "Separated semantic phase contracts from mutable CW metadata provenance."
+      ]
+    },
+    {
       "version": "0.3.3",
       "changes": [
         "Removed unsafe optional MCP configuration overrides from managed Codex processes.",

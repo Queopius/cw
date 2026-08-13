@@ -199,6 +199,19 @@ phase. It validates review criteria and decisions, gate-to-review references,
 gate artifact integrity, state references, and the known event vocabulary in
 the append-only history. Unknown evidence is an error rather than approval.
 
+Workflow consistency is derived once in the domain layer from configured order,
+dependency-valid gates, readiness, and persisted state. Only the highest
+contiguous gate prefix counts as approved. Read commands never mutate a mismatch:
+`cw status`, `cw doctor`, and `cw explain` fail closed and direct the user to the
+backup-first repair transaction. Repair restores the first unapproved phase,
+latest gate/review references, zeroed attempt, and missing approval history from
+validated evidence without creating a gate or running an agent.
+
+Project and state documents use `created_with_cw_version` for immutable origin
+provenance. Their `cw_version` is the version of the most recent CW writer or
+migrator. Gate/review `cw_version` remains historical evidence from the process
+that created that record. The installed application version is independent.
+
 ## Diagnostics
 
 Diagnostics are separate from workflow state. The latest structured record is

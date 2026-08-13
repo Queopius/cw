@@ -119,7 +119,9 @@ def command_start(
                 "Run: cw status",
             )
         validate_dependencies(root, workflow, phase)
-        protected_before = snapshot_protected_paths(root, workflow.protected_paths)
+        protected_before = snapshot_protected_paths(
+            root, workflow.protected_paths, workflow=workflow, phase=phase,
+        )
         session = create_session(root, workflow, phase)
     prompt = f"""Work only on CW phase {phase.id}: {phase.name}.
 Objective: {phase.objective}

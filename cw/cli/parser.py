@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="cw", add_help=False)
     _common(root)
     subcommands = root.add_subparsers(dest="command")
-    for name in ("init", "start", "status", "validate", "retry", "version", "help", "changelog"):
+    for name in ("init", "start", "status", "validate", "retry", "version", "help", "changelog", "explain"):
         command = subcommands.add_parser(name, add_help=True)
         _common(command, suppress_defaults=True)
     plan = subcommands.add_parser("plan", add_help=True)

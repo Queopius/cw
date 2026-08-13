@@ -9,6 +9,11 @@ phase at a time.
 
 > **No valid gate. No next phase.**
 
+CW derives progress from the highest contiguous chain of validated gates. If
+cached state, readiness, history, and gate evidence disagree, read commands
+fail closed with an integrity explanation; `cw repair` performs backup-first
+reconciliation, while `cw explain` describes the safe recovery without writing.
+
 CW is a standalone command-line product for explicit, reviewable AI-assisted
 development. It separates planning from implementation, runs deterministic
 checks before semantic review, invokes an independent read-only reviewer, and

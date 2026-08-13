@@ -7,7 +7,7 @@ from pathlib import Path
 from cw import __version__
 from .errors import CwError, ErrorCode
 from .layout import MUTABLE_DIRECTORIES, safe_file, validate_project_layout, validate_tree
-from .project import Project, create_identity, load_project, project_id, repository_fingerprint
+from .project import Project, create_identity, load_project, project_id, repository_fingerprint, stamp_project_metadata
 from .schema import SCHEMA_VERSION, migrate_legacy_document, schema_version
 from .severity import normalize_legacy_workflow_severities
 from .state import initial_state
@@ -79,6 +79,7 @@ def _migrate_legacy(root: Path) -> None:
         data = load_json(legacy_state)
         if isinstance(data, dict):
             data, _ = migrate_legacy_document(data, "Legacy workflow state")
+            data.setdefault("created_with_cw_version", data.get("cw_version", __version__))
             data.update({"cw_version": __version__, "history": data.get("history", [])})
             for key in ("last_review", "last_gate"):
                 if isinstance(data.get(key), str):
@@ -331,7 +332,8 @@ def initialize(root: Path) -> tuple[Project, bool]:
         if not isinstance(data, dict):
             raise CwError("Workflow state is invalid", ErrorCode.INVALID_STATE, "Run: cw repair")
         schema_version(data, "Workflow state")
-        data.setdefault("cw_version", __version__)
+        data.setdefault("created_with_cw_version", data.get("cw_version", __version__))
+        data["cw_version"] = __version__
         data.setdefault("attempt", 0)
         data.setdefault("last_review", None)
         data.setdefault("last_gate", None)
@@ -396,14 +398,39 @@ def backup_metadata(root: Path) -> Path:
     return destination
 
 
-def repair(root: Path) -> Path:
+def repair(root: Path, *, report: dict | None = None) -> Path:
     validate_project_layout(root, create=True)
     (root / ".cw" / "backups").mkdir(parents=True, exist_ok=True)
     backup = backup_metadata(root)
-    _migrate_metadata_schemas(root, create_backup=False)
+    if report is not None:
+        report.update({"backup": backup, "gates_verified": [], "history_reconstructed": 0})
     current_id = project_id(root)
     current_fingerprint = repository_fingerprint(root)
     same_repository = _metadata_matches_repository(root, current_id, current_fingerprint)
+    # Current-format projects validate their complete gate chain before any
+    # metadata rewrite. Recognized legacy plans are validated immediately after
+    # the raw migration layer makes them loadable.
+    if same_repository:
+        try:
+            from .workflow import load_workflow
+
+            preflight_workflow = load_workflow(root)
+        except CwError:
+            # Repair must still be able to reach recognized schema/severity
+            # migrations. The canonical post-migration validation below is
+            # mandatory and is never suppressed.
+            preflight_workflow = None
+        if preflight_workflow is not None:
+            from .progress import valid_gate_ids
+
+            preflight_verified = valid_gate_ids(root, preflight_workflow)
+            if report is not None:
+                report["gates_verified"] = preflight_verified
+    _migrate_metadata_schemas(root, create_backup=False)
+    state_before = load_json(root / ".cw" / "state.json") if (root / ".cw" / "state.json").is_file() else None
+    if report is not None and isinstance(state_before, dict):
+        report["state_before"] = dict(state_before)
+        report["stale_error_archived"] = state_before.get("last_error") is not None
     identity_path = root / ".cw" / "project.json"
     prior_initialized = utc_now()
     if same_repository and identity_path.is_file():
@@ -416,7 +443,11 @@ def repair(root: Path) -> Path:
     project = create_identity(root)
     data = load_json(identity_path)
     data["initialized_at"] = prior_initialized
-    atomic_json(identity_path, data)
+    if same_repository and identity_path.is_file():
+        original = load_json(backup / "project.json") if (backup / "project.json").is_file() else None
+        if isinstance(original, dict):
+            data["created_with_cw_version"] = original.get("created_with_cw_version") or original.get("cw_version")
+    atomic_json(identity_path, stamp_project_metadata(data))
     _copy_static(root)
     _agents(root)
     for name in MUTABLE_DIRS:
@@ -442,9 +473,11 @@ def repair(root: Path) -> Path:
             if not isinstance(state, dict):
                 raise CwError("Workflow state is invalid", ErrorCode.INVALID_STATE)
             state.update({
-                "schema_version": SCHEMA_VERSION, "cw_version": __version__, "workflow_id": current_id,
+                "schema_version": SCHEMA_VERSION, "workflow_id": current_id,
                 "pending_goal": state.get("pending_goal"), "history": state.get("history", []),
             })
+            state.setdefault("created_with_cw_version", state.get("cw_version", __version__))
+            state["cw_version"] = __version__
             state.setdefault("infrastructure_error", None)
             atomic_json(state_path, state)
         except (CwError, AttributeError, TypeError):
@@ -454,8 +487,14 @@ def repair(root: Path) -> Path:
     from .workflow import load_workflow, workflow_hash
     workflow = load_workflow(root)
     state = load_json(state_path)
-    from .progress import normalize_legacy_progress
-    workflow, _ = normalize_legacy_progress(root, workflow, state)
+    from .progress import normalize_legacy_progress, valid_gate_ids
+    verified = valid_gate_ids(root, workflow)
+    history_before = len(state.get("history", [])) if isinstance(state.get("history"), list) else 0
+    workflow, progress_changed = normalize_legacy_progress(root, workflow, state)
+    if report is not None:
+        report["gates_verified"] = verified
+        report["history_reconstructed"] = max(0, len(state.get("history", [])) - history_before)
+        report["state_reconciled"] = progress_changed
     if not workflow.phases and state.get("status") == "UNINITIALIZED":
         state["status"] = "INITIALIZED"
     if workflow.phases and state.get("current_phase") in {phase.id for phase in workflow.phases}:
@@ -471,6 +510,8 @@ def repair(root: Path) -> Path:
     )
     migrated_error = migrate_legacy_reviewer_error(root, workflow, state)
     recovered_revision = recover_orphan_revision_readiness(root, workflow, state)
+    if progress_changed:
+        state["updated_at"] = utc_now()
     atomic_json(state_path, state)
     from .session import load_session, process_is_alive, readiness_path, session_path
     phase_id = state.get("current_phase")
@@ -501,4 +542,12 @@ def repair(root: Path) -> Path:
     elif recovered_revision:
         state["status"] = "READY_FOR_REVIEW"
         atomic_json(state_path, state)
+    if report is not None:
+        from .integrity import snapshot_protected_paths
+
+        refreshed_workflow = load_workflow(root)
+        report["integrity_baseline"] = snapshot_protected_paths(
+            root, refreshed_workflow.protected_paths,
+        )
+        report["state_after"] = load_json(state_path)
     return backup

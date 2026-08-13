@@ -29,6 +29,10 @@ the independent diagnostic store and can still work if workflow state is corrupt
 - **History integrity failure:** inspect `cw doctor --json` and the referenced
   file under `.cw/reviews/`, `.cw/gates/`, or `.cw/state.json`. CW will not delete
   or regenerate historical approval evidence automatically.
+- **State/gate mismatch:** run `cw explain`, then `cw repair`. CW validates the
+  contiguous gate chain, preserves every valid approval, archives the prior state
+  in `.cw/backups/`, and advances cached state to the first phase without a gate.
+  `cw status` deliberately does not repair or render a contradictory timeline.
 - **Reviewer unavailable or timed out:** preserve readiness and run `cw retry`.
   CW records the failure as a retryable `review` operation and does not consume
   a semantic attempt. If an older project has only `reviewer_result: null` plus

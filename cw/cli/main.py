@@ -34,6 +34,13 @@ def _root() -> Path:
 
 
 def _context(root: Path) -> tuple[Any, dict[str, Any], Any]:
+    project, state, workflow = _raw_context(root)
+    if workflow.phases:
+        validate_state(root, state, workflow)
+    return project, state, workflow
+
+
+def _raw_context(root: Path) -> tuple[Any, dict[str, Any], Any]:
     validate_project_layout(root)
     project = load_project(root)
     workflow = load_workflow(root)
@@ -41,8 +48,6 @@ def _context(root: Path) -> tuple[Any, dict[str, Any], Any]:
         raise CwError("Project workflow mismatch", ErrorCode.WORKFLOW_PROJECT_MISMATCH, "Run: cw repair", details=f"Workflow: {workflow.repository or workflow.id}\nRepository: {project.project_id}")
     workflow = apply_policy(workflow, load_policy(root, workflow=workflow))
     state = load_state(root)
-    if workflow.phases:
-        validate_state(root, state, workflow)
     return project, state, workflow
 
 
@@ -85,7 +90,13 @@ def command_start(args: argparse.Namespace, console: Console) -> int:
 
 def command_status(args: argparse.Namespace, console: Console) -> int:
     return read_commands.command_status(
-        args, console, root_resolver=_root, context=_context, record_error=_record_error,
+        args, console, root_resolver=_root, context=_raw_context, record_error=_record_error,
+    )
+
+
+def command_explain(args: argparse.Namespace, console: Console) -> int:
+    return read_commands.command_explain(
+        args, console, root_resolver=_root, context=_raw_context,
     )
 
 
@@ -137,7 +148,7 @@ def _doctor(
     root: Path | None, reviewer: bool, integrations: bool = False, codex: bool = False,
 ) -> list[dict[str, Any]]:
     return read_commands.doctor_checks(
-        root, reviewer, integrations, codex, context=_context, current_resolver=_current,
+        root, reviewer, integrations, codex, context=_raw_context, current_resolver=_current,
     )
 
 
@@ -153,7 +164,7 @@ def command_error(args: argparse.Namespace, console: Console) -> int:
 
 def command_repair(args: argparse.Namespace, console: Console) -> int:
     return lifecycle_commands.command_repair(
-        args, console, root_resolver=_root, context=_context,
+        args, console, root_resolver=_root, context=_raw_context,
     )
 
 
@@ -210,6 +221,7 @@ COMMANDS = {
     "repair": command_repair, "config": command_config, "version": command_version,
     "update": command_update, "changelog": command_changelog,
     "integrations": command_integrations,
+    "explain": command_explain,
     "run": command_run,
 }
 

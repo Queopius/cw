@@ -18,6 +18,7 @@ from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_gate
 from cw.core.history import history_timeline
 from cw.core.integrity import snapshot_protected_paths
+from cw.core.progress import derive_workflow_consistency
 from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import load_session, process_is_alive, readiness_path
 from cw.core.utils import load_json
@@ -54,29 +55,27 @@ def git_branch(root: Path) -> str:
 
 def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
     project, state, workflow = context(root)
+    consistency = derive_workflow_consistency(root, workflow, state) if workflow.phases else None
     current = state.get("current_phase")
-    index = workflow.index(current) if current and workflow.phases else None
+    try:
+        index = workflow.index(current) if current and workflow.phases else None
+    except StopIteration:
+        index = None
     gates: dict[str, bool] = {}
     gate_states: dict[str, str] = {}
     invalid_gates: list[str] = []
     gate_error = None
     gate_error_code = None
     gate_error_details = None
-    for phase in workflow.phases:
-        exists = gate_path(root, phase.id).is_file()
-        gates[phase.id] = exists
-        gate_states[phase.id] = "pending"
-        if exists:
-            try:
-                validate_gate(root, workflow, phase.id)
-                gate_states[phase.id] = "approved"
-            except CwError as exc:
-                gates[phase.id] = False
-                gate_states[phase.id] = "invalid"
-                invalid_gates.append(phase.id)
-                gate_error = str(exc)
-                gate_error_code = exc.code.value
-                gate_error_details = exc.details
+    if consistency is not None:
+        gate_states.update(consistency.chain.states)
+        for phase in workflow.phases:
+            gates[phase.id] = gate_states.get(phase.id) == "approved"
+        invalid_gates = [phase.id for phase in workflow.phases if gate_states.get(phase.id) == "invalid"]
+        if consistency.chain.issues:
+            gate_error = "Approval gate chain is invalid"
+            gate_error_code = ErrorCode.INVALID_GATE.value
+            gate_error_details = "\n".join(consistency.chain.issues)
     batch = load_batch(root)
     if (
         batch and batch.get("status") == "RUNNING"
@@ -109,6 +108,10 @@ def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
         "last_error": state.get("last_error"),
         "infrastructure_error": state.get("infrastructure_error"),
         "batch": batch,
+        "consistent": consistency.consistent if consistency is not None else True,
+        "consistency_issues": list(consistency.issues) if consistency is not None else [],
+        "expected_phase": consistency.expected_current if consistency is not None else None,
+        "approved_through": consistency.chain.approved[-1][0] if consistency and consistency.chain.approved else None,
     }
 
 
@@ -126,6 +129,16 @@ def command_status(
 ) -> int:
     root = root_resolver()
     data = status_payload(root, context)
+    if not data.get("consistent", True):
+        record_error(
+            CwError(
+                "Workflow state is inconsistent with approval evidence",
+                ErrorCode.INVALID_STATE,
+                "Run: cw repair",
+                details="\n".join(data.get("consistency_issues", [])),
+            ),
+            source="status",
+        )
     if data.get("gate_error"):
         code = ErrorCode(data.get("gate_error_code") or ErrorCode.INVALID_GATE.value)
         record_error(
@@ -136,7 +149,42 @@ def command_status(
         emit_json(data)
     else:
         render_status(console, data, args.verbose)
-    return 1 if data["state"] == "ERROR" or data.get("gate_error") else 0
+    return 1 if not data.get("consistent", True) or data["state"] == "ERROR" or data.get("gate_error") else 0
+
+
+def command_explain(
+    args: argparse.Namespace, console: Console, *, root_resolver: RootResolver, context: ContextLoader,
+) -> int:
+    root = root_resolver()
+    data = status_payload(root, context)
+    payload = {
+        "consistent": data.get("consistent", True),
+        "current_phase": data.get("phase"),
+        "expected_phase": data.get("expected_phase"),
+        "approved_through": data.get("approved_through"),
+        "issues": data.get("consistency_issues", []),
+        "recovery": "cw repair" if not data.get("consistent", True) else None,
+    }
+    if args.json:
+        emit_json(payload)
+        return 1 if not payload["consistent"] else 0
+    console.header("Explain")
+    if payload["consistent"]:
+        console.item("✓", "Workflow state is consistent")
+        console.wrapped("Configured phases, approval gates and state agree.", 2)
+        return 0
+    console.item("✕", "Why is the workflow blocked?")
+    console.wrapped(
+        f"CW found validated approval evidence through {payload['approved_through'] or 'no phase'}, "
+        f"but state.json points to {payload['current_phase'] or 'no phase'}.",
+        2,
+    )
+    console.line()
+    console.wrapped("No approved work will be discarded.", 2)
+    console.line()
+    console.subsection("Safe recovery")
+    console.action("cw repair", "Reconcile state from validated evidence")
+    return 1
 
 
 def command_history(
@@ -188,6 +236,36 @@ def doctor_checks(
             {"section": "Workflow", "name": "Plan", "status": "pass", "detail": workflow.status},
             {"section": "Workflow", "name": "State", "status": "pass", "detail": state["status"]},
         ])
+        consistency = derive_workflow_consistency(root, workflow, state) if workflow.phases else None
+        if consistency is not None:
+            approved_count = len(consistency.chain.approved)
+            checks.extend([
+                {
+                    "section": "Workflow consistency", "name": "Gate chain",
+                    "status": "pass" if not consistency.chain.issues else "error",
+                    "detail": f"{approved_count} contiguous gates" if not consistency.chain.issues else consistency.chain.issues[0],
+                },
+                {
+                    "section": "Workflow consistency", "name": "Current phase",
+                    "status": "pass" if state.get("current_phase") == consistency.expected_current else "error",
+                    "detail": str(consistency.expected_current or "workflow complete"),
+                },
+                {
+                    "section": "Workflow consistency", "name": "Last gate",
+                    "status": "pass" if state.get("last_gate") == consistency.expected_last_gate else "error",
+                    "detail": str(consistency.expected_last_gate or "none"),
+                },
+                {
+                    "section": "Workflow consistency", "name": "Readiness",
+                    "status": "error" if any("readiness belongs" in issue for issue in consistency.issues) else "pass",
+                    "detail": "belongs to current phase" if readiness_path(root).is_file() else "not ready",
+                },
+                {
+                    "section": "Workflow consistency", "name": "State and evidence",
+                    "status": "pass" if consistency.consistent else "error",
+                    "detail": "consistent" if consistency.consistent else consistency.issues[0],
+                },
+            ])
         phase = current_resolver(workflow, state) if workflow.phases and state.get("current_phase") else None
         if phase:
             checks.append({"section": "Workflow", "name": "Current phase", "status": "pass", "detail": phase.id})

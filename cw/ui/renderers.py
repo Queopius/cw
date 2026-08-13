@@ -148,6 +148,31 @@ def _render_no_plan(console: Console, data: dict[str, Any], *, verbose: bool) ->
 
 
 def render_status(console: Console, data: dict[str, Any], *, verbose: bool = False) -> None:
+    if not data.get("consistent", True):
+        console.header("Workflow Integrity")
+        console.line()
+        console.line(f"  {console.style(ERROR, '31')} {console.style('STATE INCONSISTENT', '1;31')}")
+        console.line()
+        _metric(console, "Current phase", str(data.get("phase") or "none"), 18)
+        _metric(console, "Valid gates", f"through {data.get('approved_through') or 'none'}", 18)
+        _metric(console, "Expected phase", str(data.get("expected_phase") or "workflow complete"), 18)
+        console.line()
+        console.wrapped("CW will not continue with contradictory state.", 2)
+        if data.get("invalid_gates"):
+            console.line()
+            console.line(f"  {console.style(WARNING, '33')} {console.style('Approval gate invalidated', '1;33')}")
+            for phase_id in data["invalid_gates"]:
+                phase = next((item for item in data.get("phases", []) if item["id"] == phase_id), None)
+                label = f"{phase['number']}  {phase['name']}" if phase else phase_id
+                console.wrapped(f"{WARNING} {label}", 4)
+        if verbose:
+            console.line()
+            console.subsection("Consistency details")
+            for issue in data.get("consistency_issues", []):
+                console.wrapped(f"{WARNING} {issue}", 2)
+        console.line()
+        console.run("cw repair")
+        return
     if not data["phases"]:
         _render_no_plan(console, data, verbose=verbose)
         return
@@ -489,6 +514,7 @@ def render_help(console: Console) -> None:
             ("review", "Run independent review"),
             ("retry", "Retry failed operation"),
             ("history", "View workflow audit trail"),
+            ("explain", "Explain workflow integrity or blockers"),
             ("run", "Run a bounded multi-phase batch"),
         )),
         ("Maintenance", (

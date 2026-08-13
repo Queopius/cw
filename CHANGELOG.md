@@ -4,6 +4,21 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.3.4 — 2026-08-13
+
+- Derive workflow progress from a fully validated contiguous approval-gate
+  chain and fail closed before rendering or executing contradictory state.
+- Reconcile stale current phase, last gate/review, attempt, readiness, errors,
+  and missing approval history through backup-first `cw repair` without
+  reopening valid phases or touching application code.
+- Separate the semantic phase-contract fingerprint from mutable CW-managed
+  project metadata while continuing to block implementation-agent metadata
+  changes during a session.
+- Clarify metadata version provenance with `created_with_cw_version` and use
+  `cw_version` as the current document writer/migrator version.
+- Add workflow-integrity status, doctor checks, `cw explain`, and regression
+  coverage for impossible timelines, broken gate chains, and idempotent repair.
+
 ## 0.3.3 — 2026-08-13
 
 - Remove all optional-MCP `mcp_servers.*` and plugin-disable overrides from

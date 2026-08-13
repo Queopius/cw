@@ -55,7 +55,7 @@ class PostApprovalSemanticsTests(unittest.TestCase):
         report = self.approve(2)
         state = self.repo.state()
         self.assertEqual(WorkflowState.COMPLETED.value, state["status"])
-        self.assertEqual("02-phase-2", state["current_phase"])
+        self.assertIsNone(state["current_phase"])
         self.assertTrue(report["workflow_completed"])
         self.assertIsNone(report["next_phase"])
 
@@ -192,6 +192,7 @@ class ProfessionalCliRenderingTests(unittest.TestCase):
         self.repo.artifact(1, "tampered\n")
         code, output = self.invoke("status")
         self.assertEqual(1, code)
+        self.assertIn("STATE INCONSISTENT", output)
         self.assertIn("! 01", output)
         self.assertIn("Approval gate invalidated", output)
 
