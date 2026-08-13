@@ -72,3 +72,5 @@ jobs:
           python -m pip install -r docs/requirements.txt
       - name: Build documentation
         run: mkdocs build --strict
+      - name: Validate committed real-workflow hero demo
+        run: make demo-check

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Queopius/cw/demo/hero/hero-demo.schema.json",
+  "title": "CW real workflow hero recording",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "product",
+    "cw_version",
+    "recording_kind",
+    "goal",
+    "brand",
+    "provenance",
+    "events",
+    "final_result"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "product": {"const": "CW"},
+    "cw_version": {"type": "string", "minLength": 1},
+    "recording_kind": {"const": "real-workflow-recording"},
+    "goal": {"type": "string", "minLength": 1},
+    "brand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "product_name", "maker"],
+      "properties": {
+        "name": {"const": "CW"},
+        "product_name": {"const": "Codex Workflow"},
+        "maker": {"const": "Queopius"}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recorded_from_real_workflow", "source_commit"],
+      "properties": {
+        "recorded_from_real_workflow": {"const": true},
+        "source_commit": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "text"],
+        "properties": {
+          "type": {
+            "enum": ["prompt", "command", "info", "active", "success", "warning", "phase", "validation", "review", "gate", "complete"]
+          },
+          "text": {"type": "string", "minLength": 1},
+          "command": {"type": "string", "minLength": 1},
+          "result": {"type": "string", "minLength": 1},
+          "actual_duration_ms": {"type": "integer", "minimum": 0},
+          "emphasis": {"enum": ["normal", "strong", "muted"]}
+        }
+      }
+    },
+    "final_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workflow_status", "approved_phases", "valid_gates"],
+      "properties": {
+        "workflow_status": {"const": "COMPLETED"},
+        "approved_phases": {"type": "integer", "minimum": 1},
+        "valid_gates": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

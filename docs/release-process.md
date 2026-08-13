@@ -69,3 +69,27 @@ Git repositories, generates repository-specific plans without network access,
 approves a phase in repository A through a simulated independent reviewer, and
 asserts that repository B's identity, plan, state, and gates are byte-for-byte
 unchanged. The underlying reproducible runner is `scripts/demo_isolation.py`.
+
+## Hero demo artifact
+
+The landing-page hero contract is a sanitized structured recording of a real CW
+workflow, not a hand-authored transcript. Validate the committed artifact on
+every release with:
+
+```bash
+make demo-check
+```
+
+Re-record it only when the visible lifecycle changes materially. Recording is a
+maintainer operation that uses a disposable Git repository, the current
+installed CW build, real Codex planning/implementation/review, and a verified
+approval gate:
+
+```bash
+python scripts/record_hero_demo.py --dry-run
+python scripts/record_hero_demo.py
+```
+
+The real recording needs Codex authentication and network access; CI never
+regenerates it. A failed recording must preserve the last-known-good
+`demo/hero/hero-demo.json`.
