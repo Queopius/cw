@@ -102,7 +102,7 @@ def _validate_review(
         if not isinstance(code, str) or not str(state.get("last_error") or "").startswith(f"{code}:"):
             raise CwError("Infrastructure review error is inconsistent", ErrorCode.PROTECTED_PATH_MODIFIED)
         return report
-    if kind != "semantic_review" or report["attempt"] != state.get("attempt"):
+    if kind != "semantic_review":
         raise CwError("Semantic review state is inconsistent", ErrorCode.PROTECTED_PATH_MODIFIED)
     decision, criteria, blocking_criteria, issues = validate_reviewer_result(phase, report, root=root)
     if (
@@ -112,12 +112,32 @@ def _validate_review(
         or issues != report.get("blocking_issues")
     ):
         raise CwError("Semantic review decision is inconsistent", ErrorCode.PROTECTED_PATH_MODIFIED)
+    index = workflow.index(phase.id)
     expected_status = {
-        ReviewDecision.APPROVE: WorkflowState.HUMAN_REVIEW_REQUIRED if phase.requires_human_approval else WorkflowState.APPROVED,
+        ReviewDecision.APPROVE: (
+            WorkflowState.HUMAN_REVIEW_REQUIRED
+            if phase.requires_human_approval
+            else WorkflowState.COMPLETED
+            if index == len(workflow.phases) - 1
+            else WorkflowState.IN_PROGRESS
+        ),
         ReviewDecision.REVISE: WorkflowState.REVISION_REQUIRED,
         ReviewDecision.HUMAN_REVIEW_REQUIRED: WorkflowState.HUMAN_REVIEW_REQUIRED,
     }[decision]
-    if status is not expected_status or report.get("artifact_hashes") != artifact_hashes(root, phase.artifacts):
+    expected_phase = phase.id if index == len(workflow.phases) - 1 else workflow.phases[index + 1].id
+    advanced = decision is ReviewDecision.APPROVE and not phase.requires_human_approval
+    attempt_matches = (
+        report["attempt"] == state.get("attempt")
+        if not advanced or expected_status is WorkflowState.COMPLETED
+        else state.get("attempt") == 0
+    )
+    phase_matches = not advanced or state.get("current_phase") == expected_phase
+    if (
+        status is not expected_status
+        or not attempt_matches
+        or not phase_matches
+        or report.get("artifact_hashes") != artifact_hashes(root, phase.artifacts)
+    ):
         raise CwError("Semantic review evidence does not match repository state", ErrorCode.PROTECTED_PATH_MODIFIED)
     return report
 
@@ -125,6 +145,7 @@ def _validate_review(
 def _validate_state_evolution(
     before: dict[str, Any] | None,
     after: dict[str, Any],
+    workflow: Workflow,
     phase: Phase,
     reviews: list[str],
     gates: list[str],
@@ -138,7 +159,7 @@ def _validate_state_evolution(
         return
     immutable = {
         "schema_version", "cw_version", "workflow_id", "workflow_version",
-        "workflow_sha256", "current_phase", "pending_goal",
+        "workflow_sha256", "pending_goal",
     }
     if set(after) != set(before) or any(after.get(key) != before.get(key) for key in immutable):
         raise CwError("Protected workflow state identity changed", ErrorCode.PROTECTED_PATH_MODIFIED)
@@ -159,22 +180,57 @@ def _validate_state_evolution(
         raise CwError("Protected workflow state changed its prior gate", ErrorCode.PROTECTED_PATH_MODIFIED)
     status = WorkflowState(str(after.get("status")))
     if status is WorkflowState.ERROR:
-        if after.get("attempt") != before.get("attempt") or len(history) != len(prior_history):
+        if after.get("attempt") != before.get("attempt") or len(history) != len(prior_history) + 1:
             raise CwError("Infrastructure failure consumed or rewrote review history", ErrorCode.PROTECTED_PATH_MODIFIED)
+        event = history[-1]
+        metadata = after.get("infrastructure_error")
+        error_code = report.get("error_code") if report else None
+        if (
+            not isinstance(event, dict)
+            or event.get("phase") != phase.id
+            or event.get("action") != "infrastructure_error"
+            or event.get("operation") != "review"
+            or event.get("error_code") != error_code
+            or not isinstance(metadata, dict)
+            or metadata.get("error_code") != error_code
+            or metadata.get("retryable") is not True
+            or metadata.get("operation") != "review"
+            or metadata.get("phase") != phase.id
+        ):
+            raise CwError("Infrastructure review history event is invalid", ErrorCode.PROTECTED_PATH_MODIFIED)
     else:
-        if after.get("attempt") != int(before.get("attempt", 0)) + 1 or len(history) != len(prior_history) + 1:
+        decision = report.get("decision") if report else None
+        semantic_attempt = int(before.get("attempt", 0)) + 1
+        approved_and_advanced = decision == ReviewDecision.APPROVE.value and not phase.requires_human_approval
+        if approved_and_advanced:
+            index = workflow.index(phase.id)
+            final = index == len(workflow.phases) - 1
+            expected_phase = phase.id if final else workflow.phases[index + 1].id
+            valid_position = after.get("current_phase") == expected_phase
+            valid_attempt = after.get("attempt") == semantic_attempt if final else after.get("attempt") == 0
+        else:
+            valid_position = after.get("current_phase") == before.get("current_phase")
+            valid_attempt = after.get("attempt") == semantic_attempt
+        if not valid_position or not valid_attempt or len(history) != len(prior_history) + 1:
             raise CwError("Semantic review state delta is invalid", ErrorCode.PROTECTED_PATH_MODIFIED)
         event = history[-1]
-        if not isinstance(event, dict) or event.get("phase") != phase.id or event.get("attempt") != after.get("attempt"):
+        if (
+            not isinstance(event, dict)
+            or event.get("phase") != phase.id
+            or event.get("attempt") != semantic_attempt
+        ):
             raise CwError("Semantic review history event is invalid", ErrorCode.PROTECTED_PATH_MODIFIED)
-        decision = report.get("decision") if report else None
         expected_action = (
             "human_review_required"
             if decision == ReviewDecision.HUMAN_REVIEW_REQUIRED.value or phase.requires_human_approval
             else "approved" if decision == ReviewDecision.APPROVE.value
             else "revision_required"
         )
-        if event.get("action") != expected_action or after.get("last_error") is not None:
+        if (
+            event.get("action") != expected_action
+            or after.get("last_error") is not None
+            or after.get("infrastructure_error") is not None
+        ):
             raise CwError("Semantic review history does not match its decision", ErrorCode.PROTECTED_PATH_MODIFIED)
 
 
@@ -232,4 +288,4 @@ def verify_protected_paths(
     if before.state is not None:
         if not state_changed and reviews:
             raise CwError("Review metadata was created without a state transition", ErrorCode.PROTECTED_PATH_MODIFIED)
-        _validate_state_evolution(before.state, state, phase, reviews, gates, report)
+        _validate_state_evolution(before.state, state, workflow, phase, reviews, gates, report)

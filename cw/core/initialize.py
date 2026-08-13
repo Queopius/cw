@@ -9,6 +9,7 @@ from .errors import CwError, ErrorCode
 from .layout import MUTABLE_DIRECTORIES, safe_file, validate_project_layout, validate_tree
 from .project import Project, create_identity, load_project, project_id, repository_fingerprint
 from .schema import SCHEMA_VERSION, migrate_legacy_document, schema_version
+from .severity import normalize_legacy_workflow_severities
 from .state import initial_state
 from .utils import atomic_json, atomic_write, load_json, utc_now
 from .workflow import write_workflow
@@ -165,10 +166,11 @@ def _schema_documents(root: Path) -> list[tuple[Path, str, bool]]:
 
 
 def _migrate_metadata_schemas(root: Path, *, create_backup: bool) -> Path | None:
-    """Migrate schema-less v0 prototype documents after a complete compatibility pass."""
-    from .workflow import _read_document
+    """Normalize recognized prototype documents before strict current loading."""
+    from .workflow import _read_document, workflow_from_document
 
     staged: list[tuple[Path, dict, bool]] = []
+    workflow_documents: list[dict] = []
     for path, kind, is_workflow in _schema_documents(root):
         if not path.exists():
             continue
@@ -181,11 +183,17 @@ def _migrate_metadata_schemas(root: Path, *, create_backup: bool) -> Path | None
             # records remain untouched so doctor can report their corruption.
             continue
         migrated, changed = migrate_legacy_document(data, kind)
+        if is_workflow:
+            migrated, severity_changed = normalize_legacy_workflow_severities(migrated)
+            changed = changed or severity_changed
+            workflow_documents.append(migrated)
         if changed:
             staged.append((path, migrated, is_workflow))
-    if not staged:
-        return None
-    backup = backup_metadata(root) if create_backup else None
+    backup = backup_metadata(root) if create_backup and staged else None
+    # Validate the complete canonical workflow only after backup creation and
+    # before any staged document is persisted.
+    for document in workflow_documents:
+        workflow_from_document(root, document)
     for path, data, is_workflow in staged:
         if is_workflow:
             write_workflow(path, data)
@@ -275,11 +283,13 @@ def _rebind_same_repository_metadata(root: Path, project_id_value: str) -> None:
         data = load_json(path)
         if not isinstance(data, dict):
             raise CwError(f"Cannot rebind invalid metadata: {path.name}", ErrorCode.SCHEMA_VALIDATION_ERROR)
-        if "workflow" in data:
-            if not isinstance(data["workflow"], str) or not data["workflow"]:
+        workflow_key = "workflow" if "workflow" in data else "workflow_id" if "workflow_id" in data else None
+        if workflow_key is not None:
+            if not isinstance(data[workflow_key], str) or not data[workflow_key]:
                 raise CwError(f"Cannot rebind invalid metadata: {path.name}", ErrorCode.SCHEMA_VALIDATION_ERROR)
-            data["workflow"] = project_id_value
-            atomic_json(path, data)
+            if data[workflow_key] != project_id_value:
+                data[workflow_key] = project_id_value
+                atomic_json(path, data)
 
 
 def initialize(root: Path) -> tuple[Project, bool]:
@@ -326,11 +336,14 @@ def initialize(root: Path) -> tuple[Project, bool]:
         data.setdefault("last_review", None)
         data.setdefault("last_gate", None)
         data.setdefault("last_error", None)
+        data.setdefault("infrastructure_error", None)
         data.setdefault("pending_goal", None)
         data.setdefault("history", [])
         data.setdefault("updated_at", utc_now())
         if data.get("workflow_id") != project.project_id:
             raise CwError("Project workflow mismatch", ErrorCode.WORKFLOW_PROJECT_MISMATCH, "Run: cw repair")
+        if not workflow.phases and data.get("status") == "UNINITIALIZED":
+            data["status"] = "INITIALIZED"
         if workflow.phases and data.get("current_phase") in {phase.id for phase in workflow.phases}:
             data["workflow_version"] = workflow.version
             data["workflow_sha256"] = workflow_hash(plan)
@@ -432,6 +445,7 @@ def repair(root: Path) -> Path:
                 "schema_version": SCHEMA_VERSION, "cw_version": __version__, "workflow_id": current_id,
                 "pending_goal": state.get("pending_goal"), "history": state.get("history", []),
             })
+            state.setdefault("infrastructure_error", None)
             atomic_json(state_path, state)
         except (CwError, AttributeError, TypeError):
             atomic_json(state_path, initial_state(current_id))
@@ -440,21 +454,38 @@ def repair(root: Path) -> Path:
     from .workflow import load_workflow, workflow_hash
     workflow = load_workflow(root)
     state = load_json(state_path)
+    from .progress import normalize_legacy_progress
+    workflow, _ = normalize_legacy_progress(root, workflow, state)
+    if not workflow.phases and state.get("status") == "UNINITIALIZED":
+        state["status"] = "INITIALIZED"
     if workflow.phases and state.get("current_phase") in {phase.id for phase in workflow.phases}:
         state["workflow_version"] = workflow.version
         state["workflow_sha256"] = workflow_hash(plan_path)
     elif workflow.phases:
         state = initial_state(current_id)
         state.update({"workflow_version": workflow.version, "workflow_sha256": workflow_hash(plan_path), "current_phase": workflow.phases[0].id, "status": "PLAN_PROPOSED" if workflow.status == "PROPOSED" else "READY"})
+    from .recovery import (
+        migrate_legacy_reviewer_error,
+        readiness_is_valid,
+        recover_orphan_revision_readiness,
+    )
+    migrated_error = migrate_legacy_reviewer_error(root, workflow, state)
+    recovered_revision = recover_orphan_revision_readiness(root, workflow, state)
     atomic_json(state_path, state)
     from .session import load_session, process_is_alive, readiness_path, session_path
     phase_id = state.get("current_phase")
+    valid_readiness = False
+    if phase_id in {phase.id for phase in workflow.phases}:
+        valid_readiness = readiness_is_valid(root, workflow, workflow.phase(str(phase_id)))
     if session_path(root).exists() and phase_id in {phase.id for phase in workflow.phases}:
         try:
             session = load_session(root, workflow, workflow.phase(str(phase_id)))
             owner = session.get("owner_pid") if session else None
             if not readiness_path(root).exists() and (not isinstance(owner, int) or not process_is_alive(owner)):
                 session_path(root).unlink(missing_ok=True)
+            elif readiness_path(root).exists() and not valid_readiness:
+                session_path(root).unlink(missing_ok=True)
+                readiness_path(root).unlink(missing_ok=True)
         except CwError:
             session_path(root).unlink(missing_ok=True)
             readiness_path(root).unlink(missing_ok=True)
@@ -463,4 +494,11 @@ def repair(root: Path) -> Path:
         readiness_path(root).unlink(missing_ok=True)
     elif readiness_path(root).exists():
         readiness_path(root).unlink(missing_ok=True)
+    if migrated_error is not None:
+        state["last_error"] = None
+        state["status"] = "READY_FOR_REVIEW" if valid_readiness else "ERROR"
+        atomic_json(state_path, state)
+    elif recovered_revision:
+        state["status"] = "READY_FOR_REVIEW"
+        atomic_json(state_path, state)
     return backup

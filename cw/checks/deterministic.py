@@ -56,6 +56,46 @@ def _redacted_environment() -> dict[str, str]:
     return {key: value for key, value in os.environ.items() if key in allowed}
 
 
+def _validate_completed_work(root: Path, workflow: Workflow, phase: Phase, result: ValidationResult) -> None:
+    validate_dependencies(root, workflow, phase)
+    result.checks.append({"name": "Previous gates", "status": "passed"})
+    for artifact in phase.artifacts:
+        safe_project_path(root, artifact, must_exist=True)
+    result.checks.append({"name": "Artifacts", "status": "passed", "count": len(phase.artifacts)})
+    for command in phase.required_commands:
+        timeout = command.timeout_seconds or workflow.command_timeout
+        arguments = command_arguments(command.command)
+        completed = subprocess.run(
+            arguments, cwd=root, shell=False, text=True,
+            capture_output=True, timeout=timeout, env=_redacted_environment(), check=False,
+        )
+        check = {"name": "Required command", "command": command.command, "exit_code": completed.returncode}
+        result.checks.append(check)
+        if completed.returncode:
+            raise CwError(f"Required command failed: {command.command}", details=(completed.stderr or completed.stdout)[-4000:])
+    validate_dependencies(root, workflow, phase)
+    result.artifact_hashes = artifact_hashes(root, phase.artifacts)
+    result.checks.append({"name": "SHA-256 integrity", "status": "passed"})
+
+
+def inspect_completed_work(root: Path, workflow: Workflow, phase: Phase) -> ValidationResult:
+    """Validate implemented work without trusting or requiring a readiness manifest."""
+    result = ValidationResult(passed=False)
+    try:
+        _validate_completed_work(root, workflow, phase, result)
+        result.passed = True
+    except (CwError, OSError, subprocess.TimeoutExpired) as exc:
+        if isinstance(exc, subprocess.TimeoutExpired):
+            message = f"Required command timed out: {exc.cmd}"
+        elif isinstance(exc, OSError):
+            message = f"Required command could not start: {exc}"
+        else:
+            message = str(exc)
+        result.errors.append(message)
+        result.checks.append({"name": "Validation", "status": "failed", "detail": message})
+    return result
+
+
 def validate_phase(root: Path, workflow: Workflow, phase: Phase) -> ValidationResult:
     result = ValidationResult(passed=False)
     try:
@@ -66,35 +106,14 @@ def validate_phase(root: Path, workflow: Workflow, phase: Phase) -> ValidationRe
         if manifest["session_id"] != session["session_id"]:
             raise CwError("Readiness manifest does not belong to the active implementer session", ErrorCode.SCHEMA_VALIDATION_ERROR)
         result.checks.append({"name": "Manifest", "status": "passed"})
-        validate_dependencies(root, workflow, phase)
-        result.checks.append({"name": "Previous gates", "status": "passed"})
         required = set(phase.artifacts)
         declared = set(manifest["artifacts"])
         missing = required - declared
         if missing:
             raise CwError(f"Required artifacts are not declared: {', '.join(sorted(missing))}", ErrorCode.SCHEMA_VALIDATION_ERROR)
-        # Establish existence and containment before running project commands.
-        # The authoritative hashes are captured only after those commands have
-        # completed because validation tools may legitimately rewrite files.
-        for artifact in phase.artifacts:
-            safe_project_path(root, artifact, must_exist=True)
-        result.checks.append({"name": "Artifacts", "status": "passed", "count": len(phase.artifacts)})
-        for command in phase.required_commands:
-            timeout = command.timeout_seconds or workflow.command_timeout
-            arguments = command_arguments(command.command)
-            completed = subprocess.run(
-                arguments, cwd=root, shell=False, text=True,
-                capture_output=True, timeout=timeout, env=_redacted_environment(), check=False,
-            )
-            check = {"name": "Required command", "command": command.command, "exit_code": completed.returncode}
-            result.checks.append(check)
-            if completed.returncode:
-                raise CwError(f"Required command failed: {command.command}", details=(completed.stderr or completed.stdout)[-4000:])
-        # A required command must not silently invalidate an already approved
-        # dependency, and gate/review evidence must bind the final file bytes.
-        validate_dependencies(root, workflow, phase)
-        result.artifact_hashes = artifact_hashes(root, phase.artifacts)
-        result.checks.append({"name": "SHA-256 integrity", "status": "passed"})
+        # Establish existence before commands, recheck dependency gates after
+        # commands, and bind final file bytes into the semantic review.
+        _validate_completed_work(root, workflow, phase, result)
         result.passed = True
     except (CwError, OSError, subprocess.TimeoutExpired) as exc:
         if isinstance(exc, subprocess.TimeoutExpired):

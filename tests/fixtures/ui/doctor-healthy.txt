@@ -1,0 +1,18 @@
+╭──────────────────────────────────────────────────────────────╮
+│ CW · Doctor                                                  │
+╰──────────────────────────────────────────────────────────────╯
+
+  Environment
+  ✓ Git             /usr/bin/git
+  ✓ Python          /usr/bin/python3
+
+  Workflow
+  ✓ Project identity
+
+  Security
+  ✓ Runtime writable
+
+  ──────────────────────────────────────────────────────────────
+
+  ✓ Healthy
+    4 checks passed · 0 warnings · 0 errors

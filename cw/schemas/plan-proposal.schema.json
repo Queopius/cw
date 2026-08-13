@@ -50,6 +50,12 @@
           },
           "blocking_criteria": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
           "requires_human_approval": {"type": "boolean"}
+          ,
+          "required_integrations": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"}
+          }
         }
       }
     }

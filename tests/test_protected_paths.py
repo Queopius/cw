@@ -85,6 +85,24 @@ class ProtectedPathTests(unittest.TestCase):
             )
         verify_protected_paths(self.repo.root, self.repo.workflow, self.phase, before)
 
+    def test_review_infrastructure_metadata_cannot_be_forged(self):
+        self.repo.artifact()
+        self.repo.ready()
+        before = snapshot_protected_paths(self.repo.root, self.paths)
+        failure = CwError("network", ErrorCode.REVIEWER_NETWORK_ERROR)
+        with self.assertRaises(CwError):
+            run_review(
+                self.repo.root, self.repo.workflow, self.phase, self.repo.state(),
+                FakeAdapter(error=failure),
+            )
+        state = self.repo.state()
+        state["infrastructure_error"]["operation"] = "implementation"
+        from cw.core.state import save_state
+        save_state(self.repo.root, state)
+        with self.assertRaises(CwError) as raised:
+            verify_protected_paths(self.repo.root, self.repo.workflow, self.phase, before)
+        self.assertEqual(ErrorCode.PROTECTED_PATH_MODIFIED, raised.exception.code)
+
     def test_gate_without_new_review_is_rejected(self):
         self.repo.artifact()
         reference = self.repo.approved_review()

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from cw import __version__
 from cw.adapters.codex import CodexResult
-from cw.cli.main import main
+from cw.cli.main import _context, main
 from cw.core.errors import CwError, ErrorCode
 from cw.core.models import WorkflowState
 from cw.core.state import save_state, transition
@@ -45,7 +45,7 @@ class CliTests(unittest.TestCase):
     def test_status_healthy(self):
         code, output = self.invoke("status")
         self.assertEqual(0, code)
-        self.assertIn("IN_PROGRESS", output)
+        self.assertIn("IN PROGRESS", output)
         self.assertIn("01  Phase 1", output)
 
     def test_default_command_is_start(self):
@@ -80,7 +80,8 @@ class CliTests(unittest.TestCase):
         with patch("cw.cli.main.CodexAdapter.run_implementer", side_effect=implement):
             code, _ = self.invoke("start")
         self.assertEqual(0, code)
-        self.assertEqual("APPROVED", self.repo.state()["status"])
+        self.assertEqual("IN_PROGRESS", self.repo.state()["status"])
+        self.assertEqual("02-phase-2", self.repo.state()["current_phase"])
         self.assertTrue((self.repo.root / ".cw/gates/01-phase-1.approved.json").is_file())
 
     def test_start_fails_closed_when_implementer_mutates_state(self):
@@ -166,7 +167,8 @@ class CliTests(unittest.TestCase):
             code, _ = self.invoke("retry")
         self.assertEqual(0, code)
         implementer.assert_not_called()
-        self.assertEqual("APPROVED", self.repo.state()["status"])
+        self.assertEqual("IN_PROGRESS", self.repo.state()["status"])
+        self.assertEqual("02-phase-2", self.repo.state()["current_phase"])
 
     def test_hook_review_rejects_wrong_session_environment(self):
         from cw.core.session import create_session
@@ -196,6 +198,20 @@ class CliTests(unittest.TestCase):
         self.assertFalse(payload["continue"])
         self.assertNotIn("decision", payload)
 
+    def test_human_review_command_reports_created_gate(self):
+        gate = self.repo.root / ".cw/gates/01-phase-1.approved.json"
+        with patch("cw.cli.main.human_approve", return_value=gate) as approver:
+            code, output = self.invoke("review", "--human-approve", "--json")
+        self.assertEqual(0, code)
+        self.assertEqual({
+            "decision": "APPROVE",
+            "gate": ".cw/gates/01-phase-1.approved.json",
+            "human": True,
+            "next_phase": "02-phase-2",
+            "workflow_completed": False,
+        }, json.loads(output))
+        approver.assert_called_once()
+
     def test_help_flag_uses_public_help(self):
         code, output = self.invoke("--help")
         self.assertEqual(0, code)
@@ -223,7 +239,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("full diagnostic", output)
 
     def test_doctor_healthy(self):
-        with patch("cw.cli.main.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"):
+        with patch("cw.cli.commands.read.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"):
             code, output = self.invoke("doctor")
         self.assertEqual(0, code)
         self.assertIn("checks passed", output)
@@ -250,13 +266,63 @@ class CliTests(unittest.TestCase):
     def test_history_empty(self):
         code, output = self.invoke("history")
         self.assertEqual(0, code)
-        self.assertIn("No workflow events", output)
+        self.assertIn("Current", output)
 
     def test_version_json(self):
         code, output = self.invoke("version", "--json")
         payload = json.loads(output)
         self.assertEqual(__version__, payload["version"])
         self.assertEqual("CW by Queopius", payload["brand"])
+
+    def test_global_json_flag_before_command(self):
+        code, output = self.invoke("--json", "version")
+        self.assertEqual(0, code)
+        self.assertEqual("CW by Queopius", json.loads(output)["brand"])
+
+    def test_config_set_updates_project_policy_atomically(self):
+        code, output = self.invoke("config", "set", "allow_network", "true", "--json")
+        payload = json.loads(output)
+        self.assertEqual(0, code)
+        self.assertEqual("project", payload["scope"])
+        self.assertTrue(payload["value"])
+        self.assertIn("allow_network = true", (self.repo.root / ".cw/config.toml").read_text(encoding="utf-8"))
+        self.assertTrue(_context(self.repo.root)[2].allow_network)
+
+    def test_config_set_accepts_string_lists(self):
+        value = '["payments", "cryptography"]'
+        code, output = self.invoke("config", "set", "human_gate_categories", value, "--json")
+        self.assertEqual(0, code)
+        self.assertEqual(["payments", "cryptography"], json.loads(output)["value"])
+        self.assertEqual(("payments", "cryptography"), _context(self.repo.root)[2].human_gate_categories)
+
+    def test_config_set_rejects_unknown_key_without_modifying_file(self):
+        path = self.repo.root / ".cw/config.toml"
+        before = path.read_bytes()
+        code, output = self.invoke("config", "set", "secret_mode", "true")
+        self.assertEqual(2, code)
+        self.assertIn("Unknown configuration setting", output)
+        self.assertEqual(before, path.read_bytes())
+
+    def test_config_set_rejects_unsafe_path_without_modifying_file(self):
+        path = self.repo.root / ".cw/config.toml"
+        before = path.read_bytes()
+        code, output = self.invoke("config", "set", "protected_paths", '["../outside"]')
+        self.assertEqual(2, code)
+        self.assertIn("must be repository-relative", output)
+        self.assertEqual(before, path.read_bytes())
+
+    def test_config_set_rejects_non_positive_integer_without_modifying_file(self):
+        path = self.repo.root / ".cw/config.toml"
+        before = path.read_bytes()
+        code, output = self.invoke("config", "set", "review_timeout", "0")
+        self.assertEqual(2, code)
+        self.assertIn("must be a positive integer", output)
+        self.assertEqual(before, path.read_bytes())
+
+    def test_config_set_requires_key_and_value(self):
+        code, output = self.invoke("config", "set")
+        self.assertEqual(2, code)
+        self.assertIn("setting and value are required", output)
 
     def test_no_color_environment(self):
         stream = Tty()
@@ -291,7 +357,7 @@ class CliTests(unittest.TestCase):
         })
         save_state(self.repo.root, initial_state(project_id))
         code, output = self.invoke("plan")
-        self.assertEqual(1, code)
+        self.assertEqual(3, code)
         self.assertIn("Project goal is unclear", output)
         proposal = Planner().propose_plan(self.repo.root, project_id, "Build a webhook handler")
         with patch("cw.cli.main.CodexAdapter.run_planner", return_value=CodexResult({"phases": proposal["phases"]}, "")):

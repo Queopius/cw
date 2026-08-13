@@ -1,0 +1,21 @@
+╭──────────────────────────────────────────────────────────────╮
+│ CW · Codex Workflow                                   v0.3.0 │
+│ by Queopius                                                  │
+╰──────────────────────────────────────────────────────────────╯
+
+  sample-app                                                 dev
+  ──────────────────────────────────────────────────────────────
+
+  ✓ WORKFLOW COMPLETE
+
+  Progress    ##############################  100%
+
+  Approved    3 / 3 phases
+
+    ✓ 01  Repository Assessment
+    ✓ 02  Build Authentication
+    ✓ 03  Release Verification
+
+  All configured gates are valid.
+
+  cw history        View the complete audit trail

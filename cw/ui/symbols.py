@@ -1,0 +1,5 @@
+SUCCESS = "✓"
+ACTIVE = "→"
+PENDING = "·"
+WARNING = "!"
+ERROR = "✕"
