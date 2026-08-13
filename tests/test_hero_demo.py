@@ -127,6 +127,13 @@ class HeroSanitizationTests(unittest.TestCase):
 
 
 class HeroArtifactTests(unittest.TestCase):
+    def test_committed_real_recording_matches_current_release(self) -> None:
+        path = ROOT / "demo/hero/hero-demo.json"
+        version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        artifact = load_and_validate(path, expected_version=version)
+        self.assertTrue(artifact["provenance"]["recorded_from_real_workflow"])
+        self.assertEqual("COMPLETED", artifact["final_result"]["workflow_status"])
+
     def test_valid_recording_passes(self) -> None:
         self.assertEqual("COMPLETED", validate_artifact(valid_artifact())["final_result"]["workflow_status"])
 
