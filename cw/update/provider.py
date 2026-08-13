@@ -19,6 +19,7 @@ TRUSTED_RELEASE_HOSTS = {
     "github.com",
     "objects.githubusercontent.com",
     "github-releases.githubusercontent.com",
+    "release-assets.githubusercontent.com",
 }
 MANIFEST_ASSET = "cw-release-manifest.json"
 MAX_DOWNLOAD_BYTES = 128 * 1024 * 1024

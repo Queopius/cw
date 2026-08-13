@@ -4,6 +4,12 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.3.1 — 2026-08-13
+
+- Trust GitHub's official `release-assets.githubusercontent.com` redirect host
+  so verified public release manifests and artifacts remain downloadable while
+  all non-GitHub update origins continue to fail closed.
+
 ## 0.3.0 — 2026-08-13
 
 - Add controlled multi-phase execution through `cw run N`, `--phases`,
