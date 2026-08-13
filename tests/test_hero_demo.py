@@ -10,6 +10,7 @@ from unittest.mock import patch
 from scripts.hero_demo import (
     DemoWorkspace,
     HeroDemoError,
+    _normalize_execution_events,
     atomic_write_artifact,
     load_and_validate,
     sanitize_public_text,
@@ -106,6 +107,23 @@ class HeroSanitizationTests(unittest.TestCase):
         self.assertNotIn("abc123", value)
         self.assertNotIn("sk-abcdefghijklmnopqrstuvwxyz", value)
         self.assertNotIn("\x1b", value)
+
+    def test_only_plan_declared_commands_enter_public_events(self) -> None:
+        records = [
+            {"event_type": "COMMAND_STARTED", "command": "sed -n '1,200p' .cw/state.json"},
+            {"event_type": "COMMAND_STARTED", "command": "python3 -m unittest discover -v"},
+            {
+                "event_type": "COMMAND_COMPLETED", "command": "python3 -m unittest discover -v",
+                "exit_code": 0, "duration_ms": 10,
+            },
+        ]
+        events = _normalize_execution_events(
+            records, private_root=ROOT,
+            allowed_commands=frozenset({"python3 -m unittest discover -v"}),
+        )
+        serialized = json.dumps(events)
+        self.assertNotIn("state.json", serialized)
+        self.assertEqual(2, len(events))
 
 
 class HeroArtifactTests(unittest.TestCase):

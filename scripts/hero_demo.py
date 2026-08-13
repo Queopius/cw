@@ -210,6 +210,7 @@ def _read_run_events(root: Path) -> list[dict[str, Any]]:
 
 def _normalize_execution_events(
     records: list[dict[str, Any]], *, private_root: Path,
+    allowed_commands: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
@@ -224,16 +225,18 @@ def _normalize_execution_events(
             candidate = public_event("active", "Implementation active")
         elif source == "COMMAND_STARTED" and isinstance(record.get("command"), str):
             command = sanitize_public_text(record["command"], private_roots=(private_root,))
-            candidate = public_event("active", f"Running {command}", command=command)
+            if command in allowed_commands:
+                candidate = public_event("active", f"Running {command}", command=command)
         elif source == "COMMAND_COMPLETED" and isinstance(record.get("command"), str):
             command = sanitize_public_text(record["command"], private_roots=(private_root,))
             exit_code = record.get("exit_code")
-            candidate = public_event(
-                "success" if exit_code in {0, None} else "warning",
-                f"{command} completed" if exit_code in {0, None} else f"{command} failed",
-                command=command,
-                actual_duration_ms=record.get("duration_ms"),
-            )
+            if command in allowed_commands:
+                candidate = public_event(
+                    "success" if exit_code in {0, None} else "warning",
+                    f"{command} completed" if exit_code in {0, None} else f"{command} failed",
+                    command=command,
+                    actual_duration_ms=record.get("duration_ms"),
+                )
         elif source == "FILE_CHANGED":
             count = len(record.get("files") or [])
             candidate = public_event("info", f"Project files updated · {count} change{'s' if count != 1 else ''}")
@@ -320,6 +323,10 @@ def record_real_workflow(
             raise HeroDemoError("Planner returned invalid phase presentation data")
         if phase.get("requires_human_approval") is not False:
             raise HeroDemoError("Planner marked the harmless local demo as requiring human approval")
+        raw_commands = phase.get("required_commands")
+        if not isinstance(raw_commands, list) or not all(isinstance(item, str) for item in raw_commands):
+            raise HeroDemoError("Planner returned invalid deterministic commands")
+        allowed_commands = frozenset(raw_commands)
         events.append(public_event("phase", f"{phase['id']} · {phase['name']}"))
 
         approved = invoke(["plan", "approve", "--json"], "Plan approval", "cw plan approve", 60)
@@ -328,7 +335,9 @@ def record_real_workflow(
         events.append(public_event("success", "Plan approved"))
 
         invoke(["start", "--json"], "CW implementation", "cw start")
-        start_events = _normalize_execution_events(_read_run_events(project), private_root=project)
+        start_events = _normalize_execution_events(
+            _read_run_events(project), private_root=project, allowed_commands=allowed_commands,
+        )
         events.extend(start_events)
         status_result = _run(
             [str(executable), "status", "--json"], cwd=project,
@@ -345,7 +354,9 @@ def record_real_workflow(
                 and review_payload.get("workflow_completed") is True
             ):
                 raise HeroDemoError("Independent reviewer did not approve and complete the one-phase workflow")
-            all_run_events = _normalize_execution_events(_read_run_events(project), private_root=project)
+            all_run_events = _normalize_execution_events(
+                _read_run_events(project), private_root=project, allowed_commands=allowed_commands,
+            )
             events.extend(event for event in all_run_events if event not in start_events)
             # JSON mode intentionally skips the human live renderer/recorder.
             # Its structured review report is the authoritative observable
