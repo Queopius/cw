@@ -155,6 +155,12 @@ class HeroArtifactTests(unittest.TestCase):
         with self.assertRaises(HeroDemoError):
             validate_artifact(value)
 
+    def test_missing_command_activity_fails(self) -> None:
+        value = valid_artifact()
+        value["events"] = [item for item in value["events"] if item.get("type") != "active" or "command" not in item]
+        with self.assertRaisesRegex(HeroDemoError, "command activity"):
+            validate_artifact(value)
+
     def test_completion_before_gate_fails(self) -> None:
         value = valid_artifact()
         complete = value["events"].pop()
