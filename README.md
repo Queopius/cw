@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/cw-logo-dark.png">
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/cw-logo-light.png">
-    <img src="docs/assets/brand/cw-mark.png" alt="" width="180">
+    <img src="docs/assets/brand/cw-mark.png" alt="" width="420">
   </picture>
 </p>
 
