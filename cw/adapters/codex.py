@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import queue
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 from cw.core.errors import CwError, ErrorCode
@@ -16,6 +19,15 @@ from cw.adapters.invocation import (
     record_run_result,
 )
 from cw.adapters.result import CodexResult, CodexRunResult
+from cw.execution.context import current_event_sink
+from cw.execution.events import (
+    CodexEventParser,
+    ExecutionEvent,
+    ExecutionEventType,
+    ExecutionTracker,
+    StartupProfile,
+)
+from cw.execution.observability import load_observability_settings
 
 
 class CodexAdapter:
@@ -36,6 +48,8 @@ class CodexAdapter:
         completed: subprocess.CompletedProcess[str],
         *,
         payload: dict | None = None,
+        startup_profile: dict[str, int] | None = None,
+        session_id: str | None = None,
     ) -> CodexRunResult:
         """Build and persist the canonical result without promoting MCP noise."""
 
@@ -53,6 +67,8 @@ class CodexAdapter:
             completed.returncode,
             diagnostics,
             terminal_error,
+            startup_profile,
+            session_id,
         )
         record_run_result(
             root,
@@ -63,6 +79,141 @@ class CodexAdapter:
             diagnostics=tuple(item.to_dict() for item in diagnostics),
         )
         return result
+
+    def _run_streaming(
+        self,
+        root: Path,
+        role: str,
+        command: list[str],
+        environment: dict[str, str],
+        *,
+        timeout: int | None,
+    ) -> CodexRunResult:
+        """Run Codex JSONL without blocking stdout behind process completion."""
+
+        sink = current_event_sink()
+        if sink is None:
+            return self._run_captured(root, role, command, environment, timeout=timeout)
+        started = time.monotonic()
+        process = subprocess.Popen(
+            command,
+            cwd=root,
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            bufsize=1,
+        )
+        spawned = time.monotonic()
+        profile = StartupProfile(spawn_ms=max(0, round((spawned - started) * 1000)))
+        profile_sink = getattr(sink, "set_profile", None)
+        if callable(profile_sink):
+            profile_sink(profile)
+        parser = CodexEventParser(root)
+        observability = load_observability_settings()
+        tracker = ExecutionTracker(
+            quiet_threshold_seconds=observability.quiet_threshold_seconds,
+            heartbeat_seconds=observability.heartbeat_seconds,
+        )
+        sink(ExecutionEvent(
+            ExecutionEventType.PROCESS_STARTED,
+            process_id=process.pid,
+            elapsed_seconds=tracker.elapsed(),
+        ))
+        output_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
+
+        def read_stream(name: str, stream: object) -> None:
+            try:
+                for line in stream:  # type: ignore[union-attr]
+                    output_queue.put((name, line))
+            finally:
+                output_queue.put((name, None))
+
+        stdout_thread = threading.Thread(target=read_stream, args=("stdout", process.stdout), daemon=True)
+        stderr_thread = threading.Thread(target=read_stream, args=("stderr", process.stderr), daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+        stdout: list[str] = []
+        stderr: list[str] = []
+        closed: set[str] = set()
+        codex_session_id: str | None = None
+        first_codex_event_at: float | None = None
+        session_event_at: float | None = None
+        try:
+            while len(closed) < 2 or process.poll() is None:
+                if timeout is not None and time.monotonic() - started >= timeout:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+                    raise subprocess.TimeoutExpired(command, timeout)
+                try:
+                    stream_name, line = output_queue.get(timeout=0.5)
+                except queue.Empty:
+                    heartbeat = tracker.poll(process_alive=process.poll() is None)
+                    if heartbeat is not None:
+                        tracker.observe(heartbeat)
+                        sink(heartbeat)
+                    continue
+                if line is None:
+                    closed.add(stream_name)
+                    continue
+                if stream_name == "stderr":
+                    stderr.append(line)
+                    continue
+                stdout.append(line)
+                if first_codex_event_at is None:
+                    first_codex_event_at = time.monotonic()
+                    profile.first_event_ms = max(0, round((first_codex_event_at - spawned) * 1000))
+                    if callable(profile_sink):
+                        profile_sink(profile)
+                event = parser.parse_line(line)
+                if event is None:
+                    tracker.touch()
+                    continue
+                tracker.observe(event)
+                if event.type is ExecutionEventType.SESSION_STARTED:
+                    codex_session_id = event.session_id
+                    session_event_at = time.monotonic()
+                    profile.session_init_ms = max(0, round((session_event_at - spawned) * 1000))
+                    if callable(profile_sink):
+                        profile_sink(profile)
+                sink(event)
+            return_code = process.wait()
+        except BaseException:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            raise
+        finally:
+            stdout_thread.join(timeout=1)
+            stderr_thread.join(timeout=1)
+        completed_event = ExecutionEvent(
+            ExecutionEventType.PROCESS_COMPLETED,
+            exit_code=return_code,
+            status="completed" if return_code == 0 else "failed",
+            elapsed_seconds=tracker.elapsed(),
+            process_id=process.pid,
+        )
+        tracker.observe(completed_event)
+        sink(completed_event)
+        completed = subprocess.CompletedProcess(command, return_code, "".join(stdout), "".join(stderr))
+        if callable(profile_sink):
+            profile_sink(profile)
+        return self._result(
+            root,
+            role,
+            completed,
+            startup_profile=profile.to_dict(),
+            session_id=codex_session_id,
+        )
 
     def _run_captured(
         self,
@@ -133,11 +284,14 @@ class CodexAdapter:
         command = [self.command, *global_arguments]
         command.extend([
             "--cd", str(root), "--sandbox", "workspace-write",
-            "--ask-for-approval", "never", "exec", "--color", "never", prompt,
+            "--ask-for-approval", "never", "exec", "--color", "never",
         ])
+        if current_event_sink() is not None:
+            command.append("--json")
+        command.append(prompt)
         invocation = record_invocation(root, "implementer", command, environment, prompt=prompt)
         try:
-            result = self._run_captured(
+            result = self._run_streaming(
                 root, "implementer", command, environment, timeout=timeout,
             )
         except subprocess.TimeoutExpired as exc:
@@ -176,12 +330,17 @@ class CodexAdapter:
                 "--config", "project_doc_max_bytes=0",
                 "--ask-for-approval", "never", "exec", "--ephemeral",
                 "--disable", "hooks", "--sandbox", "read-only",
-                "--ignore-rules", "--color", "never", "--output-schema", str(schema),
-                "--output-last-message", str(output), "--cd", str(root), prompt,
+                "--ignore-rules", "--color", "never",
             ]
+            if current_event_sink() is not None:
+                command.append("--json")
+            command.extend([
+                "--output-schema", str(schema),
+                "--output-last-message", str(output), "--cd", str(root), prompt,
+            ])
             invocation = record_invocation(root, role, command, environment, prompt=prompt)
             try:
-                result = self._run_captured(
+                result = self._run_streaming(
                     root, role, command, environment, timeout=timeout,
                 )
             except subprocess.TimeoutExpired as exc:
@@ -214,6 +373,7 @@ class CodexAdapter:
             return CodexRunResult(
                 payload, result.stderr, result.stdout, result.exit_code,
                 result.integration_diagnostics, result.terminal_error,
+                result.startup_profile, result.session_id,
             )
 
     def run_reviewer(self, root: Path, prompt: str, schema: Path, timeout: int) -> CodexResult:

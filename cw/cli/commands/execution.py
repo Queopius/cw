@@ -4,6 +4,7 @@ import argparse
 import copy
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -22,14 +23,22 @@ from cw.core.recovery import (
     retryable_infrastructure_error,
     migrate_legacy_reviewer_error,
 )
+from cw.core.progress import derive_effective_workflow_state
 from cw.core.session import create_session, finish_session, load_session, readiness_path
 from cw.core.state import advance_after_approval, load_state, save_state, transition
 from cw.core.utils import utc_now
 from cw.execution.session import active_batch
+from cw.execution.context import execution_event_sink
+from cw.execution.events import ExecutionEvent, ExecutionEventType, ExecutionState, StartupProfile
+from cw.execution.processes import ProcessInspector
+from cw.execution.runs import RunRecorder, load_active_run, new_run_id
 from cw.integrations.config import project_requirements
 from cw.integrations.manager import IntegrationManager
 from cw.ui.console import Console, emit_json
+from cw.ui.live import LiveExecutionObserver
 from cw.ui.renderers import (
+    render_completed_start,
+    render_completed_action,
     render_review_result,
     render_review_start,
     render_start,
@@ -69,16 +78,26 @@ def command_start(
     current_resolver: CurrentResolver,
     adapter_factory: AdapterFactory,
 ) -> int:
-    if args.json:
-        raise CwError(
-            "JSON mode is not supported for cw start",
-            ErrorCode.USAGE_ERROR,
-            "Run: cw start",
-            exit_code=2,
-        )
+    preflight_started = time.monotonic()
     root = root_resolver()
     if active_batch(root, own_pid=os.getpid()) is not None:
         raise CwError("Workflow batch is already running", ErrorCode.LOCKED, "Run: cw status")
+    existing_run = load_active_run(root)
+    if existing_run is not None:
+        inspector = ProcessInspector()
+        supervisor = inspector.inspect(existing_run.get("supervisor_pid"))
+        child = inspector.inspect(existing_run.get("process_pid"))
+        if supervisor.alive or child.alive:
+            raise CwError(
+                "Existing CW execution detected", ErrorCode.LOCKED,
+                "Run: cw status",
+                details=f"Run: {existing_run.get('run_id')}\nPhase: {existing_run.get('phase')}",
+            )
+        raise CwError(
+            "Interrupted CW execution detected", ErrorCode.INVALID_STATE,
+            "Run: cw repair",
+            details=f"Run: {existing_run.get('run_id')}\nProgress was preserved.",
+        )
     _, state, workflow = context(root)
     if not workflow.phases:
         raise CwError(
@@ -87,6 +106,19 @@ def command_start(
             "Run: cw plan",
             exit_code=3,
         )
+    effective = derive_effective_workflow_state(root, workflow, state)
+    if effective.is_complete:
+        if args.json:
+            emit_json({
+                "event_type": "WORKFLOW_COMPLETED",
+                "status": "COMPLETED",
+                "approved": len(workflow.phases),
+                "phases": len(workflow.phases),
+                "implementation_started": False,
+            })
+        else:
+            render_completed_start(console, workflow)
+        return 0
     phase = current_resolver(workflow, state)
     required_integrations = project_requirements(root) | set(phase.required_integrations)
     IntegrationManager().preflight(root, required_integrations)
@@ -122,7 +154,15 @@ def command_start(
         protected_before = snapshot_protected_paths(
             root, workflow.protected_paths, workflow=workflow, phase=phase,
         )
-        session = create_session(root, workflow, phase)
+        run_id = new_run_id()
+        session = create_session(root, workflow, phase, run_id=run_id)
+        recorder = RunRecorder(
+            root,
+            run_id=run_id,
+            phase_id=phase.id,
+            role="implementation",
+            session_id=session["session_id"],
+        )
     prompt = f"""Work only on CW phase {phase.id}: {phase.name}.
 Objective: {phase.objective}
 Read AGENTS.md and .codex/workflow/phases.yaml. Do not change workflow state, criteria, reviews, or gates.
@@ -131,7 +171,7 @@ When complete, create .cw/runtime/READY_FOR_REVIEW.json matching the installed s
 including this exact session_id, and stop normally.
 """
     approved = sum(gate_path(root, item.id).is_file() for item in workflow.phases)
-    render_start(console, {
+    start_data = {
         "project": workflow.id,
         "number": phase.id.split("-", 1)[0],
         "name": phase.name,
@@ -139,8 +179,22 @@ including this exact session_id, and stop normally.
         "total": len(workflow.phases),
         "attempt": state.get("attempt", 0),
         "max_attempts": workflow.max_review_attempts,
-    })
-    notice = None if getattr(args, "_batch_mode", False) else automatic_update_notice()
+        "run_id": run_id,
+    }
+    if args.json:
+        emit_json({"event_type": "RUN_STARTED", "state": "PREFLIGHT", **start_data})
+    else:
+        render_start(console, start_data)
+    observer = LiveExecutionObserver(
+        console,
+        recorder,
+        role="implementation",
+        json_mode=args.json,
+        verbose=args.verbose,
+    )
+    profile = StartupProfile(preflight_ms=max(0, round((time.monotonic() - preflight_started) * 1000)))
+    observer.set_profile(profile)
+    notice = None if getattr(args, "_batch_mode", False) or args.json else automatic_update_notice()
     if notice is not None:
         render_update_notice(console, {
             "latest": str(notice.latest), "installed": str(notice.installed),
@@ -149,22 +203,61 @@ including this exact session_id, and stop normally.
     failure: CwError | None = None
     result = 0
     try:
-        run_result = adapter_factory().run_implementer(
-            root,
-            prompt,
-            allow_network=workflow.allow_network,
-            session_id=session["session_id"],
-            required_integrations=tuple(sorted(required_integrations)),
-            timeout=int(getattr(args, "_batch_agent_timeout", 0)) or None,
-        )
+        with execution_event_sink(observer):
+            run_result = adapter_factory().run_implementer(
+                root,
+                prompt,
+                allow_network=workflow.allow_network,
+                session_id=session["session_id"],
+                required_integrations=tuple(sorted(required_integrations)),
+                timeout=int(getattr(args, "_batch_agent_timeout", 0)) or None,
+            )
         result = int(getattr(run_result, "exit_code", run_result or 0))
+        runtime_profile = getattr(run_result, "startup_profile", None)
+        if isinstance(runtime_profile, dict):
+            profile.spawn_ms = runtime_profile.get("spawn_ms")
+            profile.session_init_ms = runtime_profile.get("session_init_ms")
+            profile.first_event_ms = runtime_profile.get("first_event_ms")
+            observer.set_profile(profile)
     except CwError as exc:
         failure = exc
+    except KeyboardInterrupt:
+        observer(ExecutionEvent(
+            ExecutionEventType.STOP_REQUESTED,
+            source_type="cw.interrupt",
+            summary="Stop requested",
+        ))
+        failure = CwError(
+            "Managed Codex execution was interrupted",
+            ErrorCode.EXECUTION_INTERRUPTED,
+            "Run: cw retry",
+            details=f"Run {run_id} stopped by the user. Progress was preserved.",
+            exit_code=130,
+        )
     try:
         verify_protected_paths(root, workflow, phase, protected_before)
     except CwError as exc:
         failure = exc
     if failure is not None:
+        observer.finish(
+            success=False,
+            status=ExecutionState.STOPPING if failure.code is ErrorCode.EXECUTION_INTERRUPTED else None,
+        )
+        last_activity = str(recorder.payload.get("last_activity") or "Codex working")
+        elapsed = float(recorder.payload.get("elapsed_seconds") or observer.tracker.elapsed())
+        diagnostic_context = (
+            f"Run: {run_id}\nLast activity: {last_activity}\n"
+            f"Elapsed: {elapsed:.1f}s\nProgress was preserved."
+        )
+        failure.details = (
+            f"{diagnostic_context}\n\n{failure.details}"
+            if failure.details else diagnostic_context
+        )
+        if not args.json and not console.quiet:
+            console.line()
+            console.field("Last activity", last_activity)
+            console.field("Elapsed", f"{elapsed:.1f}s")
+            console.wrapped("Progress preserved.", 2)
         if failure.code is ErrorCode.PROTECTED_PATH_MODIFIED and protected_before.state is not None:
             state = copy.deepcopy(protected_before.state)
             state.setdefault("history", []).append({
@@ -177,7 +270,7 @@ including this exact session_id, and stop normally.
         state["last_error"] = state_error(failure)
         if failure.code in {
             ErrorCode.IMPLEMENTER_PROCESS_ERROR, ErrorCode.CODEX_NOT_FOUND,
-            ErrorCode.BATCH_TIME_EXHAUSTED,
+            ErrorCode.BATCH_TIME_EXHAUSTED, ErrorCode.EXECUTION_INTERRUPTED,
         }:
             mark_infrastructure_error(
                 state, failure, operation="implementation", phase=phase.id,
@@ -197,13 +290,24 @@ including this exact session_id, and stop normally.
 
         validate_gate(root, workflow, phase.id)
         following = None if status is WorkflowState.COMPLETED else workflow.phase(str(state["current_phase"]))
-        render_transition(console, phase, following)
+        if args.json:
+            emit_json({
+                "event_type": "RUN_COMPLETED",
+                "run_id": run_id,
+                "phase": phase.id,
+                "status": "COMPLETED",
+                "next_phase": following.id if following else None,
+            })
+        else:
+            render_transition(console, phase, following)
+        observer.finish(success=True)
         return result
     if status is WorkflowState.ERROR:
         raw_error = str(state.get("last_error") or "")
         code_value = raw_error.split(":", 1)[0]
         known_codes = {item.value for item in ErrorCode}
         code = ErrorCode(code_value) if code_value in known_codes else ErrorCode.WORKFLOW_ERROR
+        observer.finish(success=False)
         raise CwError("Phase review failed", code, "Run: cw retry", details=raw_error)
     if status is WorkflowState.IN_PROGRESS and not readiness_path(root).exists():
         failure = CwError(
@@ -217,10 +321,21 @@ including this exact session_id, and stop normally.
         )
         transition(root, state, WorkflowState.ERROR, force_error=True)
         finish_session(root)
+        observer.finish(success=False)
         raise failure
     if status is WorkflowState.IN_PROGRESS and readiness_path(root).exists():
-        console.item("!", "Phase is ready; automatic review did not run")
-        console.run("cw review")
+        if args.json:
+            emit_json({
+                "event_type": "RUN_COMPLETED",
+                "run_id": run_id,
+                "phase": phase.id,
+                "status": "READY_FOR_REVIEW",
+                "next": "cw review",
+            })
+        else:
+            console.item("!", "Phase is ready; automatic review did not run")
+            console.run("cw review")
+    observer.finish(success=True)
     return result
 
 
@@ -300,8 +415,16 @@ def command_review(
             print("{}")
             return 0
     show_live = not args.hook and not args.json and not args.human_approve
+    review_observer: LiveExecutionObserver | None = None
     if show_live:
         render_review_start(console, phase)
+        review_run_id = new_run_id()
+        review_observer = LiveExecutionObserver(
+            console,
+            RunRecorder(root, run_id=review_run_id, phase_id=phase.id, role="review"),
+            role="review",
+            verbose=args.verbose,
+        )
     with operation_lock(root, "review"):
         if args.human_approve:
             gate = human_approver(root, workflow, phase, state)
@@ -314,7 +437,15 @@ def command_review(
             report["next_phase"] = workflow.phases[index + 1].id if index + 1 < len(workflow.phases) else None
             report["workflow_completed"] = index + 1 == len(workflow.phases)
         else:
-            report = reviewer(root, workflow, phase, state)
+            try:
+                with execution_event_sink(review_observer if review_observer is not None else None):
+                    report = reviewer(root, workflow, phase, state)
+            except BaseException:
+                if review_observer is not None:
+                    review_observer.finish(success=False)
+                raise
+    if review_observer is not None:
+        review_observer.finish(success=True)
     if args.hook:
         if report.get("decision") == "REVISE":
             reason = "CW independent review requires revision. Run: cw history"
@@ -346,6 +477,24 @@ def command_retry(
 ) -> int:
     root = root_resolver()
     _, state, workflow = context(root)
+    if workflow.phases and derive_effective_workflow_state(root, workflow, state).is_complete:
+        payload = {
+            "status": "COMPLETED",
+            "approved": len(workflow.phases),
+            "phases": len(workflow.phases),
+            "retry_required": False,
+            "implementation_started": False,
+        }
+        if args.json:
+            emit_json(payload)
+        else:
+            render_completed_action(
+                console,
+                workflow,
+                title="Retry",
+                detail="No retry is required. No implementation session was started.",
+            )
+        return 0
     if not isinstance(state.get("infrastructure_error"), dict):
         # A direct retry of prototype-era state performs the same safe,
         # backed-up normalization as `cw repair` before taking recovery action.

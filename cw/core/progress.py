@@ -39,12 +39,33 @@ class GateChain:
 
 
 @dataclass(frozen=True, slots=True)
-class WorkflowConsistency:
+class EffectiveWorkflowState:
+    """Canonical workflow position derived from validated approval evidence.
+
+    Persisted state is compared with this result, but it never determines the
+    approved prefix, completion, counters, or next executable phase.
+    """
+
     chain: GateChain
-    expected_current: str | None
-    expected_last_gate: str | None
+    status: WorkflowState
+    current_phase: str | None
+    approved_phases: tuple[str, ...]
+    approved_count: int
+    remaining_count: int
+    active_count: int
+    last_gate: str | None
+    last_review: str | None
+    is_complete: bool
     consistent: bool
     issues: tuple[str, ...]
+
+    @property
+    def expected_current(self) -> str | None:
+        return self.current_phase
+
+    @property
+    def expected_last_gate(self) -> str | None:
+        return self.last_gate
 
 
 def derive_gate_chain(root: Path, workflow: Workflow) -> GateChain:
@@ -104,27 +125,37 @@ def valid_gate_ids(root: Path, workflow: Workflow) -> list[str]:
     return [phase_id for phase_id, _ in valid_gate_prefix(root, workflow)]
 
 
-def derive_workflow_consistency(
+def derive_effective_workflow_state(
     root: Path,
     workflow: Workflow,
     state: dict[str, Any],
-) -> WorkflowConsistency:
+) -> EffectiveWorkflowState:
     """Derive canonical workflow reality and compare it with persisted state."""
     chain = derive_gate_chain(root, workflow)
     approved = list(chain.approved)
     approved_count = len(approved)
+    phase_count = len(workflow.phases)
+    is_complete = approved_count == phase_count
     current = state.get("current_phase")
     latest_reference = (
         gate_path(root, approved[-1][0]).relative_to(root).as_posix()
         if approved else None
     )
-    expected_current = None if approved_count == len(workflow.phases) else workflow.phases[approved_count].id
+    expected_current = None if is_complete else workflow.phases[approved_count].id
+    expected_status = WorkflowState.COMPLETED if is_complete else WorkflowState.IN_PROGRESS
+    latest_review = approved[-1][1].get("review_reference") if approved else None
+    if not isinstance(latest_review, str):
+        latest_review = approved[-1][1].get("review_file") if approved else None
+    if not isinstance(latest_review, str):
+        latest_review = None
     issues = list(chain.issues)
     if state.get("last_gate") != latest_reference:
         issues.append(f"last_gate must be {latest_reference or 'null'}")
-    if approved_count == len(workflow.phases):
-        if state.get("status") != WorkflowState.COMPLETED.value or current is not None:
-            issues.append("all phases are approved, so state must be COMPLETED with no current phase")
+    if is_complete:
+        if current is not None:
+            issues.append("Completed workflow still has an active phase")
+        if state.get("status") != WorkflowState.COMPLETED.value:
+            issues.append("All configured phases are approved, so state must be COMPLETED")
     else:
         if current != expected_current:
             issues.append(f"current_phase must be {expected_current}")
@@ -134,7 +165,6 @@ def derive_workflow_consistency(
             issues.append("workflow is marked complete without all approval gates")
     if approved and workflow.status == "PROPOSED":
         issues.append("an executing plan with approval gates cannot remain PROPOSED")
-    latest_review = approved[-1][1].get("review_reference") if approved else None
     if (
         expected_current is not None
         and state.get("status") == WorkflowState.IN_PROGRESS.value
@@ -158,13 +188,30 @@ def derive_workflow_consistency(
             issues.append(
                 f"readiness belongs to {readiness_phase or 'an unknown phase'}, expected {expected_current or 'none'}"
             )
-    return WorkflowConsistency(
+    return EffectiveWorkflowState(
         chain=chain,
-        expected_current=expected_current,
-        expected_last_gate=latest_reference,
+        status=expected_status,
+        current_phase=expected_current,
+        approved_phases=tuple(phase_id for phase_id, _ in approved),
+        approved_count=approved_count,
+        remaining_count=max(0, phase_count - approved_count),
+        active_count=0 if is_complete else 1,
+        last_gate=latest_reference,
+        last_review=latest_review,
+        is_complete=is_complete,
         consistent=not issues,
         issues=tuple(issues),
     )
+
+
+def derive_workflow_consistency(
+    root: Path,
+    workflow: Workflow,
+    state: dict[str, Any],
+) -> EffectiveWorkflowState:
+    """Compatibility name for the canonical effective-state derivation."""
+
+    return derive_effective_workflow_state(root, workflow, state)
 
 
 def validate_progress_state(root: Path, workflow: Workflow, state: dict[str, Any]) -> None:
@@ -173,7 +220,7 @@ def validate_progress_state(root: Path, workflow: Workflow, state: dict[str, Any
     if not consistency.consistent:
         raise CwError(
             "Workflow state is inconsistent with approval evidence",
-            ErrorCode.INVALID_STATE,
+            ErrorCode.STATE_INCONSISTENT,
             "Run: cw repair",
             details="\n".join(consistency.issues),
         )
@@ -303,8 +350,16 @@ def normalize_legacy_progress(
     Existing gates must describe a contiguous executed prefix; anything else is
     ambiguous and therefore rejected.
     """
-    approved_evidence = valid_gate_prefix(root, workflow)
-    approved = [phase_id for phase_id, _ in approved_evidence]
+    effective = derive_effective_workflow_state(root, workflow, state)
+    if effective.chain.issues:
+        raise CwError(
+            "Approval gates do not form an executable phase sequence",
+            ErrorCode.INVALID_GATE,
+            "Inspect gates and reopen the first affected phase.",
+            details="\n".join(effective.chain.issues),
+        )
+    approved_evidence = list(effective.chain.approved)
+    approved = list(effective.approved_phases)
     if not approved:
         return workflow, False
 
@@ -319,8 +374,8 @@ def normalize_legacy_progress(
     changed = changed or history_added > 0
 
     current = state.get("current_phase")
-    expected_current = None if len(approved) == len(workflow.phases) else workflow.phases[len(approved)].id
-    expected_status = WorkflowState.COMPLETED.value if len(approved) == len(workflow.phases) else WorkflowState.IN_PROGRESS.value
+    expected_current = effective.current_phase
+    expected_status = effective.status.value
     latest_id, latest_gate = approved_evidence[-1]
     latest_reference = gate_path(root, latest_id).relative_to(root).as_posix()
     latest_review = latest_gate.get("review_reference") or latest_gate.get("review_file")
@@ -333,7 +388,7 @@ def normalize_legacy_progress(
     position_stale = (
         current != expected_current
         or state.get("last_gate") != latest_reference
-        or (len(approved) == len(workflow.phases) and state.get("status") != expected_status)
+        or (effective.is_complete and state.get("status") != expected_status)
         or advanced_attempt_stale
         or resolved_cw_metadata_error(state)
     )
@@ -344,7 +399,7 @@ def normalize_legacy_progress(
             state["last_review"] = latest_review
         state["last_error"] = None
         state["infrastructure_error"] = None
-        if len(approved) == len(workflow.phases):
+        if effective.is_complete:
             state["current_phase"] = None
             state["status"] = WorkflowState.COMPLETED.value
             state["attempt"] = 0

@@ -4,6 +4,40 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.4.2 — 2026-08-13
+
+- Centralize gate-derived workflow truth in `EffectiveWorkflowState`, including
+  canonical completion, current phase, approved/remaining/active counts, and
+  final gate/review references.
+- Add completed-workflow safety barriers to start, retry, CLI batch, and the
+  domain `BatchRunner`; none may create an agent or batch after all gates pass.
+- Classify all-approved state with an active phase as `STATE_INCONSISTENT` and
+  retain strict fail-closed validation until explicit repair canonicalizes it.
+
+## 0.4.1 — 2026-08-13
+
+- Fix completed-workflow repair so a fully validated gate chain converges to
+  `COMPLETED` with no current phase instead of falling back to the first phase.
+- Make completion an explicit reconciliation branch, preserve the final gate,
+  clear stale readiness/errors, and keep repeated repair history-idempotent.
+- Add completed repair/start UX: `cw repair` reports the complete gate count and
+  `cw` never launches an implementer for an already completed workflow.
+
+## 0.4.0 — 2026-08-13
+
+- Stream documented `codex exec --json` JSONL events through one shared
+  adapter so startup, session initialization, commands, file changes, token
+  usage, completion, and failure remain observable without exposing reasoning.
+- Replace the stale `Starting Codex…` wait with truthful line-oriented live
+  states, elapsed time, command durations, debounced file summaries, restrained
+  heartbeats, configurable inactivity warnings, quiet mode, and JSONL output.
+- Persist redacted versioned run events and startup profiles under `.cw/logs`,
+  add `cw inspect`, `cw logs --run`, `cw doctor --performance`, and portable
+  managed-process diagnostics.
+- Give runs durable IDs, protect projects from duplicate implementers, detect
+  interrupted supervisors, and archive stale execution metadata through
+  explicit repair without changing workflow gates or approval semantics.
+
 ## 0.3.4 — 2026-08-13
 
 - Derive workflow progress from a fully validated contiguous approval-gate

@@ -19,7 +19,7 @@ development. It separates planning from implementation, runs deterministic
 checks before semantic review, invokes an independent read-only reviewer, and
 records SHA-256 approval gates before allowing another phase to begin.
 
-CW v0.3 is an early release. It is designed for local Git repositories and
+CW v0.4 is an early release. It is designed for local Git repositories and
 offers bounded—not unlimited—autonomy.
 
 ## Quick start
@@ -45,7 +45,7 @@ atomically selects it through `current`, and creates the stable launcher
 
 ```text
 ╭──────────────────────────────────────────────────────────────╮
-│ CW · Codex Workflow                                   v0.3.2 │
+│ CW · Codex Workflow                                   v0.4.2 │
 │ by Queopius                                                  │
 ╰──────────────────────────────────────────────────────────────╯
 
@@ -160,6 +160,8 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
 | `cw review` | Run independent review after readiness |
 | `cw retry` | Retry a retryable infrastructure failure |
 | `cw history` | Show the phase audit trail |
+| `cw inspect run [ID]` | Inspect a managed Codex execution |
+| `cw logs --run ID` | Show its structured execution events |
 | `cw doctor` | Diagnose environment and workflow integrity |
 | `cw repair` | Back up and repair CW metadata only |
 | `cw config` | Show effective configuration or set a validated project override |
@@ -171,6 +173,34 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
 
 Important read commands support `--json`; daily output respects `NO_COLOR` and
 automatically removes ANSI escapes when stdout is not a TTY.
+
+## Live Codex execution
+
+CW consumes the supported JSONL stream from `codex exec --json`. Once the
+child exists, the startup message immediately becomes an active session view;
+command starts and completions, reliable file-change summaries, elapsed time,
+and final state are rendered as meaningful checkpoints rather than a spinner.
+
+```text
+✓ Codex process started
+✓ Session initialized
+
+IMPLEMENTATION
+──────────────────────────────────────────────────────────────
+
+→ Running command
+  composer check
+
+Elapsed      08m 41s
+```
+
+Long event silence produces a restrained heartbeat and then a non-destructive
+inactivity warning while the process remains alive. It is never killed merely
+for being quiet. Event logs are redacted, versioned, and addressable by run ID;
+`cw inspect session`, `cw logs --run ID`, `cw doctor --performance`, and
+`cw doctor --processes` expose progressively deeper diagnostics. `--quiet`
+suppresses live presentation, `--verbose` expands it, and `--json` emits JSONL
+without ANSI. See [Live execution](docs/live-execution.md).
 
 ## Controlled multi-phase execution
 

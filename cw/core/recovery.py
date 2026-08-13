@@ -17,6 +17,7 @@ RETRYABLE_OPERATIONS: dict[ErrorCode, str] = {
     ErrorCode.REVIEWER_PROCESS_ERROR: "review",
     ErrorCode.REVIEW_TIMEOUT: "review",
     ErrorCode.IMPLEMENTER_PROCESS_ERROR: "implementation",
+    ErrorCode.EXECUTION_INTERRUPTED: "implementation",
     ErrorCode.PLANNER_NETWORK_ERROR: "planning",
     ErrorCode.PLANNER_TRANSPORT_ERROR: "planning",
     ErrorCode.PLANNER_PROCESS_ERROR: "planning",

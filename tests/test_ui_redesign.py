@@ -106,6 +106,10 @@ class SemanticRenderingTests(unittest.TestCase):
         output = render(render_status, data)
         self.assertIn("✓ WORKFLOW COMPLETE", output)
         self.assertIn("100%", output)
+        self.assertIn("State", output)
+        self.assertIn("COMPLETED", output)
+        self.assertIn("Plan", output)
+        self.assertIn("APPROVED", output)
         self.assertIn("All configured gates are valid.", output)
 
     def test_error_and_human_states_have_contextual_actions(self) -> None:

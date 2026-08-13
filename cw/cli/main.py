@@ -188,6 +188,14 @@ def command_integrations(args: argparse.Namespace, console: Console) -> int:
     return read_commands.command_integrations(args, console, root_resolver=_root, context=_context)
 
 
+def command_inspect(args: argparse.Namespace, console: Console) -> int:
+    return read_commands.command_inspect(args, console, root_resolver=_root)
+
+
+def command_logs(args: argparse.Namespace, console: Console) -> int:
+    return read_commands.command_logs(args, console, root_resolver=_root)
+
+
 def command_run(args: argparse.Namespace, console: Console) -> int:
     def execute_phase(phase_id: str, remaining_seconds: float) -> int:
         root = _root()
@@ -223,6 +231,8 @@ COMMANDS = {
     "integrations": command_integrations,
     "explain": command_explain,
     "run": command_run,
+    "inspect": command_inspect,
+    "logs": command_logs,
 }
 
 

@@ -2,6 +2,28 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.4.2",
+      "changes": [
+        "Centralized gate-derived workflow state and completion counters.",
+        "Prevented start, retry, and batch execution after workflow completion."
+      ]
+    },
+    {
+      "version": "0.4.1",
+      "changes": [
+        "Fixed all-gates-approved repair so completed workflows never wrap to the first phase.",
+        "Added idempotent completed-workflow repair and no-implementation completion UX."
+      ]
+    },
+    {
+      "version": "0.4.0",
+      "changes": [
+        "Added live Codex JSONL activity streaming and truthful execution states.",
+        "Added run inspection, structured logs, startup profiling, and stall detection.",
+        "Added durable run identity, duplicate-run protection, and interrupted-run recovery."
+      ]
+    },
+    {
       "version": "0.3.4",
       "changes": [
         "Added strict workflow consistency derivation and fail-closed status rendering.",

@@ -25,6 +25,7 @@ cw.planning repository inspection and plan proposal
 cw.checks   deterministic validation
 cw.agents   independent review policy and consistency checks
 cw.adapters isolated Codex subprocess integration
+cw.execution normalized events, live state, run identity, profiles, clocks
 cw.integrations optional/required capability health and diagnostic normalization
 cw.update    release providers, cache, verification, transactions, and rollback
 cw.templates project-installed static integration
@@ -56,6 +57,12 @@ clears stale errors and runtime readiness, or completes the final phase. The
 append-only review and gate are written before that state commit, so a crash can
 be reconciled from authoritative evidence by backup-first repair.
 
+`cw.core.progress.EffectiveWorkflowState` is the sole gate-derived workflow
+position. It validates the contiguous dependency/gate chain and exposes
+completion, current phase, approved/remaining/active counts, and final
+gate/review references. Status, repair, start, retry, and batch execution consume
+this result; persisted `current_phase` can never override completed evidence.
+
 `cw.core.layout` defines the trusted project filesystem topology. Validation is
 performed before init writes, lock acquisition, normal context loading, repair,
 and backup. Individual critical loaders retain their own regular-file checks as
@@ -82,6 +89,42 @@ misreported as a network failure.
 
 No third-party CLI/UI framework is used in v0.2. This minimizes installation
 cost, enables a self-contained global copy, and keeps behavior auditable.
+
+## Live execution observability
+
+```text
+codex exec --json (stdout JSONL)     Codex stderr
+                 |                       |
+                 v                       v
+          CodexEventParser       optional diagnostics
+                 |
+                 v
+          ExecutionTracker ---- monotonic clock
+            |          |
+            v          v
+      live renderer   RunRecorder -> .cw/logs/runs/<run-id>.jsonl
+```
+
+The adapter reads stdout and stderr independently from a portable `Popen`
+boundary. Documented JSON events are the primary activity source; process
+liveness is only a secondary safety signal. Agent messages and reasoning items
+are deliberately excluded from live and persisted events. Commands are
+summarized and secret-looking arguments are redacted at parsing and persistence
+boundaries.
+
+`ExecutionTracker` owns the state machine and startup profile. The observer is
+line-oriented—no alternate screen or fast redraw—and renders only meaningful
+checkpoints. A heartbeat and quiet warning are clock-injected and throttled;
+silence never kills a healthy child. The same stream feeds normal, batch, quiet,
+verbose, non-TTY, and JSONL modes.
+
+Each managed invocation receives a durable run ID independent of its PID. An
+atomic active-run pointer records supervisor/child identity, while redacted
+versioned summaries remain inspectable after completion. A live run blocks a
+second implementer; a dead supervisor/child pair is an explicit interrupted
+run which `cw repair` archives before another launch. Common code has no `/proc`
+dependency and the subprocess/liveness boundary works on Linux, macOS, and
+Windows.
 
 ## Managed installation and updates
 

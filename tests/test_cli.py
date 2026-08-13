@@ -17,6 +17,9 @@ from cw.cli.main import _context, main
 from cw.core.errors import CwError, ErrorCode
 from cw.core.models import WorkflowState
 from cw.core.state import save_state, transition
+from cw.core.utils import atomic_json
+from cw.execution.events import ExecutionEvent, ExecutionEventType, ExecutionState
+from cw.execution.runs import RunRecorder, new_run_id
 from cw.ui.console import Console
 from cw.planning.planner import Planner
 from tests.helpers import TempRepo, result
@@ -143,12 +146,77 @@ class CliTests(unittest.TestCase):
         self.assertEqual("ERROR", self.repo.state()["status"])
         self.assertFalse((self.repo.root / ".cw/runtime/implementer-session.json").exists())
 
-    def test_start_json_is_rejected_without_mutating_state(self):
-        before = (self.repo.root / ".cw/state.json").read_bytes()
-        code, output = self.invoke("start", "--json")
-        self.assertEqual(2, code)
-        self.assertEqual("USAGE_ERROR", json.loads(output)["error"]["code"])
-        self.assertEqual(before, (self.repo.root / ".cw/state.json").read_bytes())
+    def test_start_json_emits_machine_events_without_human_formatting(self):
+        def implement(*_args, **_kwargs):
+            self.repo.artifact()
+            self.repo.ready()
+            return 0
+
+        with patch("cw.cli.main.CodexAdapter.run_implementer", side_effect=implement):
+            code, output = self.invoke("start", "--json")
+        self.assertEqual(0, code)
+        events = [json.loads(line) for line in output.splitlines()]
+        self.assertEqual("RUN_STARTED", events[0]["event_type"])
+        self.assertEqual("RUN_COMPLETED", events[-1]["event_type"])
+        self.assertNotIn("\033[", output)
+        self.assertNotIn("Starting Codex", output)
+
+    def test_active_managed_run_blocks_duplicate_implementer(self):
+        recorder = RunRecorder(
+            self.repo.root,
+            run_id=new_run_id(),
+            phase_id="01-phase-1",
+            role="implementation",
+        )
+        with patch("cw.cli.main.CodexAdapter.run_implementer") as implementer:
+            code, output = self.invoke("start")
+        self.assertEqual(1, code)
+        self.assertIn("Another CW operation is active", output)
+        self.assertIn("Existing CW execution detected", output)
+        implementer.assert_not_called()
+        recorder.finish(status=ExecutionState.STOPPING, elapsed_seconds=0)
+
+    def test_stale_managed_run_is_visible_and_requires_repair(self):
+        recorder = RunRecorder(
+            self.repo.root,
+            run_id=new_run_id(),
+            phase_id="01-phase-1",
+            role="implementation",
+        )
+        active = json.loads((self.repo.root / ".cw/runtime/active-run.json").read_text())
+        active["supervisor_pid"] = 999_999_999
+        active["process_pid"] = 999_999_998
+        atomic_json(self.repo.root / ".cw/runtime/active-run.json", active)
+        code, output = self.invoke("status")
+        self.assertEqual(0, code)
+        self.assertIn("INTERRUPTED", output)
+        self.assertIn("cw repair", output)
+        recorder.payload = active
+        recorder.finish(status=ExecutionState.STOPPING, elapsed_seconds=0)
+
+    def test_inspect_logs_and_performance_use_structured_run_record(self):
+        recorder = RunRecorder(
+            self.repo.root,
+            run_id=new_run_id(),
+            phase_id="01-phase-1",
+            role="implementation",
+        )
+        recorder.record(
+            ExecutionEvent(ExecutionEventType.COMMAND_STARTED, command="composer check"),
+            ExecutionState.RUNNING_COMMAND,
+        )
+        recorder.finish(status=ExecutionState.COMPLETED, elapsed_seconds=1.5)
+        code, inspect_output = self.invoke("inspect", "run", recorder.run_id)
+        self.assertEqual(0, code)
+        self.assertIn(recorder.run_id, inspect_output)
+        code, log_output = self.invoke("logs", "--run", recorder.run_id)
+        self.assertEqual(0, code)
+        self.assertIn("COMMAND_STARTED", log_output)
+        self.assertIn("composer check", log_output)
+        code, performance_output = self.invoke("doctor", "--performance")
+        self.assertEqual(0, code)
+        self.assertIn("Performance", performance_output)
+        self.assertIn(recorder.run_id, performance_output)
 
     def test_retry_reviews_existing_readiness_after_implementer_exit(self):
         failure = CwError("exited after readiness", ErrorCode.IMPLEMENTER_PROCESS_ERROR, "Run: cw retry")

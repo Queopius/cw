@@ -29,7 +29,9 @@ class Console:
 
     def line(self, value: str = "") -> None:
         if not self.quiet:
-            print(value, file=self.stream)
+            # Live execution checkpoints must be visible immediately even when
+            # stdout is redirected to CI logs instead of attached to a TTY.
+            print(value, file=self.stream, flush=True)
 
     @property
     def width(self) -> int:
@@ -132,7 +134,13 @@ class Console:
 
 
 def emit_json(payload: Any, stream: TextIO | None = None) -> None:
-    print(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True), file=stream or sys.stdout)
+    # One object per line keeps ordinary JSON machine-readable and allows
+    # streaming commands to use the same function as a JSONL transport.
+    print(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        file=stream or sys.stdout,
+        flush=True,
+    )
 
 
 def error_summary(code: str, message: str) -> tuple[str, str]:
@@ -140,6 +148,7 @@ def error_summary(code: str, message: str) -> tuple[str, str]:
         "REVIEWER_NETWORK_ERROR": ("Reviewer unavailable", "Could not contact the Codex reviewer."),
         "REVIEW_TIMEOUT": ("Reviewer timed out", "The independent review exceeded its configured timeout."),
         "IMPLEMENTER_PROCESS_ERROR": ("Implementer stopped unexpectedly", "Codex did not finish the implementation session normally."),
+        "EXECUTION_INTERRUPTED": ("Stop requested", "CW stopped the managed Codex operation and preserved workflow progress."),
         "PLANNER_NETWORK_ERROR": ("Planner unavailable", "Could not contact the Codex planner."),
         "PLANNER_TRANSPORT_ERROR": ("Planner transport failed", "The Codex planner connection closed before completion."),
         "PLANNER_SCHEMA_ERROR": ("Planner schema incompatible", "CW could not start planning because its structured output schema was rejected by Codex."),
@@ -148,6 +157,7 @@ def error_summary(code: str, message: str) -> tuple[str, str]:
         "WORKFLOW_PROJECT_MISMATCH": ("Project workflow mismatch", "This workflow belongs to another repository."),
         "RUNTIME_NOT_WRITABLE": ("Runtime path is read-only", ".cw must be writable."),
         "INVALID_STATE": ("Workflow state invalid", message),
+        "STATE_INCONSISTENT": ("Workflow state inconsistent", message),
         "INVALID_GATE": ("Approval gate invalid", message),
         "PROTECTED_PATH_MODIFIED": ("Protected workflow metadata changed", "CW detected an unauthorized metadata change and stopped safely."),
         "CODEX_NOT_FOUND": ("Codex not found", "The Codex CLI is required for planning and agent operations."),

@@ -6,6 +6,7 @@ import os
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from cw.agents.reviewer import run_review
 from cw.cli.main import main
@@ -240,6 +241,178 @@ class WorkflowStateReconciliationTests(unittest.TestCase):
         self.assertNotIn("✓ 01", output)
         self.assertNotIn("→ 01", output)
         self.assertNotIn("✓ 02", output)
+
+    def test_all_approved_repair_completes_without_wrapping_and_is_idempotent(self) -> None:
+        for phase in range(1, 4):
+            self.review(phase)
+        gates_before = {
+            path.name: path.read_bytes()
+            for path in sorted((self.repo.root / ".cw/gates").glob("*.json"))
+        }
+        state = self.repo.state()
+        history_before = list(state["history"])
+        state.update({
+            "current_phase": "01-phase-1",
+            "status": "ERROR",
+            "attempt": 2,
+            "last_gate": ".cw/gates/01-phase-1.approved.json",
+            "last_error": "INVALID_STATE: stale completed workflow position",
+            "infrastructure_error": None,
+        })
+        save_state(self.repo.root, state)
+        readiness = self.repo.root / ".cw/runtime/READY_FOR_REVIEW.json"
+        readiness.write_text(json.dumps({
+            "schema_version": 1,
+            "phase": "01-phase-1",
+            "status": "READY_FOR_REVIEW",
+            "artifacts": ["docs/phase-1.md"],
+            "checks_executed": [],
+            "session_id": "a" * 32,
+        }), encoding="utf-8")
+
+        before = derive_workflow_consistency(
+            self.repo.root, self.repo.workflow, self.repo.state(),
+        )
+        self.assertFalse(before.consistent)
+        self.assertIsNone(before.expected_current)
+        self.assertTrue(before.is_complete)
+        self.assertEqual(3, before.approved_count)
+        self.assertEqual(0, before.remaining_count)
+        self.assertEqual(0, before.active_count)
+        self.assertIn("Completed workflow still has an active phase", before.issues)
+        with self.assertRaises(CwError) as invalid:
+            validate_state(self.repo.root, self.repo.state(), self.repo.workflow)
+        self.assertEqual("STATE_INCONSISTENT", invalid.exception.code.value)
+        status_code, status_output = self.invoke("status", "--no-color")
+        self.assertEqual(1, status_code)
+        self.assertIn("Expected phase", status_output)
+        self.assertIn("workflow complete", status_output)
+
+        first_report: dict = {}
+        repair(self.repo.root, report=first_report)
+        repaired = load_state(self.repo.root)
+        self.assertEqual("COMPLETED", repaired["status"])
+        self.assertIsNone(repaired["current_phase"])
+        self.assertEqual(0, repaired["attempt"])
+        self.assertEqual(".cw/gates/03-phase-3.approved.json", repaired["last_gate"])
+        self.assertIsNone(repaired["last_error"])
+        self.assertIsNone(repaired["infrastructure_error"])
+        self.assertFalse(readiness.exists())
+        self.assertEqual(history_before, repaired["history"])
+        self.assertEqual(0, first_report["history_reconstructed"])
+        self.assertEqual(gates_before, {
+            path.name: path.read_bytes()
+            for path in sorted((self.repo.root / ".cw/gates").glob("*.json"))
+        })
+        validate_state(self.repo.root, repaired, load_workflow(self.repo.root))
+
+        state_after_first = (self.repo.root / ".cw/state.json").read_bytes()
+        history_after_first = list(repaired["history"])
+        second_report: dict = {}
+        repair(self.repo.root, report=second_report)
+        self.assertEqual(state_after_first, (self.repo.root / ".cw/state.json").read_bytes())
+        self.assertEqual(history_after_first, load_state(self.repo.root)["history"])
+        self.assertFalse(second_report["state_reconciled"])
+        self.assertEqual(0, second_report["history_reconstructed"])
+
+        repair_code, repair_output = self.invoke("repair", "--no-color")
+        self.assertEqual(0, repair_code)
+        self.assertIn("State already consistent", repair_output)
+        self.assertIn("History already complete", repair_output)
+        self.assertIn("Workflow", repair_output)
+        self.assertIn("✓ COMPLETE", repair_output)
+        self.assertIn("3 / 3 phases", repair_output)
+        self.assertIn("No repairs required", repair_output)
+        self.assertNotIn("Current\n", repair_output)
+        self.assertNotIn("→ 01-phase-1", repair_output)
+
+        code, output = self.invoke("status", "--no-color")
+        self.assertEqual(0, code)
+        self.assertIn("WORKFLOW COMPLETE", output)
+        self.assertIn("100%", output)
+        self.assertNotIn("CURRENT PHASE", output)
+        self.assertNotIn("→ 01", output)
+
+        json_code, json_output = self.invoke("status", "--json")
+        self.assertEqual(0, json_code)
+        status_payload = json.loads(json_output)
+        self.assertTrue(status_payload["is_complete"])
+        self.assertEqual(3, status_payload["approved_count"])
+        self.assertEqual(0, status_payload["remaining_count"])
+        self.assertEqual(0, status_payload["active_count"])
+        self.assertIsNone(status_payload["phase"])
+
+        with patch("cw.cli.main.CodexAdapter.run_implementer") as implementer:
+            start_code, start_output = self.invoke("start", "--no-color")
+            retry_code, retry_output = self.invoke("retry", "--no-color")
+            run_code, run_output = self.invoke("run", "--phases", "3", "--no-color")
+        self.assertEqual(0, start_code)
+        self.assertIn("WORKFLOW COMPLETE", start_output)
+        self.assertEqual(0, retry_code)
+        self.assertIn("WORKFLOW COMPLETE", retry_output)
+        self.assertIn("No retry is required", retry_output)
+        self.assertEqual(0, run_code)
+        self.assertIn("WORKFLOW COMPLETE", run_output)
+        self.assertIn("0 phases are available", run_output)
+        self.assertFalse((self.repo.root / ".cw/runtime/batch.json").exists())
+        implementer.assert_not_called()
+
+
+class CanonicalGatePositionTests(unittest.TestCase):
+    def test_exact_nine_phase_positions_never_wrap(self) -> None:
+        for approved_count, expected_current, expected_status in (
+            (0, "01-phase-1", "IN_PROGRESS"),
+            (1, "02-phase-2", "IN_PROGRESS"),
+            (7, "08-phase-8", "IN_PROGRESS"),
+            (8, "09-phase-9", "IN_PROGRESS"),
+            (9, None, "COMPLETED"),
+        ):
+            repo = TempRepo(phases=9)
+            try:
+                for phase in range(1, approved_count + 1):
+                    repo.artifact(phase)
+                    repo.ready(phase)
+                    run_review(
+                        repo.root,
+                        repo.workflow,
+                        repo.workflow.phases[phase - 1],
+                        repo.state(),
+                        FakeAdapter(result(phase)),
+                    )
+                state = repo.state()
+                consistency = derive_workflow_consistency(repo.root, repo.workflow, state)
+                self.assertTrue(consistency.consistent)
+                self.assertEqual(expected_current, consistency.expected_current)
+                self.assertEqual(expected_current, state["current_phase"])
+                self.assertEqual(expected_status, state["status"])
+                self.assertEqual(approved_count, len(consistency.chain.approved))
+                self.assertEqual(approved_count, consistency.approved_count)
+                self.assertEqual(9 - approved_count, consistency.remaining_count)
+                self.assertEqual(0 if approved_count == 9 else 1, consistency.active_count)
+                if approved_count == 9:
+                    self.assertEqual(".cw/gates/09-phase-9.approved.json", state["last_gate"])
+                    self.assertEqual(0, state["attempt"])
+            finally:
+                repo.close()
+
+    def test_invalid_final_gate_never_produces_completed_consistency(self) -> None:
+        repo = TempRepo(phases=3)
+        try:
+            for phase in range(1, 4):
+                repo.artifact(phase)
+                repo.ready(phase)
+                run_review(
+                    repo.root, repo.workflow, repo.workflow.phases[phase - 1],
+                    repo.state(), FakeAdapter(result(phase)),
+                )
+            (repo.root / "docs/phase-3.md").write_text("tampered\n", encoding="utf-8")
+            consistency = derive_workflow_consistency(repo.root, repo.workflow, repo.state())
+            self.assertFalse(consistency.consistent)
+            self.assertEqual(2, len(consistency.chain.approved))
+            self.assertEqual("03-phase-3", consistency.expected_current)
+            self.assertEqual("invalid", consistency.chain.states["03-phase-3"])
+        finally:
+            repo.close()
 
 
 if __name__ == "__main__":

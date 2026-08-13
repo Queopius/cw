@@ -22,6 +22,8 @@ class CodexRunResult:
     exit_code: int = 0
     integration_diagnostics: tuple[IntegrationDiagnostic, ...] = ()
     terminal_error: ErrorCode | None = None
+    startup_profile: dict[str, int] | None = None
+    session_id: str | None = None
 
     @property
     def payload(self) -> dict[str, Any]:

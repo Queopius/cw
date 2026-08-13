@@ -493,16 +493,36 @@ def repair(root: Path, *, report: dict | None = None) -> Path:
     workflow, progress_changed = normalize_legacy_progress(root, workflow, state)
     if report is not None:
         report["gates_verified"] = verified
+        report["approved_count"] = len(verified)
+        report["phase_count"] = len(workflow.phases)
         report["history_reconstructed"] = max(0, len(state.get("history", [])) - history_before)
         report["state_reconciled"] = progress_changed
     if not workflow.phases and state.get("status") == "UNINITIALIZED":
         state["status"] = "INITIALIZED"
-    if workflow.phases and state.get("current_phase") in {phase.id for phase in workflow.phases}:
-        state["workflow_version"] = workflow.version
-        state["workflow_sha256"] = workflow_hash(plan_path)
-    elif workflow.phases:
-        state = initial_state(current_id)
-        state.update({"workflow_version": workflow.version, "workflow_sha256": workflow_hash(plan_path), "current_phase": workflow.phases[0].id, "status": "PLAN_PROPOSED" if workflow.status == "PROPOSED" else "READY"})
+    phase_ids = {phase.id for phase in workflow.phases}
+    all_phases_approved = bool(workflow.phases) and len(verified) == len(workflow.phases)
+    if workflow.phases:
+        if all_phases_approved:
+            # Completion is canonical, not a missing-position fallback. A null
+            # current phase is required and must never restart at phase one.
+            if state.get("status") != "COMPLETED" or state.get("current_phase") is not None:
+                raise CwError(
+                    "Completed workflow reconciliation did not converge",
+                    ErrorCode.INVALID_STATE,
+                )
+            state["workflow_version"] = workflow.version
+            state["workflow_sha256"] = workflow_hash(plan_path)
+        elif state.get("current_phase") in phase_ids:
+            state["workflow_version"] = workflow.version
+            state["workflow_sha256"] = workflow_hash(plan_path)
+        else:
+            state = initial_state(current_id)
+            state.update({
+                "workflow_version": workflow.version,
+                "workflow_sha256": workflow_hash(plan_path),
+                "current_phase": workflow.phases[0].id,
+                "status": "PLAN_PROPOSED" if workflow.status == "PROPOSED" else "READY",
+            })
     from .recovery import (
         migrate_legacy_reviewer_error,
         readiness_is_valid,
@@ -535,7 +555,21 @@ def repair(root: Path, *, report: dict | None = None) -> Path:
         readiness_path(root).unlink(missing_ok=True)
     elif readiness_path(root).exists():
         readiness_path(root).unlink(missing_ok=True)
-    if migrated_error is not None:
+    from cw.execution.processes import ProcessInspector
+    from cw.execution.runs import archive_interrupted_run, load_active_run
+
+    active_run = load_active_run(root)
+    if active_run is not None:
+        inspector = ProcessInspector()
+        supervisor_alive = inspector.inspect(active_run.get("supervisor_pid")).alive
+        child_alive = inspector.inspect(active_run.get("process_pid")).alive
+        if not supervisor_alive and not child_alive:
+            archive_interrupted_run(root, active_run)
+    if migrated_error is not None and state.get("status") == "COMPLETED":
+        state["last_error"] = None
+        state["infrastructure_error"] = None
+        atomic_json(state_path, state)
+    elif migrated_error is not None:
         state["last_error"] = None
         state["status"] = "READY_FOR_REVIEW" if valid_readiness else "ERROR"
         atomic_json(state_path, state)

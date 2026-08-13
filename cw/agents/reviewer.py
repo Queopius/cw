@@ -19,6 +19,8 @@ from cw.core.severity import CriterionSeverity
 from cw.core.session import finish_session, readiness_path
 from cw.core.state import advance_after_approval, save_state, transition
 from cw.core.utils import atomic_json_new, utc_now
+from cw.execution.context import current_event_sink
+from cw.execution.events import ExecutionEvent, ExecutionEventType
 
 
 def reviewer_prompt(workflow: Workflow, phase: Phase) -> str:
@@ -61,9 +63,19 @@ def _persist_review(root: Path, phase: Phase, report: dict[str, Any], label: str
 
 
 def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, Any], adapter: CodexAdapter | None = None) -> dict[str, Any]:
+    sink = current_event_sink()
+    if sink is not None:
+        sink(ExecutionEvent(ExecutionEventType.VALIDATION_STARTED, source_type="cw.validation"))
     validation = validate_phase(root, workflow, phase)
     if not validation.passed:
         raise CwError("Deterministic validation failed", ErrorCode.WORKFLOW_ERROR, "Run: cw validate", details="\n".join(validation.errors))
+    if sink is not None:
+        sink(ExecutionEvent(
+            ExecutionEventType.VALIDATION_COMPLETED,
+            source_type="cw.validation",
+            status="passed",
+            summary=f"{len(validation.checks)} deterministic checks passed",
+        ))
     current = WorkflowState(state["status"])
     if current is WorkflowState.REVISION_REQUIRED:
         transition(root, state, WorkflowState.IN_PROGRESS)
@@ -81,10 +93,19 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
     reviewer = adapter or CodexAdapter()
     schema = codex_schema("review-output.schema.json")
     try:
+        if sink is not None:
+            sink(ExecutionEvent(ExecutionEventType.REVIEW_STARTED, source_type="cw.review"))
         response = reviewer.run_reviewer(root, reviewer_prompt(workflow, phase), schema, workflow.review_timeout)
         decision, criteria, blocking_criteria, issues = validate_reviewer_result(
             phase, response.payload, require_blocking_criteria=True, strict=True, root=root,
         )
+        if sink is not None:
+            sink(ExecutionEvent(
+                ExecutionEventType.REVIEW_COMPLETED,
+                source_type="cw.review",
+                status=decision.value,
+                summary=decision.value.replace("_", " "),
+            ))
     except CwError as exc:
         state["last_error"] = state_error(exc)
         metadata = mark_infrastructure_error(
@@ -131,6 +152,13 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
             return report
         gate = create_gate(root, workflow, phase, state["last_review"])
         gate_reference = gate.relative_to(root).as_posix()
+        if sink is not None:
+            sink(ExecutionEvent(
+                ExecutionEventType.GATE_CREATED,
+                source_type="cw.gate",
+                status="verified",
+                summary=gate.name,
+            ))
         next_phase = advance_after_approval(
             root, state, workflow, phase, gate_reference, attempt=attempt,
         )
@@ -140,6 +168,13 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
             "next_phase": next_phase.id if next_phase else None,
             "workflow_completed": next_phase is None,
         }
+        if sink is not None:
+            sink(ExecutionEvent(
+                ExecutionEventType.PHASE_ADVANCED,
+                source_type="cw.workflow",
+                status="completed" if next_phase is None else "advanced",
+                summary=next_phase.id if next_phase else "Workflow complete",
+            ))
     elif decision is ReviewDecision.HUMAN_REVIEW_REQUIRED:
         _event(state, phase.id, "human_review_required", attempt=attempt)
         transition(root, state, WorkflowState.HUMAN_REVIEW_REQUIRED)

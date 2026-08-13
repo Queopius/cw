@@ -40,7 +40,10 @@ def _render_cw_error(
         })
     elif not args.quiet:
         title, detail = error_summary(error.code.value, error.message)
-        warning = error.code in {ErrorCode.PLAN_UNCLEAR, ErrorCode.PLAN_REQUIRED, ErrorCode.NOTHING_TO_VALIDATE} or error.exit_code == 3
+        warning = error.code in {
+            ErrorCode.PLAN_UNCLEAR, ErrorCode.PLAN_REQUIRED,
+            ErrorCode.NOTHING_TO_VALIDATE, ErrorCode.EXECUTION_INTERRUPTED,
+        } or error.exit_code == 3
         console.item("!" if warning else "✕", title)
         console.wrapped(detail)
         if error.details and (
