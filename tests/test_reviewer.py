@@ -4,10 +4,12 @@ import unittest
 from dataclasses import replace
 
 from cw.agents.reviewer import human_approve, run_review
+from cw.adapters.result import CodexRunResult
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import validate_gate
 from cw.core.models import Criterion
 from cw.core.severity import CriterionSeverity
+from cw.integrations.models import IntegrationDiagnostic, IntegrationHealth
 from tests.helpers import FakeAdapter, TempRepo, result
 
 
@@ -24,6 +26,31 @@ class ReviewerTests(unittest.TestCase):
 
     def test_approve(self):
         self.assertEqual("APPROVE", self.review(result())["decision"])
+
+    def test_optional_mcp_diagnostic_does_not_change_semantic_attempt_accounting(self):
+        diagnostic = IntegrationDiagnostic(
+            "vercel", IntegrationHealth.AUTH_REQUIRED, "MCP_AUTH_REQUIRED",
+            summary="Authentication is required",
+        )
+
+        class Adapter:
+            def run_reviewer(_self, root, prompt, schema, timeout):
+                return CodexRunResult(
+                    result(decision="REVISE", status="FAIL"),
+                    "AuthRequired",
+                    integration_diagnostics=(diagnostic,),
+                )
+
+        report = run_review(
+            self.repo.root,
+            self.repo.workflow,
+            self.repo.workflow.phases[0],
+            self.repo.state(),
+            Adapter(),
+        )
+
+        self.assertEqual("REVISE", report["decision"])
+        self.assertEqual(1, self.repo.state()["attempt"])
 
     def test_revise(self):
         self.assertEqual("REVISE", self.review(result(decision="REVISE", status="FAIL"))["decision"])

@@ -12,6 +12,7 @@ from cw.core.project import load_project
 from cw.core.workflow import load_workflow
 from cw.ui.console import Console, emit_json
 from cw.execution.config import load_execution_settings, set_execution_setting
+from cw.execution.observability import load_observability_settings, set_observability_setting
 from cw.update.config import load_update_settings, set_update_setting
 
 
@@ -40,6 +41,27 @@ def _render_value(value: Any) -> Any:
 
 
 def command_config(args: argparse.Namespace, console: Console, *, root_resolver: RootResolver) -> int:
+    if args.action == "set" and isinstance(args.key, str) and args.key.startswith("observability."):
+        if args.value is None:
+            raise CwError("Configuration value is required", ErrorCode.USAGE_ERROR, exit_code=2)
+        value, settings = set_observability_setting(args.key, args.value)
+        payload = {
+            "scope": "global", "setting": args.key, "value": value,
+            "observability": {
+                "heartbeat_seconds": settings.heartbeat_seconds,
+                "quiet_threshold_seconds": settings.quiet_threshold_seconds,
+            },
+            "path": "~/.config/cw/config.toml",
+        }
+        if args.json:
+            emit_json(payload)
+        else:
+            console.header("Configuration")
+            console.item("✓", "Global observability setting updated")
+            console.field("Setting", args.key)
+            console.field("Value", value)
+            console.field("File", "~/.config/cw/config.toml")
+        return 0
     if args.action == "set" and isinstance(args.key, str) and args.key.startswith("execution."):
         if args.value is None:
             raise CwError("Configuration value is required", ErrorCode.USAGE_ERROR, exit_code=2)
@@ -127,6 +149,11 @@ def command_config(args: argparse.Namespace, console: Console, *, root_resolver:
         "hard_max_phases": execution.hard_max_phases,
         "default_max_time_seconds": execution.default_max_time_seconds,
         "max_semantic_revisions_per_phase": execution.max_semantic_revisions_per_phase,
+    }
+    observability = load_observability_settings()
+    config["observability"] = {
+        "heartbeat_seconds": observability.heartbeat_seconds,
+        "quiet_threshold_seconds": observability.quiet_threshold_seconds,
     }
     if args.json:
         emit_json(config)

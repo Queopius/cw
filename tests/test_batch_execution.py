@@ -7,7 +7,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from cw.cli.main import main
 from cw.cli.parser import parse_args
@@ -91,6 +91,25 @@ class BatchExecutionTests(unittest.TestCase):
         self.assertEqual("04-phase-4", load_state(self.repo.root)["current_phase"])
         self.assertTrue(all(gate_path(self.repo.root, f"{n:02d}-phase-{n}").is_file() for n in range(1, 4)))
         self.assertFalse(gate_path(self.repo.root, "04-phase-4").exists())
+
+    def test_completed_workflow_runner_never_invokes_executor_or_creates_batch(self) -> None:
+        for phase in self.repo.workflow.phases:
+            self.approve(phase.id)
+        executor = Mock()
+
+        outcome = BatchRunner().run(
+            self.repo.root,
+            self.repo.workflow,
+            ExecutionBudget(3, 7200, 3),
+            executor,
+        )
+
+        self.assertEqual("COMPLETED", outcome.status)
+        self.assertEqual("workflow_complete", outcome.reason)
+        self.assertEqual(0, outcome.completed)
+        self.assertIsNone(outcome.current_phase)
+        executor.assert_not_called()
+        self.assertFalse((self.repo.root / ".cw/runtime/batch.json").exists())
 
     def test_revision_stays_in_phase_and_does_not_consume_phase_budget(self) -> None:
         revised = False

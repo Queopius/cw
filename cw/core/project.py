@@ -58,9 +58,27 @@ def create_identity(root: Path) -> Project:
     atomic_json(root / ".cw" / "project.json", {
         "schema_version": SCHEMA_VERSION, "project_id": project.project_id,
         "repository_root_fingerprint": project.fingerprint,
-        "initialized_at": utc_now(), "cw_version": __version__,
+        "initialized_at": utc_now(),
+        "created_with_cw_version": __version__,
+        "cw_version": __version__,
     })
     return project
+
+
+def stamp_project_metadata(data: dict[str, object]) -> dict[str, object]:
+    """Stamp CW-owned mutable metadata without losing its origin version.
+
+    ``created_with_cw_version`` is historical. ``cw_version`` identifies the
+    last CW writer/migrator of the current document representation.
+    """
+    stamped = dict(data)
+    original = stamped.get("created_with_cw_version") or stamped.get("cw_version")
+    if isinstance(original, str) and original:
+        stamped["created_with_cw_version"] = original
+    else:
+        stamped["created_with_cw_version"] = __version__
+    stamped["cw_version"] = __version__
+    return stamped
 
 
 def load_project(root: Path, *, allow_moved: bool = True) -> Project:

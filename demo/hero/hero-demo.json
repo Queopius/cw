@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "product": "CW",
+  "cw_version": "0.5.0",
+  "recording_kind": "real-workflow-recording",
+  "goal": "Add a deterministic greeting function with automated tests in one development phase using Python 3",
+  "brand": {
+    "name": "CW",
+    "product_name": "Codex Workflow",
+    "maker": "Queopius"
+  },
+  "provenance": {
+    "recorded_from_real_workflow": true,
+    "source_commit": "084d3823adff8804b74c72beabcf18475e46c19b"
+  },
+  "events": [
+    {
+      "type": "command",
+      "text": "cw init",
+      "command": "cw init"
+    },
+    {
+      "type": "success",
+      "text": "Project initialized"
+    },
+    {
+      "type": "command",
+      "text": "cw plan --goal \"Add a deterministic greeting function with automated tests in one development phase using Python 3\"",
+      "command": "cw plan --goal \"Add a deterministic greeting function with automated tests in one development phase using Python 3\""
+    },
+    {
+      "type": "success",
+      "text": "Plan proposed"
+    },
+    {
+      "type": "command",
+      "text": "cw plan show",
+      "command": "cw plan show"
+    },
+    {
+      "type": "phase",
+      "text": "01-greeting-and-tests · Implement deterministic greeting with tests"
+    },
+    {
+      "type": "command",
+      "text": "cw plan approve",
+      "command": "cw plan approve"
+    },
+    {
+      "type": "success",
+      "text": "Plan approved"
+    },
+    {
+      "type": "command",
+      "text": "cw start",
+      "command": "cw start"
+    },
+    {
+      "type": "success",
+      "text": "Codex process started"
+    },
+    {
+      "type": "success",
+      "text": "Codex session initialized"
+    },
+    {
+      "type": "active",
+      "text": "Implementation active"
+    },
+    {
+      "type": "info",
+      "text": "Project files updated · 2 changes"
+    },
+    {
+      "type": "active",
+      "text": "Running python3 -m unittest discover -v",
+      "command": "python3 -m unittest discover -v"
+    },
+    {
+      "type": "success",
+      "text": "python3 -m unittest discover -v completed",
+      "command": "python3 -m unittest discover -v",
+      "actual_duration_ms": 18
+    },
+    {
+      "type": "info",
+      "text": "Project files updated · 1 change"
+    },
+    {
+      "type": "command",
+      "text": "cw review",
+      "command": "cw review"
+    },
+    {
+      "type": "validation",
+      "text": "Deterministic validation passed",
+      "result": "passed"
+    },
+    {
+      "type": "review",
+      "text": "Independent review approved",
+      "result": "APPROVE"
+    },
+    {
+      "type": "gate",
+      "text": "Approval gate verified",
+      "result": "verified"
+    },
+    {
+      "type": "complete",
+      "text": "Workflow complete"
+    }
+  ],
+  "final_result": {
+    "workflow_status": "COMPLETED",
+    "approved_phases": 1,
+    "valid_gates": 1
+  }
+}

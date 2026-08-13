@@ -116,6 +116,15 @@ class PlannerBackendTests(unittest.TestCase):
         )
         self.assertTrue(any(phase["requires_human_approval"] for phase in plan["phases"]))
 
+    def test_prompt_limits_human_gates_to_configured_categories(self):
+        backend = self.backend()
+        Planner(("payments", "production"), backend=backend).propose_plan(
+            self.repo.root, "sample-app", "Add a local greeting function"
+        )
+        prompt = backend.calls[0][1]
+        self.assertIn('Human-approval categories: ["payments", "production"]', prompt)
+        self.assertIn("ordinary local code and test changes\nmust use false", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

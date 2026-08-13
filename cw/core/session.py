@@ -24,7 +24,9 @@ def readiness_path(root: Path) -> Path:
     return root / READINESS_FILE
 
 
-def create_session(root: Path, workflow: Workflow, phase: Phase) -> dict[str, Any]:
+def create_session(
+    root: Path, workflow: Workflow, phase: Phase, *, run_id: str | None = None,
+) -> dict[str, Any]:
     if readiness_path(root).exists():
         raise CwError(
             "A readiness manifest already exists",
@@ -53,6 +55,10 @@ def create_session(root: Path, workflow: Workflow, phase: Phase) -> dict[str, An
         "started_at": utc_now(),
         "owner_pid": os.getpid(),
     }
+    if run_id is not None:
+        if re.fullmatch(r"run_[0-9a-f]{32}", run_id) is None:
+            raise CwError("Managed run identifier is invalid", ErrorCode.INVALID_STATE)
+        payload["run_id"] = run_id
     atomic_json(session_path(root), payload)
     return payload
 
@@ -69,7 +75,7 @@ def load_session(root: Path, workflow: Workflow, phase: Phase) -> dict[str, Any]
     if (
         not isinstance(data, dict)
         or not required.issubset(data)
-        or set(data) - (required | {"owner_pid"})
+        or set(data) - (required | {"owner_pid", "run_id"})
         or not isinstance(data.get("session_id"), str)
         or re.fullmatch(r"[0-9a-f]{32}", data["session_id"]) is None
         or data.get("workflow") != workflow.id
@@ -77,6 +83,7 @@ def load_session(root: Path, workflow: Workflow, phase: Phase) -> dict[str, Any]
         or data.get("status") != "ACTIVE"
         or not isinstance(data.get("started_at"), str)
         or ("owner_pid" in data and (isinstance(data["owner_pid"], bool) or not isinstance(data["owner_pid"], int) or data["owner_pid"] <= 0))
+        or ("run_id" in data and (not isinstance(data["run_id"], str) or re.fullmatch(r"run_[0-9a-f]{32}", data["run_id"]) is None))
     ):
         raise CwError("Implementer session metadata is invalid", ErrorCode.INVALID_STATE, "Run: cw repair")
     return data

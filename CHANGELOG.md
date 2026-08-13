@@ -4,6 +4,101 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.5.0 — 2026-08-13
+
+- Add a reproducible real-workflow recording pipeline for the future public CW
+  landing-page hero, using a disposable Git repository and the installed CW
+  product through normal planning, implementation, validation, independent
+  review, gate, and completion behavior.
+- Add a small stable public event schema, strict offline narrative/security
+  validation, transactional last-known-good replacement, private-path and
+  secret redaction, and deterministic fixture tests without exposing Codex
+  reasoning or optional MCP diagnostics.
+- Add explicit maintainer recording/dry-run commands and a network-free CI
+  quality gate for the committed public artifact; ordinary tests never invoke
+  Codex or require authentication.
+
+## 0.4.2 — 2026-08-13
+
+- Centralize gate-derived workflow truth in `EffectiveWorkflowState`, including
+  canonical completion, current phase, approved/remaining/active counts, and
+  final gate/review references.
+- Add completed-workflow safety barriers to start, retry, CLI batch, and the
+  domain `BatchRunner`; none may create an agent or batch after all gates pass.
+- Classify all-approved state with an active phase as `STATE_INCONSISTENT` and
+  retain strict fail-closed validation until explicit repair canonicalizes it.
+- Add a pinned MkDocs Material documentation build to the main CI pipeline;
+  `mkdocs build --strict` now fails release validation on documentation warnings.
+- Establish the owner-supplied CW monogram as the canonical brand source, add
+  deterministic dark/light/icon derivatives, and integrate it into README and
+  MkDocs without adding assets or Pillow to the Python runtime package.
+
+## 0.4.1 — 2026-08-13
+
+- Fix completed-workflow repair so a fully validated gate chain converges to
+  `COMPLETED` with no current phase instead of falling back to the first phase.
+- Make completion an explicit reconciliation branch, preserve the final gate,
+  clear stale readiness/errors, and keep repeated repair history-idempotent.
+- Add completed repair/start UX: `cw repair` reports the complete gate count and
+  `cw` never launches an implementer for an already completed workflow.
+
+## 0.4.0 — 2026-08-13
+
+- Stream documented `codex exec --json` JSONL events through one shared
+  adapter so startup, session initialization, commands, file changes, token
+  usage, completion, and failure remain observable without exposing reasoning.
+- Replace the stale `Starting Codex…` wait with truthful line-oriented live
+  states, elapsed time, command durations, debounced file summaries, restrained
+  heartbeats, configurable inactivity warnings, quiet mode, and JSONL output.
+- Persist redacted versioned run events and startup profiles under `.cw/logs`,
+  add `cw inspect`, `cw logs --run`, `cw doctor --performance`, and portable
+  managed-process diagnostics.
+- Give runs durable IDs, protect projects from duplicate implementers, detect
+  interrupted supervisors, and archive stale execution metadata through
+  explicit repair without changing workflow gates or approval semantics.
+
+## 0.3.4 — 2026-08-13
+
+- Derive workflow progress from a fully validated contiguous approval-gate
+  chain and fail closed before rendering or executing contradictory state.
+- Reconcile stale current phase, last gate/review, attempt, readiness, errors,
+  and missing approval history through backup-first `cw repair` without
+  reopening valid phases or touching application code.
+- Separate the semantic phase-contract fingerprint from mutable CW-managed
+  project metadata while continuing to block implementation-agent metadata
+  changes during a session.
+- Clarify metadata version provenance with `created_with_cw_version` and use
+  `cw_version` as the current document writer/migrator version.
+- Add workflow-integrity status, doctor checks, `cw explain`, and regression
+  coverage for impossible timelines, broken gate chains, and idempotent repair.
+
+## 0.3.3 — 2026-08-13
+
+- Remove all optional-MCP `mcp_servers.*` and plugin-disable overrides from
+  managed Codex processes; use the user's normal effective configuration.
+- Add a shared `CodexRunResult` for implementer, planner, and reviewer with
+  separately captured stdout/stderr, structured payload, deduplicated optional
+  integration diagnostics, and terminal-error precedence.
+- Run the implementer through captured `codex exec`, retain redacted diagnostic
+  logs, and add `cw doctor --codex --verbose` for sanitized argv inspection.
+- Preserve explicit required-integration preflight while ensuring optional MCP
+  authentication, HTTP, startup, or transport warnings cannot override a
+  successful Codex result or consume semantic review attempts.
+
+## 0.3.2 — 2026-08-13
+
+- Fix managed Codex integration isolation for plugin-provided MCP servers by
+  disabling optional plugins process-locally instead of reconstructing their
+  effective definitions as `mcp_servers.*` overlays.
+- Preserve user-owned Codex authentication/configuration, project Stop hooks,
+  and required integrations while ensuring CW never emits an MCP `transport`
+  property or modifies global Codex configuration.
+- Classify rejected Codex MCP configuration as non-retryable
+  `CODEX_CONFIG_ERROR`, preflight implementer configuration, and retain
+  redacted argv/environment diagnostics without exposing prompts or secrets.
+- Add managed build metadata and `cw version --verbose` paths/fingerprints so a
+  stale installed runtime can be distinguished from the development source.
+
 ## 0.3.1 — 2026-08-13
 
 - Trust GitHub's official `release-assets.githubusercontent.com` redirect host

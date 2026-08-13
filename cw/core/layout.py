@@ -12,6 +12,7 @@ CRITICAL_FILES = (
     ".cw/state.json",
     ".cw/config.toml",
     ".cw/runtime/implementer-session.json",
+    ".cw/runtime/active-run.json",
     ".cw/runtime/READY_FOR_REVIEW.json",
     ".codex/hooks.json",
     ".codex/hooks/phase_gate.py",

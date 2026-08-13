@@ -37,8 +37,10 @@ class IntegrationManager:
         required = required or set()
         if shutil.which(self.command) is None and self.command == "codex":
             raise CwError("Codex CLI was not found", ErrorCode.CODEX_NOT_FOUND)
+        command = [self.command, "mcp"]
+        command.append("list")
         completed = self.runner(
-            [self.command, "mcp", "list"], text=True, capture_output=True,
+            command, text=True, capture_output=True,
             stdin=subprocess.DEVNULL, timeout=20, check=False,
         )
         if completed.returncode:

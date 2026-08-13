@@ -39,6 +39,14 @@ the state/history delta, every configured criterion, the gate-to-review link,
 the required human-approval type, and the complete artifact hash set. A mismatch
 sets `PROTECTED_PATH_MODIFIED` and fails closed; it is not automatically retryable.
 
+The immutable phase-contract fingerprint contains the current phase definition,
+criteria, dependencies, relevant policy, and human/integration requirements. It
+does not include mutable operational fields such as metadata writer versions or
+timestamps. CW-managed project/state files remain a separate protected class, so
+an implementation agent still cannot edit them. Trusted migration and repair
+write those documents backup-first outside an implementation session; the next
+session establishes its baseline from the committed metadata.
+
 Readiness manifests are bound to the random ID of the current `cw start`
 invocation. This prevents accidental reuse or replay across sessions. The Stop
 hook checks the implementer and session environment before invoking review, so
@@ -81,11 +89,13 @@ no project name, remote, workflow, or source content. Application update state
 is global; project migration remains a separate explicit `cw repair` process.
 
 CW never writes MCP credentials or silently changes the user's global Codex
-configuration. Planner/reviewer isolation uses Codex's supported
-`--ignore-user-config`, which preserves authentication. Normalized health caches
-omit raw stderr, HTML, headers, and tokens. Optional integration failures do not
-approve, reject, or block unrelated workflow phases; required failures stop
-before implementation.
+configuration. Managed planner, reviewer, and implementer processes load the
+user's normal effective Codex configuration without adding `mcp_servers.*`
+overrides. Their stdout and stderr are captured separately; optional MCP startup
+or authentication diagnostics never override exit code zero plus a valid CW
+result. Redacted diagnostics are retained under `.cw/logs/`, while normalized
+health caches omit raw stderr, HTML, headers, and tokens. Required integrations
+are checked explicitly before implementation and fail closed when unavailable.
 
 Multi-phase execution never bypasses validation, review, protected-path,
 integration, or gate controls. The default hard cap is ten phases and there is

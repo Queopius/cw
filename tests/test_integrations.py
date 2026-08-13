@@ -27,6 +27,10 @@ unexpected server response: HTTP 500 Internal Server Error
 <html><body><script>large diagnostic content</script></body></html>
 ⚠ MCP startup incomplete (failed: vercel)
 """
+VERCEL_AUTH = """MCP client for `vercel` failed to start:
+AuthRequired: invalid_token: No authorization provided
+MCP startup incomplete (failed: vercel)
+"""
 
 
 class FakeRunner:
@@ -38,7 +42,7 @@ class FakeRunner:
 
     def __call__(self, command, **_kwargs):
         self.calls.append(command)
-        if command[1:3] == ["mcp", "list"]:
+        if len(command) > 2 and command[1] == "mcp" and command[-1] == "list":
             return subprocess.CompletedProcess(command, 0, f"Name Url Status Auth\nvercel https://mcp.vercel.com {self.status} Unknown\n", "")
         return subprocess.CompletedProcess(command, self.exit_code, "INTEGRATIONS_OK\n", self.stderr)
 
@@ -138,6 +142,13 @@ class IntegrationManagerTests(unittest.TestCase):
         })
         self.assertEqual(("vercel",), phase.required_integrations)
 
+    def test_effective_mcp_discovery_does_not_depend_on_config_toml(self):
+        config = self.root / "config.toml"
+        config.write_text("model = 'gpt-5'\n", encoding="utf-8")
+        manager = self.manager(FakeRunner())
+        self.assertEqual("vercel", manager.configured()[0].id)
+        self.assertNotIn("mcp_servers", config.read_text(encoding="utf-8"))
+
     def test_doctor_keeps_independent_checks_visible_after_workflow_error(self):
         available = Integration(
             "vercel", "mcp", True, Requirement.OPTIONAL, IntegrationHealth.AVAILABLE,
@@ -161,7 +172,7 @@ class IntegrationManagerTests(unittest.TestCase):
 
 
 class CodexIntegrationIsolationTests(unittest.TestCase):
-    def test_planner_uses_user_auth_but_ignores_optional_user_config(self):
+    def test_planner_uses_normal_effective_config_and_captures_optional_noise(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name); schema = root / "schema.json"; output = {"phases": []}
             schema.write_text('{"type":"object"}', encoding="utf-8")
@@ -173,7 +184,9 @@ class CodexIntegrationIsolationTests(unittest.TestCase):
             ) as invoked:
                 result = CodexAdapter().run_planner(root, "plan", schema, 10)
             command = invoked.call_args.args[0]
-            self.assertIn("--ignore-user-config", command)
+            self.assertNotIn("--ignore-user-config", command)
+            self.assertNotIn(["--disable", "plugins"], [command[index:index + 2] for index in range(len(command) - 1)])
+            self.assertFalse(any("mcp_servers." in value for value in command))
             self.assertNotIn("CODEX_HOME", invoked.call_args.kwargs["env"])
             self.assertEqual(1, len(result.mcp_diagnostics))
             self.assertEqual(output, result.payload)
@@ -191,21 +204,62 @@ class CodexIntegrationIsolationTests(unittest.TestCase):
                 result = CodexAdapter().run_reviewer(root, "review", schema, 10)
             self.assertEqual(payload, result.payload)
 
-    def test_implementer_disables_unrequired_mcp_and_preserves_required(self):
-        configured = (
-            Integration("vercel", "mcp", True, Requirement.REQUIRED, IntegrationHealth.AVAILABLE),
-            Integration("figma", "mcp", True, Requirement.OPTIONAL, IntegrationHealth.UNKNOWN),
-        )
+    def test_implementer_preserves_optional_effective_config_and_captures_auth_warning(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / ".cw/logs").mkdir(parents=True)
+            with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.CodexAdapter._validate_implementer_configuration"
+            ), patch(
+                "cw.adapters.codex.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "implementation complete", VERCEL_AUTH),
+            ) as invoked:
+                result = CodexAdapter().run_implementer(root, "work")
+            retained = (root / ".cw/logs/codex-runs.jsonl").read_text(encoding="utf-8")
+        command = invoked.call_args.args[0]
+        self.assertIn("exec", command)
+        self.assertFalse(any("mcp_servers." in value for value in command))
+        self.assertFalse(any("transport" in value for value in command))
+        self.assertEqual(0, result.exit_code)
+        self.assertEqual("MCP_AUTH_REQUIRED", result.integration_diagnostics[0].error_code)
+        self.assertIsNone(result.terminal_error)
+        self.assertIn("AuthRequired", retained)
+
+    def test_optional_mcp_never_receives_a_config_override(self):
+        source = Path("cw/adapters/codex.py").read_text(encoding="utf-8")
+        self.assertNotIn('f"mcp_servers.', source)
+        self.assertNotIn("_integration_arguments", source)
+
+    def test_implementer_preserves_effective_config_when_plugin_is_required(self):
         with tempfile.TemporaryDirectory() as name, patch(
             "cw.adapters.codex.shutil.which", return_value="/usr/bin/codex",
-        ), patch("cw.adapters.codex.IntegrationManager.configured", return_value=configured), patch(
-            "cw.adapters.codex.subprocess.call", return_value=0,
+        ), patch(
+            "cw.adapters.codex.CodexAdapter._validate_implementer_configuration"
+        ), patch(
+            "cw.adapters.codex.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, "done", ""),
         ) as invoked:
             CodexAdapter().run_implementer(Path(name), "work", required_integrations=("vercel",))
         command = invoked.call_args.args[0]
         rendered = " ".join(command)
-        self.assertIn("mcp_servers.figma.enabled=false", rendered)
+        self.assertNotIn("mcp_servers.figma.enabled=false", rendered)
         self.assertNotIn("mcp_servers.vercel.enabled=false", rendered)
+        self.assertNotIn("--disable plugins", rendered)
+        self.assertNotIn("transport", rendered)
+
+    def test_process_isolation_never_modifies_user_config(self):
+        with tempfile.TemporaryDirectory() as name:
+            config = Path(name) / "config.toml"
+            config.write_text("[plugins.vercel]\nenabled = true\n", encoding="utf-8")
+            before = config.read_bytes()
+            with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.CodexAdapter._validate_implementer_configuration",
+            ), patch(
+                "cw.adapters.codex.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "done", VERCEL_AUTH),
+            ):
+                CodexAdapter().run_implementer(Path(name), "work")
+            self.assertEqual(before, config.read_bytes())
 
 
 if __name__ == "__main__":

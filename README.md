@@ -1,20 +1,39 @@
-# CW by Queopius
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/cw-logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/cw-logo-light.png">
+    <img src="docs/assets/brand/cw-mark.png" alt="" width="420">
+  </picture>
+</p>
 
-**Codex Workflow**
+# CW — Codex Workflow
 
+**by Queopius**
+
+[![Tests](https://github.com/Queopius/cw/actions/workflows/ci.yml/badge.svg?branch=prod)](https://github.com/Queopius/cw/actions/workflows/ci.yml)
+[![Python 3.10–3.14](https://img.shields.io/badge/python-3.10%E2%80%933.14-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![Latest release](https://img.shields.io/github/v/release/Queopius/cw?display_name=tag&sort=semver)](https://github.com/Queopius/cw/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Queopius/cw/total?label=downloads)](https://github.com/Queopius/cw/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+
+**Build with autonomy. Advance with evidence.**
 
 Plan, build, review, and advance software projects with Codex—one validated
 phase at a time.
 
 > **No valid gate. No next phase.**
 
+CW derives progress from the highest contiguous chain of validated gates. If
+cached state, readiness, history, and gate evidence disagree, read commands
+fail closed with an integrity explanation; `cw repair` performs backup-first
+reconciliation, while `cw explain` describes the safe recovery without writing.
+
 CW is a standalone command-line product for explicit, reviewable AI-assisted
 development. It separates planning from implementation, runs deterministic
 checks before semantic review, invokes an independent read-only reviewer, and
 records SHA-256 approval gates before allowing another phase to begin.
 
-CW v0.3 is an early release. It is designed for local Git repositories and
+CW v0.4 is an early release. It is designed for local Git repositories and
 offers bounded—not unlimited—autonomy.
 
 ## Quick start
@@ -40,7 +59,7 @@ atomically selects it through `current`, and creates the stable launcher
 
 ```text
 ╭──────────────────────────────────────────────────────────────╮
-│ CW · Codex Workflow                                   v0.3.1 │
+│ CW · Codex Workflow                                   v0.4.2 │
 │ by Queopius                                                  │
 ╰──────────────────────────────────────────────────────────────╯
 
@@ -155,6 +174,8 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
 | `cw review` | Run independent review after readiness |
 | `cw retry` | Retry a retryable infrastructure failure |
 | `cw history` | Show the phase audit trail |
+| `cw inspect run [ID]` | Inspect a managed Codex execution |
+| `cw logs --run ID` | Show its structured execution events |
 | `cw doctor` | Diagnose environment and workflow integrity |
 | `cw repair` | Back up and repair CW metadata only |
 | `cw config` | Show effective configuration or set a validated project override |
@@ -166,6 +187,34 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
 
 Important read commands support `--json`; daily output respects `NO_COLOR` and
 automatically removes ANSI escapes when stdout is not a TTY.
+
+## Live Codex execution
+
+CW consumes the supported JSONL stream from `codex exec --json`. Once the
+child exists, the startup message immediately becomes an active session view;
+command starts and completions, reliable file-change summaries, elapsed time,
+and final state are rendered as meaningful checkpoints rather than a spinner.
+
+```text
+✓ Codex process started
+✓ Session initialized
+
+IMPLEMENTATION
+──────────────────────────────────────────────────────────────
+
+→ Running command
+  composer check
+
+Elapsed      08m 41s
+```
+
+Long event silence produces a restrained heartbeat and then a non-destructive
+inactivity warning while the process remains alive. It is never killed merely
+for being quiet. Event logs are redacted, versioned, and addressable by run ID;
+`cw inspect session`, `cw logs --run ID`, `cw doctor --performance`, and
+`cw doctor --processes` expose progressively deeper diagnostics. `--quiet`
+suppresses live presentation, `--verbose` expands it, and `--json` emits JSONL
+without ANSI. See [Live execution](docs/live-execution.md).
 
 ## Controlled multi-phase execution
 
@@ -206,10 +255,11 @@ rollback. Source/editable installations are protected from self-update. See
 
 CW separates capabilities required by the current phase from optional Codex
 integrations. An unavailable deployment MCP does not block a domain phase that
-does not use it. Planner and reviewer children retain normal Codex authentication
-while loading no unrelated user MCP configuration; implementers preserve only
-explicitly required MCPs. CW never stores MCP credentials or silently changes
-`~/.codex/config.toml`. See [Integrations](docs/integrations.md).
+does not use it. Managed children retain the normal effective Codex
+configuration and capture optional MCP startup diagnostics without turning them
+into workflow failures. Required integrations are preflighted explicitly. CW
+never injects partial `mcp_servers.*` definitions, stores MCP credentials, or
+silently changes `~/.codex/config.toml`. See [Integrations](docs/integrations.md).
 
 ## Project layout
 

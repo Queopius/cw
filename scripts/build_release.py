@@ -9,6 +9,7 @@ import platform
 import shutil
 import tarfile
 import tempfile
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,6 +28,21 @@ def main() -> int:
         shutil.copytree(root / "cw", stage / "cw", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         for item in ("VERSION", "LICENSE", "NOTICE", "CHANGELOG.md"):
             shutil.copy2(root / item, stage / item)
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, text=True,
+            capture_output=True, timeout=5, check=False,
+        )
+        commit = completed.stdout.strip() if completed.returncode == 0 else "unknown"
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=root,
+            text=True, capture_output=True, timeout=5, check=False,
+        )
+        if commit != "unknown" and dirty.returncode == 0 and dirty.stdout.strip():
+            commit += "-dirty"
+        (stage / "BUILD.json").write_text(
+            json.dumps({"schema_version": 1, "commit": commit, "source": "release-artifact"}, indent=2) + "\n",
+            encoding="utf-8",
+        )
         (stage / "entrypoint.py").write_text(
             "#!/usr/bin/env python3\nfrom cw.cli.main import main\nraise SystemExit(main())\n", encoding="utf-8",
         )
