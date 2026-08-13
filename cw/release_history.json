@@ -2,6 +2,52 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.4.2",
+      "changes": [
+        "Centralized gate-derived workflow state and completion counters.",
+        "Prevented start, retry, and batch execution after workflow completion.",
+        "Added strict MkDocs documentation validation to the main CI pipeline.",
+        "Integrated the official CW monogram and deterministic documentation assets."
+      ]
+    },
+    {
+      "version": "0.4.1",
+      "changes": [
+        "Fixed all-gates-approved repair so completed workflows never wrap to the first phase.",
+        "Added idempotent completed-workflow repair and no-implementation completion UX."
+      ]
+    },
+    {
+      "version": "0.4.0",
+      "changes": [
+        "Added live Codex JSONL activity streaming and truthful execution states.",
+        "Added run inspection, structured logs, startup profiling, and stall detection.",
+        "Added durable run identity, duplicate-run protection, and interrupted-run recovery."
+      ]
+    },
+    {
+      "version": "0.3.4",
+      "changes": [
+        "Added strict workflow consistency derivation and fail-closed status rendering.",
+        "Reconciled stale state and history from validated contiguous approval gates.",
+        "Separated semantic phase contracts from mutable CW metadata provenance."
+      ]
+    },
+    {
+      "version": "0.3.3",
+      "changes": [
+        "Removed unsafe optional MCP configuration overrides from managed Codex processes.",
+        "Unified captured Codex results and optional integration diagnostic precedence."
+      ]
+    },
+    {
+      "version": "0.3.2",
+      "changes": [
+        "Fixed process-scoped isolation for plugin-provided Codex MCP integrations.",
+        "Added deterministic Codex configuration errors and build fingerprints."
+      ]
+    },
+    {
       "version": "0.3.1",
       "changes": [
         "Allowed GitHub's official release-asset redirect origin for verified updates."

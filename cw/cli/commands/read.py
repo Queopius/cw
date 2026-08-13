@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ from typing import Any, Callable
 
 from cw import __version__
 from cw.adapters.codex import CodexAdapter
+from cw.adapters.invocation import latest_invocation
 from cw.adapters.structured_output import codex_schema
 from cw.checks.deterministic import load_readiness
 from cw.core.audit import audit_history
@@ -17,6 +19,7 @@ from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_gate
 from cw.core.history import history_timeline
 from cw.core.integrity import snapshot_protected_paths
+from cw.core.progress import derive_effective_workflow_state
 from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import load_session, process_is_alive, readiness_path
 from cw.core.utils import load_json
@@ -26,6 +29,8 @@ from cw.integrations.config import project_requirements
 from cw.integrations.manager import IntegrationManager
 from cw.integrations.models import IntegrationHealth, Requirement
 from cw.execution.session import load_batch
+from cw.execution.processes import ProcessInspector
+from cw.execution.runs import latest_run, load_active_run, load_run, load_run_events
 from cw.ui.console import Console, emit_json
 from cw.ui.renderers import (
     render_doctor,
@@ -34,13 +39,14 @@ from cw.ui.renderers import (
     render_status as render_status_view,
     render_integrations,
 )
+from cw.ui.live import render_performance, render_processes
 
 
 RootResolver = Callable[[], Path]
 ContextLoader = Callable[[Path], tuple[Any, dict[str, Any], Any]]
 CurrentResolver = Callable[[Any, dict[str, Any]], Any]
 ErrorRecorder = Callable[..., None]
-DoctorProvider = Callable[[Path | None, bool, bool], list[dict[str, Any]]]
+DoctorProvider = Callable[[Path | None, bool, bool, bool], list[dict[str, Any]]]
 
 
 def git_branch(root: Path) -> str:
@@ -53,30 +59,37 @@ def git_branch(root: Path) -> str:
 
 def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
     project, state, workflow = context(root)
+    consistency = derive_effective_workflow_state(root, workflow, state) if workflow.phases else None
     current = state.get("current_phase")
-    index = workflow.index(current) if current and workflow.phases else None
+    try:
+        index = workflow.index(current) if current and workflow.phases else None
+    except StopIteration:
+        index = None
     gates: dict[str, bool] = {}
     gate_states: dict[str, str] = {}
     invalid_gates: list[str] = []
     gate_error = None
     gate_error_code = None
     gate_error_details = None
-    for phase in workflow.phases:
-        exists = gate_path(root, phase.id).is_file()
-        gates[phase.id] = exists
-        gate_states[phase.id] = "pending"
-        if exists:
-            try:
-                validate_gate(root, workflow, phase.id)
-                gate_states[phase.id] = "approved"
-            except CwError as exc:
-                gates[phase.id] = False
-                gate_states[phase.id] = "invalid"
-                invalid_gates.append(phase.id)
-                gate_error = str(exc)
-                gate_error_code = exc.code.value
-                gate_error_details = exc.details
+    if consistency is not None:
+        gate_states.update(consistency.chain.states)
+        for phase in workflow.phases:
+            gates[phase.id] = gate_states.get(phase.id) == "approved"
+        invalid_gates = [phase.id for phase in workflow.phases if gate_states.get(phase.id) == "invalid"]
+        if consistency.chain.issues:
+            gate_error = "Approval gate chain is invalid"
+            gate_error_code = ErrorCode.INVALID_GATE.value
+            gate_error_details = "\n".join(consistency.chain.issues)
     batch = load_batch(root)
+    managed_run = load_active_run(root)
+    if managed_run is not None:
+        process = ProcessInspector().inspect(managed_run.get("process_pid"))
+        supervisor = ProcessInspector().inspect(managed_run.get("supervisor_pid"))
+        managed_run = {
+            **managed_run,
+            "alive": process.alive or supervisor.alive,
+            "stale": not (process.alive or supervisor.alive),
+        }
     if (
         batch and batch.get("status") == "RUNNING"
         and (not isinstance(batch.get("pid"), int) or not process_is_alive(batch["pid"]))
@@ -88,7 +101,12 @@ def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
         "workflow": "INITIALIZED" if not workflow.phases else "ACTIVE",
         "plan": workflow.status, "state": state["status"], "phase": current,
         "phase_index": index, "position": index + 1 if index is not None else None,
-        "phase_count": len(workflow.phases), "approved_count": sum(gates.values()),
+        "phase_count": len(workflow.phases),
+        "approved_count": consistency.approved_count if consistency is not None else 0,
+        "remaining_count": consistency.remaining_count if consistency is not None else 0,
+        "active_count": consistency.active_count if consistency is not None else 0,
+        "effective_state": consistency.status.value if consistency is not None else state["status"],
+        "is_complete": consistency.is_complete if consistency is not None else False,
         "attempt": state.get("attempt", 0), "max_attempts": workflow.max_review_attempts,
         "ready": (root / ".cw" / "runtime" / "READY_FOR_REVIEW.json").is_file(),
         "gate": gates.get(current, False) if current else False, "gates": gates,
@@ -108,6 +126,11 @@ def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
         "last_error": state.get("last_error"),
         "infrastructure_error": state.get("infrastructure_error"),
         "batch": batch,
+        "run": managed_run,
+        "consistent": consistency.consistent if consistency is not None else True,
+        "consistency_issues": list(consistency.issues) if consistency is not None else [],
+        "expected_phase": consistency.expected_current if consistency is not None else None,
+        "approved_through": consistency.chain.approved[-1][0] if consistency and consistency.chain.approved else None,
     }
 
 
@@ -125,6 +148,16 @@ def command_status(
 ) -> int:
     root = root_resolver()
     data = status_payload(root, context)
+    if not data.get("consistent", True):
+        record_error(
+            CwError(
+                "Workflow state is inconsistent with approval evidence",
+                ErrorCode.STATE_INCONSISTENT,
+                "Run: cw repair",
+                details="\n".join(data.get("consistency_issues", [])),
+            ),
+            source="status",
+        )
     if data.get("gate_error"):
         code = ErrorCode(data.get("gate_error_code") or ErrorCode.INVALID_GATE.value)
         record_error(
@@ -135,7 +168,42 @@ def command_status(
         emit_json(data)
     else:
         render_status(console, data, args.verbose)
-    return 1 if data["state"] == "ERROR" or data.get("gate_error") else 0
+    return 1 if not data.get("consistent", True) or data["state"] == "ERROR" or data.get("gate_error") else 0
+
+
+def command_explain(
+    args: argparse.Namespace, console: Console, *, root_resolver: RootResolver, context: ContextLoader,
+) -> int:
+    root = root_resolver()
+    data = status_payload(root, context)
+    payload = {
+        "consistent": data.get("consistent", True),
+        "current_phase": data.get("phase"),
+        "expected_phase": data.get("expected_phase"),
+        "approved_through": data.get("approved_through"),
+        "issues": data.get("consistency_issues", []),
+        "recovery": "cw repair" if not data.get("consistent", True) else None,
+    }
+    if args.json:
+        emit_json(payload)
+        return 1 if not payload["consistent"] else 0
+    console.header("Explain")
+    if payload["consistent"]:
+        console.item("✓", "Workflow state is consistent")
+        console.wrapped("Configured phases, approval gates and state agree.", 2)
+        return 0
+    console.item("✕", "Why is the workflow blocked?")
+    console.wrapped(
+        f"CW found validated approval evidence through {payload['approved_through'] or 'no phase'}, "
+        f"but state.json points to {payload['current_phase'] or 'no phase'}.",
+        2,
+    )
+    console.line()
+    console.wrapped("No approved work will be discarded.", 2)
+    console.line()
+    console.subsection("Safe recovery")
+    console.action("cw repair", "Reconcile state from validated evidence")
+    return 1
 
 
 def command_history(
@@ -163,6 +231,7 @@ def doctor_checks(
     root: Path | None,
     reviewer: bool,
     integrations: bool = False,
+    codex: bool = False,
     *,
     context: ContextLoader,
     current_resolver: CurrentResolver,
@@ -186,6 +255,36 @@ def doctor_checks(
             {"section": "Workflow", "name": "Plan", "status": "pass", "detail": workflow.status},
             {"section": "Workflow", "name": "State", "status": "pass", "detail": state["status"]},
         ])
+        consistency = derive_effective_workflow_state(root, workflow, state) if workflow.phases else None
+        if consistency is not None:
+            approved_count = len(consistency.chain.approved)
+            checks.extend([
+                {
+                    "section": "Workflow consistency", "name": "Gate chain",
+                    "status": "pass" if not consistency.chain.issues else "error",
+                    "detail": f"{approved_count} contiguous gates" if not consistency.chain.issues else consistency.chain.issues[0],
+                },
+                {
+                    "section": "Workflow consistency", "name": "Current phase",
+                    "status": "pass" if state.get("current_phase") == consistency.expected_current else "error",
+                    "detail": str(consistency.expected_current or "workflow complete"),
+                },
+                {
+                    "section": "Workflow consistency", "name": "Last gate",
+                    "status": "pass" if state.get("last_gate") == consistency.expected_last_gate else "error",
+                    "detail": str(consistency.expected_last_gate or "none"),
+                },
+                {
+                    "section": "Workflow consistency", "name": "Readiness",
+                    "status": "error" if any("readiness belongs" in issue for issue in consistency.issues) else "pass",
+                    "detail": "belongs to current phase" if readiness_path(root).is_file() else "not ready",
+                },
+                {
+                    "section": "Workflow consistency", "name": "State and evidence",
+                    "status": "pass" if consistency.consistent else "error",
+                    "detail": "consistent" if consistency.consistent else consistency.issues[0],
+                },
+            ])
         phase = current_resolver(workflow, state) if workflow.phases and state.get("current_phase") else None
         if phase:
             checks.append({"section": "Workflow", "name": "Current phase", "status": "pass", "detail": phase.id})
@@ -268,6 +367,25 @@ def doctor_checks(
                 })
         except CwError as exc:
             checks.append({"section": "Integrations", "name": "Integration health", "status": "error", "detail": f"{exc.code.value}: {exc.message}"})
+    if codex:
+        invocation = latest_invocation(root)
+        if invocation is None:
+            checks.append({
+                "section": "Managed Codex", "name": "Latest invocation",
+                "status": "neutral", "detail": "none recorded",
+            })
+        else:
+            command = str(invocation.get("command", ""))
+            unsafe = "mcp_servers." in command
+            checks.append({
+                "section": "Managed Codex", "name": "Sanitized argv",
+                "status": "error" if unsafe else "pass", "detail": command,
+            })
+            checks.append({
+                "section": "Managed Codex", "name": "MCP overrides",
+                "status": "error" if unsafe else "pass",
+                "detail": "unsupported mcp_servers.* override detected" if unsafe else "none",
+            })
     return checks
 
 
@@ -282,7 +400,26 @@ def command_doctor(
         root = root_resolver()
     except CwError:
         root = None
-    checks = checks_provider(root, args.reviewer, args.integrations)
+    if getattr(args, "performance", False):
+        run = latest_run(root) if root is not None else None
+        if args.json:
+            emit_json({"performance": run})
+        else:
+            render_performance(console, run)
+        return 0 if run is not None else 1
+    if getattr(args, "processes", False):
+        run = latest_run(root) if root is not None else None
+        alive = False
+        if run is not None and not run.get("finished_at"):
+            inspector = ProcessInspector()
+            alive = inspector.inspect(run.get("process_pid")).alive or inspector.inspect(run.get("supervisor_pid")).alive
+        payload = {"run": run, "process_alive": alive}
+        if args.json:
+            emit_json(payload)
+        else:
+            render_processes(console, run, process_alive=alive)
+        return 0
+    checks = checks_provider(root, args.reviewer, args.integrations, args.codex)
     errors = sum(item["status"] == "error" for item in checks)
     warnings = sum(item["status"] == "warning" for item in checks)
     passed = sum(item["status"] == "pass" for item in checks)
@@ -292,6 +429,75 @@ def command_doctor(
     else:
         render_doctor(console, checks, payload["result"], verbose=args.verbose)
     return 1 if errors else 0
+
+
+def command_inspect(
+    args: argparse.Namespace,
+    console: Console,
+    *,
+    root_resolver: RootResolver,
+) -> int:
+    root = root_resolver()
+    active = load_active_run(root)
+    if args.action == "session" and active is not None:
+        run = active
+    elif args.run_id:
+        run = load_run(root, args.run_id)
+    else:
+        run = latest_run(root)
+    if run is None:
+        raise CwError("No CW-managed execution was found", ErrorCode.INVALID_STATE, "Run: cw status")
+    events = load_run_events(root, str(run["run_id"]))
+    payload = {"run": run, "events": events}
+    if args.json:
+        emit_json(payload)
+        return 0
+    console.header("Run")
+    console.field("Run", run.get("run_id"))
+    console.field("Phase", run.get("phase"))
+    console.field("Role", str(run.get("role", "unknown")).title())
+    console.field("State", run.get("status"))
+    console.field("Started", run.get("started_at"))
+    if run.get("finished_at"):
+        console.field("Finished", run.get("finished_at"))
+    if run.get("elapsed_seconds") is not None:
+        console.field("Duration", f"{float(run['elapsed_seconds']):.1f}s")
+    console.field("Events", len(events))
+    if run.get("last_activity"):
+        console.field("Activity", run.get("last_activity"))
+    if args.verbose:
+        console.field("Session", run.get("codex_session_id") or run.get("session_id") or "unknown")
+        console.field("PID", run.get("process_pid") or "not active")
+        console.field("Profile", json.dumps(run.get("profile", {}), sort_keys=True))
+    return 0
+
+
+def command_logs(
+    args: argparse.Namespace,
+    console: Console,
+    *,
+    root_resolver: RootResolver,
+) -> int:
+    root = root_resolver()
+    run = load_run(root, args.run_id) if args.run_id else latest_run(root)
+    if run is None:
+        raise CwError("No CW-managed execution log was found", ErrorCode.INVALID_STATE, "Run: cw status")
+    events = load_run_events(root, str(run["run_id"]))
+    payload = {"run_id": run["run_id"], "events": events}
+    if args.json:
+        emit_json(payload)
+        return 0
+    console.header("Logs")
+    console.field("Run", run["run_id"])
+    console.field("Phase", run.get("phase"))
+    console.line()
+    for event in events:
+        event_type = str(event.get("event_type", "UNKNOWN"))
+        detail = event.get("command") or event.get("summary") or event.get("source_type") or ""
+        console.wrapped(f"{event_type.ljust(20)} {detail}", 2)
+        if args.verbose:
+            console.field("Timestamp", event.get("timestamp", "unknown"), 14)
+    return 0
 
 
 def command_integrations(
@@ -393,6 +599,8 @@ def command_error(args: argparse.Namespace, console: Console, *, root_resolver: 
 
 
 def command_version(args: argparse.Namespace, console: Console) -> int:
+    from cw.core.build import version_diagnostics
+
     settings = load_update_settings()
     installation = ManagedInstallation()
     payload = {
@@ -400,6 +608,8 @@ def command_version(args: argparse.Namespace, console: Console) -> int:
         "version": __version__, "channel": settings.channel, "schema": SCHEMA_VERSION,
         "install": installation.kind,
     }
+    diagnostics = version_diagnostics()
+    payload.update(diagnostics)
     if args.json:
         emit_json(payload)
     else:
@@ -409,4 +619,11 @@ def command_version(args: argparse.Namespace, console: Console) -> int:
         console.field("Channel", settings.channel)
         console.field("Schema", SCHEMA_VERSION)
         console.field("Install", installation.kind)
+        if args.verbose:
+            console.field("Executable", diagnostics["executable"])
+            console.field("Runtime", diagnostics["runtime"])
+            console.field("Build", diagnostics["build"])
+            if diagnostics["source_build"]:
+                console.field("Source", diagnostics["source_build"])
+                console.field("Source match", "YES" if diagnostics["source_match"] else "NO · stale installation")
     return 0

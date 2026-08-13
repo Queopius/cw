@@ -275,7 +275,8 @@ def command_repair(
             save_state(root, state)
             reopened = target.id
         else:
-            backup = repair_metadata(root)
+            repair_report: dict[str, Any] = {}
+            backup = repair_metadata(root, report=repair_report)
     payload = {
         "repaired": reopened is None,
         "reopened": reopened,
@@ -285,6 +286,39 @@ def command_repair(
         emit_json(payload)
     else:
         console.header("Repair")
-        console.item("✓", f"Phase reopened: {reopened}" if reopened else "Workflow metadata repaired")
-        console.field("Backup", payload["backup"])
+        if reopened:
+            console.item("✓", f"Phase reopened: {reopened}")
+            console.field("Backup", payload["backup"])
+        else:
+            console.item("✓", "Backup created")
+            verified = repair_report.get("gates_verified", [])
+            if verified:
+                console.item("✓", f"{len(verified)} approval gates verified")
+            console.item("✓", "State reconciled" if repair_report.get("state_reconciled") else "State already consistent")
+            reconstructed = int(repair_report.get("history_reconstructed", 0))
+            if reconstructed:
+                console.item("✓", f"History reconstructed · {reconstructed} event{'s' if reconstructed != 1 else ''}")
+            else:
+                console.item("✓", "History already complete")
+            console.item("✓", "Integrity baseline refreshed")
+            console.item("✓", "Existing approvals preserved")
+            after = repair_report.get("state_after")
+            if isinstance(after, dict) and after.get("status") == WorkflowState.COMPLETED.value:
+                console.line()
+                console.section("Workflow")
+                console.item("✓", "COMPLETE")
+                console.field(
+                    "Approved",
+                    f"{repair_report.get('approved_count', 0)} / {repair_report.get('phase_count', 0)} phases",
+                )
+            elif isinstance(after, dict) and after.get("current_phase"):
+                console.line()
+                console.section("Current")
+                console.item("→", str(after["current_phase"]))
+            if not repair_report.get("state_reconciled") and reconstructed == 0:
+                console.line()
+                console.wrapped("No repairs required.", 2)
+            console.line()
+            console.wrapped("No application code was changed.", 2)
+            console.field("Backup", payload["backup"])
     return 0

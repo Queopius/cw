@@ -102,6 +102,7 @@ def _render_global_toml(document: dict[str, Any]) -> str:
             "default_phases", "recommended_max_phases", "hard_max_phases",
             "default_max_time", "max_semantic_revisions_per_phase",
         ),
+        "observability": ("heartbeat_seconds", "quiet_threshold_seconds"),
     }
     for section, keys in ordered_sections.items():
         values = document.get(section, {})

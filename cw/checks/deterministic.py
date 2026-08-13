@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,8 @@ from cw.core.models import Phase, ValidationResult, Workflow
 from cw.core.session import load_session, readiness_path
 from cw.core.schema import schema_version
 from cw.core.utils import load_json, safe_project_path
+from cw.execution.context import current_event_sink
+from cw.execution.events import ExecutionEvent, ExecutionEventType
 
 
 def load_readiness(root: Path, phase: Phase) -> dict[str, Any]:
@@ -65,10 +68,28 @@ def _validate_completed_work(root: Path, workflow: Workflow, phase: Phase, resul
     for command in phase.required_commands:
         timeout = command.timeout_seconds or workflow.command_timeout
         arguments = command_arguments(command.command)
+        sink = current_event_sink()
+        if sink is not None:
+            sink(ExecutionEvent(
+                ExecutionEventType.COMMAND_STARTED,
+                source_type="cw.validation.command",
+                command=command.command,
+                status="in_progress",
+            ))
+        command_started = time.monotonic()
         completed = subprocess.run(
             arguments, cwd=root, shell=False, text=True,
             capture_output=True, timeout=timeout, env=_redacted_environment(), check=False,
         )
+        if sink is not None:
+            sink(ExecutionEvent(
+                ExecutionEventType.COMMAND_COMPLETED,
+                source_type="cw.validation.command",
+                command=command.command,
+                exit_code=completed.returncode,
+                duration_ms=max(0, round((time.monotonic() - command_started) * 1000)),
+                status="completed" if completed.returncode == 0 else "failed",
+            ))
         check = {"name": "Required command", "command": command.command, "exit_code": completed.returncode}
         result.checks.append(check)
         if completed.returncode:

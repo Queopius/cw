@@ -9,6 +9,7 @@ from cw import __version__
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import validate_dependencies, validate_gate
 from cw.core.models import WorkflowState
+from cw.core.progress import derive_effective_workflow_state
 from cw.core.state import load_state
 from cw.core.utils import utc_now
 
@@ -56,6 +57,12 @@ class BatchRunner:
         session: dict[str, Any] | None = None,
     ) -> BatchOutcome:
         state = load_state(root)
+        effective = derive_effective_workflow_state(root, workflow, state)
+        if effective.is_complete:
+            return BatchOutcome(
+                "COMPLETED", 0, budget.max_phases, 0,
+                "workflow_complete", None, 0,
+            )
         if not workflow.phases or not state.get("current_phase"):
             raise CwError("An approved development plan is required", ErrorCode.PLAN_REQUIRED, "Run: cw plan")
         if session is None:

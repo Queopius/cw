@@ -1,5 +1,5 @@
 ╭──────────────────────────────────────────────────────────────╮
-│ CW · Codex Workflow                                   v0.3.1 │
+│ CW · Codex Workflow                                   v0.4.2 │
 │ by Queopius                                                  │
 ╰──────────────────────────────────────────────────────────────╯
 
@@ -11,10 +11,15 @@
   Progress    ##############################  100%
 
   Approved    3 / 3 phases
+  State       COMPLETED
+  Plan        APPROVED
 
     ✓ 01  Repository Assessment
     ✓ 02  Build Authentication
     ✓ 03  Release Verification
+
+  ──────────────────────────────────────────────────────────────
+  3 approved · 0 active · 0 remaining
 
   All configured gates are valid.
 

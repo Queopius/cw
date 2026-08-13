@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cw.adapters.codex import CodexAdapter
+from cw.adapters.result import CodexRunResult
 from cw.core.errors import CwError, ErrorCode
 
 
@@ -16,9 +17,10 @@ class CodexAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
-                "cw.adapters.codex.IntegrationManager.configured", return_value=()
+                "cw.adapters.codex.CodexAdapter._validate_implementer_configuration"
             ), patch(
-                "cw.adapters.codex.subprocess.call", return_value=0
+                "cw.adapters.codex.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "done", ""),
             ) as call:
                 CodexAdapter().run_implementer(root, "implement")
             command = call.call_args.args[0]
@@ -31,9 +33,10 @@ class CodexAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
-                "cw.adapters.codex.IntegrationManager.configured", return_value=()
+                "cw.adapters.codex.CodexAdapter._validate_implementer_configuration"
             ), patch(
-                "cw.adapters.codex.subprocess.call", return_value=0
+                "cw.adapters.codex.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "done", ""),
             ) as call:
                 CodexAdapter().run_implementer(root, "implement", allow_network=True)
             command = call.call_args.args[0]
@@ -44,9 +47,10 @@ class CodexAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
-                "cw.adapters.codex.IntegrationManager.configured", return_value=()
+                "cw.adapters.codex.CodexAdapter._validate_implementer_configuration"
             ), patch(
-                "cw.adapters.codex.subprocess.call", return_value=0
+                "cw.adapters.codex.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "done", ""),
             ) as call:
                 CodexAdapter().run_implementer(root, "implement", session_id="a" * 32)
         self.assertEqual("1", call.call_args.kwargs["env"]["CW_IMPLEMENTER_ACTIVE"])
@@ -55,38 +59,22 @@ class CodexAdapterTests(unittest.TestCase):
     def test_implementer_nonzero_exit_is_classified(self):
         with tempfile.TemporaryDirectory() as temporary:
             with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
-                "cw.adapters.codex.IntegrationManager.configured", return_value=()
+                "cw.adapters.codex.CodexAdapter._validate_implementer_configuration"
             ), patch(
-                "cw.adapters.codex.subprocess.call", return_value=17
+                "cw.adapters.codex.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 17, "", "process crashed"),
             ), self.assertRaises(CwError) as raised:
                 CodexAdapter().run_implementer(Path(temporary), "implement")
         self.assertEqual(ErrorCode.IMPLEMENTER_PROCESS_ERROR, raised.exception.code)
         self.assertIn("17", raised.exception.details or "")
 
-    def test_batch_interrupt_terminates_child_before_propagating(self):
-        class InterruptedProcess:
-            def __init__(self):
-                self.terminated = False
-
-            def wait(self, timeout=None):
-                if not self.terminated:
-                    raise KeyboardInterrupt
-                return 130
-
-            def terminate(self):
-                self.terminated = True
-
-            def kill(self):
-                self.terminated = True
-
-        process = InterruptedProcess()
+    def test_batch_interrupt_propagates_from_captured_child(self):
         with tempfile.TemporaryDirectory() as temporary, patch(
             "cw.adapters.codex.shutil.which", return_value="/usr/bin/codex",
-        ), patch("cw.adapters.codex.IntegrationManager.configured", return_value=()), patch(
-            "cw.adapters.codex.subprocess.Popen", return_value=process,
+        ), patch("cw.adapters.codex.CodexAdapter._validate_implementer_configuration"), patch(
+            "cw.adapters.codex.subprocess.run", side_effect=KeyboardInterrupt,
         ), self.assertRaises(KeyboardInterrupt):
             CodexAdapter().run_implementer(Path(temporary), "implement", timeout=60)
-        self.assertTrue(process.terminated)
 
     def test_reviewer_is_read_only_ephemeral_and_hooks_disabled(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -95,7 +83,8 @@ class CodexAdapterTests(unittest.TestCase):
             def fake_run(command, **kwargs):
                 self.assertIn("read-only", command)
                 self.assertIn("--ephemeral", command)
-                self.assertEqual(command[command.index("--disable") + 1], "hooks")
+                self.assertIn(["--disable", "hooks"], [command[index:index + 2] for index in range(len(command) - 1)])
+                self.assertFalse(any("mcp_servers." in value for value in command))
                 self.assertIn('web_search="disabled"', command)
                 self.assertIn("project_doc_max_bytes=0", command)
                 self.assertEqual("review", command[-1])
@@ -105,6 +94,7 @@ class CodexAdapterTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, "", "")
             with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch("cw.adapters.codex.subprocess.run", side_effect=fake_run):
                 result = CodexAdapter().run_reviewer(root, "review", schema, 10)
+            self.assertIsInstance(result, CodexRunResult)
             self.assertEqual("APPROVE", result.payload["decision"])
 
     def test_planner_is_structured_read_only_ephemeral_and_rules_disabled(self):
@@ -115,7 +105,8 @@ class CodexAdapterTests(unittest.TestCase):
                 self.assertIn("read-only", command)
                 self.assertIn("--ephemeral", command)
                 self.assertIn("--ignore-rules", command)
-                self.assertEqual(command[command.index("--disable") + 1], "hooks")
+                self.assertIn(["--disable", "hooks"], [command[index:index + 2] for index in range(len(command) - 1)])
+                self.assertFalse(any("mcp_servers." in value for value in command))
                 self.assertIn('web_search="disabled"', command)
                 self.assertIn("project_doc_max_bytes=0", command)
                 self.assertEqual("plan", command[-1])
@@ -127,6 +118,7 @@ class CodexAdapterTests(unittest.TestCase):
                 "cw.adapters.codex.subprocess.run", side_effect=fake_run
             ):
                 result = CodexAdapter().run_planner(root, "plan", schema, 10)
+            self.assertIsInstance(result, CodexRunResult)
             self.assertEqual([], result.payload["phases"])
 
     def test_planner_network_failure_is_classified_separately(self):
@@ -150,6 +142,58 @@ class CodexAdapterTests(unittest.TestCase):
             ), self.assertRaises(CwError) as raised:
                 CodexAdapter().run_planner(root, "plan", schema, 10)
             self.assertEqual(ErrorCode.PLAN_TIMEOUT, raised.exception.code)
+
+    def test_invalid_mcp_transport_is_nonretryable_codex_config_error(self):
+        failure = subprocess.CompletedProcess(
+            [], 1, "", "Error loading config.toml: invalid transport in `mcp_servers.vercel`",
+        )
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "cw.adapters.codex.shutil.which", return_value="/usr/bin/codex",
+        ), patch(
+            "cw.adapters.codex.subprocess.run", return_value=failure,
+        ), self.assertRaises(CwError) as raised:
+            CodexAdapter().run_implementer(Path(temporary), "implement")
+        self.assertEqual(ErrorCode.CODEX_CONFIG_ERROR, raised.exception.code)
+        self.assertEqual("Run: cw error", raised.exception.hint)
+
+    def test_codex_doctor_config_load_failure_is_config_error(self):
+        output = '{"checks":{"config.load":{"status":"fail","summary":"config could not be loaded"}}}'
+        self.assertEqual(
+            ErrorCode.CODEX_CONFIG_ERROR,
+            CodexAdapter.classify_process_error("", output, role="implementer"),
+        )
+
+    def test_managed_environment_preserves_auth_home_but_drops_parent_identity(self):
+        from cw.adapters.invocation import managed_codex_environment
+
+        with patch.dict("os.environ", {
+            "HOME": "/home/user", "CODEX_HOME": "/auth/codex",
+            "CODEX_THREAD_ID": "parent", "CODEX_PERMISSION_PROFILE": "parent-policy",
+        }, clear=True):
+            environment = managed_codex_environment("planner")
+        self.assertEqual("/auth/codex", environment["CODEX_HOME"])
+        self.assertNotIn("CODEX_THREAD_ID", environment)
+        self.assertNotIn("CODEX_PERMISSION_PROFILE", environment)
+
+    def test_sanitized_final_argv_and_environment_are_logged(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cw/logs").mkdir(parents=True)
+            with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.CodexAdapter._validate_implementer_configuration"
+            ), patch(
+                "cw.adapters.codex.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "done", ""),
+            ):
+                CodexAdapter().run_implementer(root, "secret prompt", session_id="b" * 32)
+            records = [json.loads(line) for line in (root / ".cw/logs/codex-invocations.jsonl").read_text().splitlines()]
+        invocation = records[-1]
+        self.assertEqual("implementer", invocation["role"])
+        self.assertIn(" exec ", invocation["command"])
+        self.assertNotIn("mcp_servers.", invocation["command"])
+        self.assertIn("[PROMPT sha256:", invocation["command"])
+        self.assertNotIn("secret prompt", invocation["command"])
+        self.assertEqual("b" * 32, invocation["environment"]["CW_IMPLEMENTER_SESSION"])
 
 
 if __name__ == "__main__":

@@ -33,7 +33,8 @@ TRANSITIONS: dict[WorkflowState, set[WorkflowState]] = {
 
 def initial_state(project_id: str) -> dict[str, Any]:
     return {
-        "schema_version": SCHEMA_VERSION, "cw_version": __version__, "workflow_id": project_id,
+        "schema_version": SCHEMA_VERSION, "created_with_cw_version": __version__,
+        "cw_version": __version__, "workflow_id": project_id,
         "workflow_version": None, "workflow_sha256": None, "current_phase": None,
         "status": WorkflowState.INITIALIZED.value, "attempt": 0,
         "last_review": None, "last_gate": None, "last_error": None,
@@ -55,6 +56,9 @@ def load_state(root: Path) -> dict[str, Any]:
 
 
 def save_state(root: Path, state: dict[str, Any]) -> None:
+    original = state.get("created_with_cw_version") or state.get("cw_version")
+    state["created_with_cw_version"] = original if isinstance(original, str) and original else __version__
+    state["cw_version"] = __version__
     state["updated_at"] = utc_now()
     atomic_json(root / ".cw" / "state.json", state)
 
@@ -85,8 +89,16 @@ def validate_state(root: Path, state: dict[str, Any], workflow: Workflow) -> Non
         raise CwError("Workflow state belongs to another project", ErrorCode.WORKFLOW_PROJECT_MISMATCH, "Run: cw repair")
     if state.get("workflow_sha256") != workflow_hash(root / ".codex" / "workflow" / "phases.yaml"):
         raise CwError("Workflow changed after state was created", ErrorCode.INVALID_STATE, "Run: cw plan rebuild")
-    if workflow.phases and state.get("current_phase") not in {phase.id for phase in workflow.phases}:
+    if (
+        workflow.phases
+        and state.get("current_phase") not in {phase.id for phase in workflow.phases}
+        and not (state.get("status") == WorkflowState.COMPLETED.value and state.get("current_phase") is None)
+    ):
         raise CwError("Current phase is not in the workflow", ErrorCode.INVALID_STATE)
+    if workflow.phases:
+        from .progress import validate_progress_state
+
+        validate_progress_state(root, workflow, state)
     infrastructure = state.get("infrastructure_error")
     if infrastructure is not None:
         required = {"error_code", "retryable", "operation", "phase", "occurred_at"}
@@ -160,7 +172,8 @@ def advance_after_approval(
     next_phase = workflow.phases[index + 1] if index + 1 < len(workflow.phases) else None
     if next_phase is None:
         state["status"] = WorkflowState.COMPLETED.value
-        state["attempt"] = attempt
+        state["current_phase"] = None
+        state["attempt"] = 0
     else:
         state["current_phase"] = next_phase.id
         state["status"] = WorkflowState.IN_PROGRESS.value
