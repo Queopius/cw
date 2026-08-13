@@ -20,7 +20,7 @@ from cw.update.cache import UpdateCache
 from cw.update.config import UpdateSettings, load_update_settings, set_update_setting
 from cw.update.installation import InstallPaths, ManagedInstallation, safe_extract_release
 from cw.update.models import ReleaseArtifact, ReleaseManifest, Version
-from cw.update.provider import HttpsDownloader, LocalDownloader, LocalReleaseProvider
+from cw.update.provider import HttpsDownloader, LocalDownloader, LocalReleaseProvider, require_trusted_url
 from cw.update.service import UpdateService
 from cw.update.service import automatic_update_notice
 
@@ -138,6 +138,9 @@ class UpdateModelTests(unittest.TestCase):
             with self.assertRaises(CwError) as caught:
                 HttpsDownloader().download("https://evil.example/cw.tar.gz", Path(name) / "x")
         self.assertEqual(ErrorCode.UPDATE_MANIFEST_ERROR, caught.exception.code)
+
+    def test_github_release_asset_redirect_origin_is_trusted(self):
+        require_trusted_url("https://release-assets.githubusercontent.com/github-production-release-asset/cw")
 
     def test_global_update_config_round_trip_on_python_310(self):
         with tempfile.TemporaryDirectory() as name, patch.dict(

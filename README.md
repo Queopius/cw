@@ -40,7 +40,7 @@ atomically selects it through `current`, and creates the stable launcher
 
 ```text
 ╭──────────────────────────────────────────────────────────────╮
-│ CW · Codex Workflow                                   v0.3.0 │
+│ CW · Codex Workflow                                   v0.3.1 │
 │ by Queopius                                                  │
 ╰──────────────────────────────────────────────────────────────╯
 
