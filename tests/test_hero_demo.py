@@ -203,6 +203,13 @@ class HeroArtifactTests(unittest.TestCase):
         self.assertNotIn("reasoning", enum)
         self.assertEqual(len(enum), len(set(enum)))
 
+    def test_structured_review_evidence_fields_are_required_by_narrative(self) -> None:
+        value = valid_artifact()
+        approved = next(item for item in value["events"] if item.get("result") == "APPROVE")
+        approved["result"] = "REVISE"
+        with self.assertRaises(HeroDemoError):
+            validate_artifact(value)
+
 
 class RecordingTransactionTests(unittest.TestCase):
     def test_successful_recording_replaces_atomically(self) -> None:

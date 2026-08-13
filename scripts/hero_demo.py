@@ -337,9 +337,26 @@ def record_real_workflow(
         status_objects = status_result.json_objects()
         status = status_objects[-1] if status_objects else {}
         if status.get("ready") and not status.get("is_complete"):
-            invoke(["review", "--json"], "Independent review", "cw review")
+            review_result = invoke(["review", "--json"], "Independent review", "cw review")
+            review_payload = _single_json(review_result, "Independent review")
+            if not (
+                review_payload.get("decision") == "APPROVE"
+                and isinstance(review_payload.get("gate"), str)
+                and review_payload.get("workflow_completed") is True
+            ):
+                raise HeroDemoError("Independent reviewer did not approve and complete the one-phase workflow")
             all_run_events = _normalize_execution_events(_read_run_events(project), private_root=project)
             events.extend(event for event in all_run_events if event not in start_events)
+            # JSON mode intentionally skips the human live renderer/recorder.
+            # Its structured review report is the authoritative observable
+            # result: run_review cannot produce APPROVE/gate/completion unless
+            # deterministic validation and the independent review both pass.
+            events.extend([
+                public_event("validation", "Deterministic validation passed", result="passed"),
+                public_event("review", "Independent review approved", result="APPROVE"),
+                public_event("gate", "Approval gate verified", result="verified"),
+                public_event("complete", "Workflow complete"),
+            ])
 
         final_status_result = _run(
             [str(executable), "status", "--json"], cwd=project,
