@@ -294,9 +294,11 @@ class UpdateServiceTests(unittest.TestCase):
             provider, self.fixture.service.downloader, self.fixture.installation,
             self.fixture.cache, self.fixture.service.settings,
         )
-        self.assertIsNone(service.cached_notice())
+        with patch.dict(os.environ, {"CI": ""}):
+            self.assertIsNone(service.cached_notice())
         self.assertTrue(self.fixture.cache.fresh("stable", 24))
-        self.assertIsNone(service.cached_notice())
+        with patch.dict(os.environ, {"CI": ""}):
+            self.assertIsNone(service.cached_notice())
         self.assertEqual(1, provider.calls)
 
     def test_ci_suppresses_automatic_notice(self):

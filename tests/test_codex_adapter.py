@@ -16,6 +16,8 @@ class CodexAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.IntegrationManager.configured", return_value=()
+            ), patch(
                 "cw.adapters.codex.subprocess.call", return_value=0
             ) as call:
                 CodexAdapter().run_implementer(root, "implement")
@@ -29,6 +31,8 @@ class CodexAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.IntegrationManager.configured", return_value=()
+            ), patch(
                 "cw.adapters.codex.subprocess.call", return_value=0
             ) as call:
                 CodexAdapter().run_implementer(root, "implement", allow_network=True)
@@ -40,6 +44,8 @@ class CodexAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.IntegrationManager.configured", return_value=()
+            ), patch(
                 "cw.adapters.codex.subprocess.call", return_value=0
             ) as call:
                 CodexAdapter().run_implementer(root, "implement", session_id="a" * 32)
@@ -49,6 +55,8 @@ class CodexAdapterTests(unittest.TestCase):
     def test_implementer_nonzero_exit_is_classified(self):
         with tempfile.TemporaryDirectory() as temporary:
             with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.IntegrationManager.configured", return_value=()
+            ), patch(
                 "cw.adapters.codex.subprocess.call", return_value=17
             ), self.assertRaises(CwError) as raised:
                 CodexAdapter().run_implementer(Path(temporary), "implement")

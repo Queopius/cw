@@ -249,7 +249,7 @@ def render_history(console: Console, phases: list[dict[str, Any]], *, verbose: b
         "human_review_required": "Human review required",
         "current": "Current",
     }
-    for phase in phases:
+    for phase_index, phase in enumerate(phases):
         marker = SUCCESS if phase["approved"] else ACTIVE if phase["current"] else WARNING
         console.focus(marker, phase["number"], phase["name"], indent=2)
         for entry in phase["entries"]:
@@ -266,7 +266,8 @@ def render_history(console: Console, phases: list[dict[str, Any]], *, verbose: b
                     console.field("Gate", entry["gate"], 12)
                 if entry.get("error_code"):
                     console.field("Error", entry["error_code"], 12)
-        console.line()
+        if phase_index < len(phases) - 1:
+            console.line()
 
 
 def render_doctor(console: Console, checks: list[dict[str, Any]], result: dict[str, int], *, verbose: bool = False) -> None:
