@@ -13,6 +13,11 @@ All notable changes to CW are documented here.
   domain `BatchRunner`; none may create an agent or batch after all gates pass.
 - Classify all-approved state with an active phase as `STATE_INCONSISTENT` and
   retain strict fail-closed validation until explicit repair canonicalizes it.
+- Add a pinned MkDocs Material documentation build to the main CI pipeline;
+  `mkdocs build --strict` now fails release validation on documentation warnings.
+- Establish the owner-supplied CW monogram as the canonical brand source, add
+  deterministic dark/light/icon derivatives, and integrate it into README and
+  MkDocs without adding assets or Pillow to the Python runtime package.
 
 ## 0.4.1 — 2026-08-13
 

@@ -1,0 +1,50 @@
+site_name: CW — Codex Workflow
+site_description: Bounded, gate-driven AI-assisted software development workflows.
+site_author: Queopius
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  logo: assets/brand/cw-mark.png
+  favicon: assets/brand/cw-mark-32.png
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Getting Started: getting-started.md
+      - Planning: planning.md
+      - Workflow: workflow.md
+  - Workflow:
+      - Gates and Reviews: gates-and-reviews.md
+      - Batch Execution: batch-execution.md
+      - Live Execution: live-execution.md
+      - Integrations: integrations.md
+  - Operations:
+      - Configuration: configuration.md
+      - Updating: updating.md
+      - Troubleshooting: troubleshooting.md
+      - Error Reference: errors.md
+  - Engineering:
+      - Architecture: architecture.md
+      - Project Layout: project-layout.md
+      - Security: security.md
+      - Release Process: release-process.md
+      - Brand Assets: assets/brand/README.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences

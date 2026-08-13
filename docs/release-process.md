@@ -18,9 +18,15 @@ long-lived branches.
 ## Creating a release
 
 1. Confirm CI passes on `release`.
-2. Update `VERSION`, `cw.__version__`, `pyproject.toml`, and `CHANGELOG.md` in the
+2. Confirm the documentation quality gate passes:
+
+   ```bash
+   mkdocs build --strict
+   ```
+
+3. Update `VERSION`, `cw.__version__`, `pyproject.toml`, and `CHANGELOG.md` in the
    release candidate.
-3. Create an annotated tag while checked out on `release`:
+4. Create an annotated tag while checked out on `release`:
 
    ```bash
    git switch release
@@ -28,11 +34,30 @@ long-lived branches.
    git push origin release v0.2.0
    ```
 
-4. Promote the tagged release commit to `prod` through review.
+5. Promote the tagged release commit to `prod` through review.
 
 The Release Check workflow rejects tags whose commit is not reachable from
 `origin/release` or whose name does not match the repository `VERSION`. It builds
 artifacts for inspection but does not publish them to PyPI.
+
+## Documentation validation
+
+Documentation dependencies are isolated from the CW runtime. Install them and
+preview the site locally with:
+
+```bash
+python -m pip install -r docs/requirements.txt
+mkdocs serve
+```
+
+Run the same strict validation used by CI with:
+
+```bash
+make docs-check
+```
+
+Warnings fail the documentation job and block release promotion.
+
 Before promotion, run the offline installation/isolation demonstration:
 
 ```bash

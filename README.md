@@ -1,6 +1,16 @@
-# CW by Queopius
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/cw-logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/cw-logo-light.png">
+    <img src="docs/assets/brand/cw-mark.png" alt="" width="180">
+  </picture>
+</p>
 
-**Codex Workflow**
+# CW — Codex Workflow
+
+**by Queopius**
+
+**Build with autonomy. Advance with evidence.**
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 

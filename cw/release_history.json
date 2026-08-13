@@ -5,7 +5,9 @@
       "version": "0.4.2",
       "changes": [
         "Centralized gate-derived workflow state and completion counters.",
-        "Prevented start, retry, and batch execution after workflow completion."
+        "Prevented start, retry, and batch execution after workflow completion.",
+        "Added strict MkDocs documentation validation to the main CI pipeline.",
+        "Integrated the official CW monogram and deterministic documentation assets."
       ]
     },
     {
