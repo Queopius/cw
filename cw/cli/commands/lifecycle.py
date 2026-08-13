@@ -7,7 +7,7 @@ from typing import Any, Callable
 from cw.adapters.codex import CodexAdapter
 from cw.core.diagnostics import state_error
 from cw.core.errors import CwError, ErrorCode
-from cw.core.gates import gate_path
+from cw.core.gates import gate_path, validate_gate
 from cw.core.initialize import backup_metadata, initialize, repair as repair_metadata
 from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
@@ -77,18 +77,42 @@ def _plan_payload(workflow: Any) -> dict[str, Any]:
     }
 
 
-def _show_plan(args: argparse.Namespace, console: Console, workflow: Any) -> int:
+def _show_plan(
+    args: argparse.Namespace,
+    console: Console,
+    root: Path,
+    state: dict[str, Any],
+    workflow: Any,
+) -> int:
     payload = _plan_payload(workflow)
+    payload["current_phase"] = state.get("current_phase")
+    for phase in payload["phases"]:
+        phase["status"] = "current" if phase["id"] == state.get("current_phase") else "pending"
+        if gate_path(root, phase["id"]).is_file():
+            try:
+                validate_gate(root, workflow, phase["id"])
+                phase["status"] = "approved"
+            except CwError:
+                phase["status"] = "invalid"
     if args.json:
         emit_json(payload)
     else:
-        console.header("Plan")
+        console.header("Development Plan")
+        console.field("Project", workflow.id)
         console.field("Status", workflow.status)
-        console.field("Goal", workflow.goal or "NOT DEFINED")
+        console.field("Phases", len(workflow.phases))
+        if args.verbose:
+            console.field("Goal", workflow.goal or "NOT DEFINED")
         console.line()
         for phase in workflow.phases:
-            console.item("·", f"{phase.id}  {phase.name}")
-            console.wrapped(phase.objective, 4)
+            rendered = next(item for item in payload["phases"] if item["id"] == phase.id)
+            marker = {"approved": "✓", "current": "→", "invalid": "!", "pending": "·"}[rendered["status"]]
+            console.phase(marker, phase.id.split("-", 1)[0], phase.name)
+            if args.verbose:
+                console.wrapped(phase.objective, 6)
+                if phase.depends_on:
+                    console.field("Depends", ", ".join(phase.depends_on), 12)
+                console.field("Criteria", len(phase.acceptance_criteria), 12)
         if not workflow.phases:
             console.item("!", "No plan has been created")
             console.run('cw plan --goal "..."')
@@ -130,7 +154,7 @@ def command_plan(
     root = root_resolver()
     project, state, workflow = context(root)
     if args.action == "show":
-        return _show_plan(args, console, workflow)
+        return _show_plan(args, console, root, state, workflow)
     if args.action == "approve":
         return _approve_plan(args, console, root, state, workflow)
     with operation_lock(root, "plan"):

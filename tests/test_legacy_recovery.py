@@ -133,7 +133,7 @@ class LegacyReviewerRecoveryTests(unittest.TestCase):
         reviewer.assert_called_once()
         final = load_state(self.repo.root)
         self.assertEqual("06-first-e2e", final["current_phase"])
-        self.assertEqual("APPROVED", final["status"])
+        self.assertEqual("COMPLETED", final["status"])
         self.assertEqual(1, final["attempt"])
         retry_event = next(event for event in final["history"] if event["action"] == "retry_started")
         approval_event = next(event for event in final["history"] if event["action"] == "approved" and event["phase"] == "06-first-e2e")

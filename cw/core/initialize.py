@@ -452,6 +452,8 @@ def repair(root: Path) -> Path:
     from .workflow import load_workflow, workflow_hash
     workflow = load_workflow(root)
     state = load_json(state_path)
+    from .progress import normalize_legacy_progress
+    workflow, _ = normalize_legacy_progress(root, workflow, state)
     if workflow.phases and state.get("current_phase") in {phase.id for phase in workflow.phases}:
         state["workflow_version"] = workflow.version
         state["workflow_sha256"] = workflow_hash(plan_path)

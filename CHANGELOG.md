@@ -4,6 +4,24 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.1.4 — 2026-08-13
+
+- Advance non-final approvals directly to the next configured phase with
+  `IN_PROGRESS`, attempt zero, pending gate, and consumed readiness; complete
+  the workflow immediately when the final configured phase is approved.
+- Normalize legacy `PROPOSED` plans only when verified gates prove execution,
+  and repair stale post-approval state without altering review or gate evidence.
+- Reconstruct the phase audit view from validated gates and reviews, retaining
+  revisions and recovered infrastructure failures while deduplicating legacy
+  approval records around the canonical gate.
+- Separate current position from verified approval count in status output and
+  render invalid, approved, current, and pending phases from actual gate state.
+- Add a dedicated terminal theme, symbols, and renderer layer with compact
+  status, history, doctor, plan, start, review, and diagnostic presentation.
+- Keep JSON free of presentation formatting, honor `NO_COLOR`, disable ANSI for
+  non-TTY output, wrap long phase names, and reserve paths/details for verbose
+  mode.
+
 - Begin the v0.2 CLI modularization by extracting lifecycle, execution,
   validation, review, retry, status, history, doctor, diagnostics,
   configuration, and version use cases behind injected command services while

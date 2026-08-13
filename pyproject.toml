@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-workflow"
-version = "0.1.3"
+version = "0.1.4"
 description = "CW by Queopius — plan, build, validate, and review software one verified phase at a time."
 readme = "README.md"
 requires-python = ">=3.10"

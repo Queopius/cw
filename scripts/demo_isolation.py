@@ -105,10 +105,6 @@ def main() -> int:
 
     run_review(roots["a"], workflow_a, phase_a, load_state(roots["a"]), Approver())
     validate_gate(roots["a"], workflow_a, phase_a.id)
-    state_a = load_state(roots["a"])
-    state_a["current_phase"] = workflow_a.phases[1].id
-    state_a["attempt"] = 0
-    transition(roots["a"], state_a, WorkflowState.IN_PROGRESS)
 
     workflow_b = load_workflow(roots["b"])
     b_after = {

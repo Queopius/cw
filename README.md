@@ -41,20 +41,21 @@ source checkout.
 ```text
 CW by Queopius · Codex Workflow
 
-  Project     shop-api
-  Branch      main
-  Workflow    ACTIVE
-  State       IN_PROGRESS
-  Plan        APPROVED
+  shop-api  ·  main
 
-  Phase       02-authentication · Authentication
-  Progress    2 / 4 phases
+  Workflow    ACTIVE
+  Plan        APPROVED
+  State       IN_PROGRESS
+
+  Phase       02 · Authentication
+  Position    2 / 4
+  Approved    1 / 4
   Attempt     0 / 3
 
-✓ 01  Repository Assessment
-→ 02  Authentication
-· 03  Billing
-· 04  Release Verification
+  ✓ 01  Repository Assessment
+  → 02  Authentication
+  · 03  Billing
+  · 04  Release Verification
 
   Readiness   NOT READY
   Gate        PENDING
@@ -75,6 +76,8 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
 - Required commands run before AI review and come only from `phases.yaml`.
 - Reviewers run independently with `read-only`, ephemeral sessions, and hooks disabled.
 - Approved artifact hashes are rechecked before every dependent phase.
+- A verified non-final gate advances state immediately to the next configured
+  phase; the final gate completes the workflow.
 - Payment, cryptography, production, destructive migration, and similar goals can require a human gate.
 
 ## Commands

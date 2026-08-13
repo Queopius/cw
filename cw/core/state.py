@@ -6,7 +6,8 @@ from typing import Any
 from cw import __version__
 from .errors import CwError, ErrorCode
 from .layout import safe_file
-from .models import Workflow, WorkflowState
+from .gates import validate_gate
+from .models import Phase, Workflow, WorkflowState
 from .schema import SCHEMA_VERSION, schema_version
 from .utils import atomic_json, load_json, utc_now
 from .workflow import workflow_hash
@@ -111,3 +112,63 @@ def validate_state(root: Path, state: dict[str, Any], workflow: Workflow) -> Non
             )
         ):
             raise CwError("Infrastructure error metadata is invalid", ErrorCode.INVALID_STATE, "Run: cw repair")
+
+
+def advance_after_approval(
+    root: Path,
+    state: dict[str, Any],
+    workflow: Workflow,
+    phase: Phase,
+    gate_reference: str,
+    *,
+    attempt: int,
+    action: str = "approved",
+    timestamp: str | None = None,
+    record_event: bool = True,
+) -> Phase | None:
+    """Commit the operational state produced by a verified phase gate.
+
+    Reviews and gates are append-only evidence. This is the single state
+    operation that turns that evidence into either the next executable phase or
+    a completed workflow.
+    """
+    if state.get("current_phase") != phase.id:
+        raise CwError("Approval does not target the current phase", ErrorCode.INVALID_STATE)
+    if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
+        raise CwError("Approval attempt is invalid", ErrorCode.INVALID_STATE)
+    expected_reference = f".cw/gates/{phase.id}.approved.json"
+    if gate_reference != expected_reference:
+        raise CwError("Approval gate reference is invalid", ErrorCode.INVALID_GATE)
+    validate_gate(root, workflow, phase.id)
+
+    state["last_gate"] = gate_reference
+    state["last_error"] = None
+    state["infrastructure_error"] = None
+    if record_event:
+        event: dict[str, Any] = {
+            "timestamp": timestamp or utc_now(),
+            "phase": phase.id,
+            "action": action,
+            "gate": gate_reference,
+        }
+        if action == "approved":
+            event["attempt"] = attempt
+        state.setdefault("history", []).append(event)
+
+    index = workflow.index(phase.id)
+    next_phase = workflow.phases[index + 1] if index + 1 < len(workflow.phases) else None
+    if next_phase is None:
+        state["status"] = WorkflowState.COMPLETED.value
+        state["attempt"] = attempt
+    else:
+        state["current_phase"] = next_phase.id
+        state["status"] = WorkflowState.IN_PROGRESS.value
+        state["attempt"] = 0
+    save_state(root, state)
+
+    # Runtime evidence belongs to the approved phase and cannot cross the gate.
+    from .session import finish_session, readiness_path
+
+    readiness_path(root).unlink(missing_ok=True)
+    finish_session(root)
+    return next_phase

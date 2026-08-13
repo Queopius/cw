@@ -8,7 +8,7 @@ from typing import Any
 from .commands import command_arguments
 from .errors import CwError, ErrorCode
 from .layout import safe_file
-from .models import Workflow
+from .models import PlanStatus, Workflow
 from .schema import schema_version
 from .severity import CANONICAL_CRITERION_SEVERITIES
 from .utils import atomic_write, safe_project_path, sha256_bytes
@@ -70,6 +70,10 @@ def workflow_from_document(root: Path, data: dict[str, Any]) -> Workflow:
 
 
 def validate_workflow(root: Path, workflow: Workflow) -> None:
+    try:
+        PlanStatus(workflow.status)
+    except ValueError as exc:
+        raise CwError("Workflow plan status is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR) from exc
     if not workflow.id or workflow.id != workflow.repository:
         raise CwError("Workflow identity is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
     ids = [phase.id for phase in workflow.phases]
@@ -118,7 +122,11 @@ def write_workflow(path: Path, payload: dict[str, Any]) -> None:
 
 
 def set_plan_status(root: Path, status: str) -> None:
+    try:
+        canonical = PlanStatus(status).value
+    except ValueError as exc:
+        raise CwError("Workflow plan status is invalid", ErrorCode.INVALID_STATE) from exc
     path = root / ".codex" / "workflow" / "phases.yaml"
     data = _read_document(path)
-    data.setdefault("workflow", {})["status"] = status
+    data.setdefault("workflow", {})["status"] = canonical
     write_workflow(path, data)

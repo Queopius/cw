@@ -28,6 +28,18 @@ to be extracted and tested without turning the entry point back into a monolith.
 Mutable configuration has its own command module; read-oriented status and
 diagnostic commands never acquire responsibility for configuration writes.
 
+`cw.ui.theme`, `cw.ui.symbols`, and `cw.ui.renderers` form the presentation
+boundary. Commands pass structured status, history, and diagnostic data to that
+layer; domain code never emits ANSI and JSON is serialized directly from domain
+payloads. Color is state communication only and is disabled for non-TTY output,
+`NO_COLOR`, and `--no-color`.
+
+`cw.core.state.advance_after_approval` owns the operational boundary after a
+gate is verified. It records the final state once, resets the next phase attempt,
+clears stale errors and runtime readiness, or completes the final phase. The
+append-only review and gate are written before that state commit, so a crash can
+be reconciled from authoritative evidence by backup-first repair.
+
 `cw.core.layout` defines the trusted project filesystem topology. Validation is
 performed before init writes, lock acquisition, normal context loading, repair,
 and backup. Individual critical loaders retain their own regular-file checks as

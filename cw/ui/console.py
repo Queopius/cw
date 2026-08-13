@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import textwrap
 from dataclasses import dataclass, field
 from typing import Any, TextIO
+
+from .theme import MARKER_COLORS, STATE_COLORS
 
 
 @dataclass(slots=True)
@@ -30,14 +33,35 @@ class Console:
         self.line()
 
     def item(self, marker: str, message: str) -> None:
-        colors = {"✓": "32", "✕": "31", "!": "33", "→": "36", "·": "2"}
-        self.line(f"{self.style(marker, colors.get(marker, '0'))} {message}")
+        self.line(f"{self.style(marker, MARKER_COLORS.get(marker, '0'))} {message}")
 
     def field(self, label: str, value: Any, width: int = 11) -> None:
-        self.line(f"  {self.style(label.ljust(width), '1')} {value}")
+        prefix = f"  {label.ljust(width)} "
+        terminal = min(100, max(80, shutil.get_terminal_size((96, 24)).columns))
+        rendered = textwrap.wrap(str(value), width=max(20, terminal - len(prefix))) or [""]
+        self.line(f"  {self.style(label.ljust(width), '1')} {self.state(str(rendered[0]))}")
+        for continuation in rendered[1:]:
+            self.line(" " * len(prefix) + continuation)
+
+    def state(self, value: str) -> str:
+        code = STATE_COLORS.get(value)
+        return self.style(value, code) if code else value
+
+    def section(self, title: str) -> None:
+        self.line(self.style(title, "1"))
+
+    def phase(self, marker: str, number: str, name: str, *, indent: int = 2) -> None:
+        prefix = " " * indent + f"{marker} {number:>2}  "
+        terminal = min(100, max(80, shutil.get_terminal_size((96, 24)).columns))
+        lines = textwrap.wrap(name, width=max(20, terminal - len(prefix))) or [""]
+        colored = self.style(marker, MARKER_COLORS.get(marker, "0"))
+        self.line(" " * indent + f"{colored} {number:>2}  {lines[0]}")
+        for continuation in lines[1:]:
+            self.line(" " * len(prefix) + continuation)
 
     def wrapped(self, value: str, indent: int = 2) -> None:
-        for line in textwrap.wrap(value, width=78 - indent) or [""]:
+        terminal = min(100, max(80, shutil.get_terminal_size((96, 24)).columns))
+        for line in textwrap.wrap(value, width=terminal - indent) or [""]:
             self.line(" " * indent + line)
 
     def run(self, command: str) -> None:
@@ -78,28 +102,27 @@ HELP = """CW by Queopius · Codex Workflow
 Usage:
   cw [command]
 
-Workflow:
-  init        Initialize CW in current repository
-  plan        Create or inspect development plan
-  start       Start or resume current phase
-  status      Show workflow progress
+Workflow
+  init        Initialize CW
+  plan        Create or inspect the plan
+  start       Start or resume development
+  status      Show current workflow status
   validate    Run deterministic validation
-  review      Review current ready phase
-  retry       Retry failed workflow operation
+  review      Run independent review
+  retry       Retry a failed operation
   history     Show workflow history
 
-Maintenance:
-  doctor      Check CW environment
-  repair      Repair workflow metadata
-  config      Show or set project configuration
+Maintenance
+  doctor      Check environment and integration
+  repair      Repair or migrate workflow metadata
+  config      Show configuration
   error       Show last detailed error
   version     Show CW version
   help        Show help
 
-Examples:
+Examples
   cw init
-  cw plan --goal "Implement subscription billing"
-  cw plan approve
+  cw plan
   cw
   cw status
 """

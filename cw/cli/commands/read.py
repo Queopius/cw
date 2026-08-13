@@ -14,11 +14,13 @@ from cw.core.audit import audit_history
 from cw.core.diagnostics import legacy_diagnostic, load_diagnostic, raw_diagnostic
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_gate
+from cw.core.history import history_timeline
 from cw.core.integrity import snapshot_protected_paths
 from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import load_session, process_is_alive, readiness_path
 from cw.core.utils import load_json
 from cw.ui.console import Console, emit_json, error_summary
+from cw.ui.renderers import render_doctor, render_history, render_status as render_status_view
 
 
 RootResolver = Callable[[], Path]
@@ -41,17 +43,23 @@ def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
     current = state.get("current_phase")
     index = workflow.index(current) if current and workflow.phases else None
     gates: dict[str, bool] = {}
+    gate_states: dict[str, str] = {}
+    invalid_gates: list[str] = []
     gate_error = None
     gate_error_code = None
     gate_error_details = None
     for phase in workflow.phases:
         exists = gate_path(root, phase.id).is_file()
         gates[phase.id] = exists
+        gate_states[phase.id] = "pending"
         if exists:
             try:
                 validate_gate(root, workflow, phase.id)
+                gate_states[phase.id] = "approved"
             except CwError as exc:
                 gates[phase.id] = False
+                gate_states[phase.id] = "invalid"
+                invalid_gates.append(phase.id)
                 gate_error = str(exc)
                 gate_error_code = exc.code.value
                 gate_error_details = exc.details
@@ -60,14 +68,21 @@ def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
         "repository_root": str(root), "branch": git_branch(root),
         "workflow": "INITIALIZED" if not workflow.phases else "ACTIVE",
         "plan": workflow.status, "state": state["status"], "phase": current,
-        "phase_index": index, "phase_count": len(workflow.phases),
+        "phase_index": index, "position": index + 1 if index is not None else None,
+        "phase_count": len(workflow.phases), "approved_count": sum(gates.values()),
         "attempt": state.get("attempt", 0), "max_attempts": workflow.max_review_attempts,
         "ready": (root / ".cw" / "runtime" / "READY_FOR_REVIEW.json").is_file(),
         "gate": gates.get(current, False) if current else False, "gates": gates,
+        "gate_states": gate_states, "invalid_gates": invalid_gates,
         "gate_error": gate_error, "gate_error_code": gate_error_code,
         "gate_error_details": gate_error_details,
         "phases": [
-            {"id": phase.id, "name": phase.name, "depends_on": list(phase.depends_on)}
+            {
+                "id": phase.id,
+                "number": phase.id.split("-", 1)[0],
+                "name": phase.name,
+                "depends_on": list(phase.depends_on),
+            }
             for phase in workflow.phases
         ],
         "last_error": state.get("last_error"),
@@ -76,51 +91,7 @@ def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
 
 
 def render_status(console: Console, data: dict[str, Any], verbose: bool = False) -> None:
-    console.header()
-    console.field("Project", data["project"])
-    console.field("Branch", data["branch"])
-    console.field("Workflow", data["workflow"])
-    console.field("State", data["state"])
-    console.field("Plan", data["plan"])
-    if data["phase"]:
-        current = data["phases"][data["phase_index"]]
-        console.line()
-        console.field("Phase", f"{current['id']} · {current['name']}")
-        console.field("Progress", f"{data['phase_index'] + 1} / {data['phase_count']} phases")
-        console.field("Attempt", f"{data['attempt']} / {data['max_attempts']}")
-        console.line()
-        for index, phase in enumerate(data["phases"]):
-            marker = "✓" if data["gates"].get(phase["id"]) else "→" if index == data["phase_index"] else "·"
-            console.item(marker, f"{phase['id'].split('-', 1)[0]:>2}  {phase['name']}")
-        console.line()
-        console.field("Readiness", "READY" if data["ready"] else "NOT READY")
-        console.field("Gate", "APPROVED" if data["gate"] else "PENDING")
-    else:
-        console.line()
-        console.field("Workflow", "INITIALIZED")
-        console.field("Plan", "NOT CREATED")
-        console.run("cw plan")
-    if data.get("gate_error"):
-        console.line()
-        console.item("✕", "Approval gate invalidated")
-        console.run("cw error")
-    recovery = data.get("infrastructure_error")
-    if data["state"] == "ERROR" and isinstance(recovery, dict) and recovery.get("retryable") is True:
-        console.line()
-        console.item("!", "Infrastructure recovery available")
-        console.field("Operation", recovery.get("operation", "unknown"))
-        console.run("cw retry")
-    elif data["state"] == "ERROR" and data.get("last_error"):
-        code = data["last_error"].split(":", 1)[0]
-        title, detail = error_summary(code, data["last_error"])
-        console.line()
-        console.item("✕", title)
-        console.wrapped(detail)
-        console.run("cw error")
-    if verbose:
-        console.line()
-        console.field("Root", data["repository_root"])
-        console.field("State file", ".cw/state.json")
+    render_status_view(console, data, verbose=verbose)
 
 
 def command_status(
@@ -152,20 +123,18 @@ def command_history(
     root = root_resolver()
     _, state, workflow = context(root)
     audit_history(root, workflow, state)
+    phases = history_timeline(root, workflow, state)
+    if args.phase:
+        phases = [
+            phase for phase in phases
+            if phase["phase"] == args.phase or phase["number"] == args.phase
+        ]
     events = [event for event in state.get("history", []) if not args.phase or event.get("phase") == args.phase]
-    payload = {"workflow": workflow.id, "events": events}
+    payload = {"workflow": workflow.id, "phases": phases, "events": events}
     if args.json:
         emit_json(payload)
     else:
-        console.header("History")
-        if not events:
-            console.item("·", "No workflow events recorded")
-        for event in events:
-            marker = "✓" if "approved" in event["action"] else "→" if event["action"] == "revision_required" else "!"
-            console.item(marker, f"{event['phase']}  {event['action'].replace('_', ' ')}")
-            console.field("When", event["timestamp"], 8)
-            if "attempt" in event:
-                console.field("Attempt", event["attempt"], 8)
+        render_history(console, phases, verbose=args.verbose)
     return 0
 
 
@@ -180,7 +149,7 @@ def doctor_checks(
     for name in ("git", "python3", "codex"):
         path = shutil.which(name)
         checks.append({
-            "section": "Environment", "name": name.capitalize(),
+            "section": "Environment", "name": "Python" if name == "python3" else name.capitalize(),
             "status": "pass" if path else "error", "detail": path or "not found",
         })
     if root is None:
@@ -191,9 +160,15 @@ def doctor_checks(
         project, state, workflow = context(root)
         checks.extend([
             {"section": "Workflow", "name": "Project identity", "status": "pass", "detail": project.project_id},
-            {"section": "Workflow", "name": "phases.yaml", "status": "pass", "detail": workflow.status},
+            {"section": "Workflow", "name": "Plan", "status": "pass", "detail": workflow.status},
             {"section": "Workflow", "name": "State", "status": "pass", "detail": state["status"]},
         ])
+        phase = current_resolver(workflow, state) if workflow.phases and state.get("current_phase") else None
+        if phase:
+            checks.append({"section": "Workflow", "name": "Current phase", "status": "pass", "detail": phase.id})
+            for dependency in phase.depends_on:
+                validate_gate(root, workflow, dependency)
+            checks.append({"section": "Workflow", "name": "Previous gates", "status": "pass", "detail": f"{len(phase.depends_on)} dependencies verified"})
         history = audit_history(root, workflow, state)
         checks.append({
             "section": "Workflow", "name": "History integrity", "status": "pass",
@@ -203,7 +178,6 @@ def doctor_checks(
         checks.append({"section": "Security", "name": ".cw writable", "status": "pass" if writable else "error", "detail": "required"})
         snapshot_protected_paths(root, workflow.protected_paths)
         checks.append({"section": "Security", "name": "Protected paths", "status": "pass", "detail": f"{len(workflow.protected_paths)} enforced"})
-        phase = current_resolver(workflow, state) if workflow.phases and state.get("current_phase") else None
         session = load_session(root, workflow, phase) if phase else None
         readiness = readiness_path(root)
         owner = session.get("owner_pid") if session else None
@@ -224,7 +198,7 @@ def doctor_checks(
             checks.append({"section": "Security", "name": "Readiness session", "status": "pass", "detail": phase.id})
         else:
             checks.append({"section": "Security", "name": "Readiness session", "status": "neutral", "detail": "none"})
-        checks.append({"section": "Security", "name": ".codex writable", "status": "neutral", "detail": "not required at runtime"})
+        checks.append({"section": "Security", "name": ".codex runtime writes", "status": "neutral", "detail": "not required"})
         checks.append({"section": "Security", "name": "Hook trust", "status": "neutral", "detail": "managed by Codex; run /hooks if prompted"})
         if reviewer:
             adapter = CodexAdapter()
@@ -258,53 +232,69 @@ def command_doctor(
     if args.json:
         emit_json(payload)
     else:
-        console.header("Doctor")
-        section = None
-        for check in checks:
-            if check["section"] != section:
-                section = check["section"]
-                console.line(section)
-            marker = {"pass": "✓", "warning": "!", "error": "✕", "neutral": "·"}[check["status"]]
-            console.item(marker, f"{check['name']}  {check['detail']}")
-        console.line()
-        console.line("Result")
-        console.item("✓", f"{passed} checks passed")
-        console.item("·", f"{warnings} warnings")
-        console.item("✕", f"{errors} errors")
+        render_doctor(console, checks, payload["result"], verbose=args.verbose)
     return 1 if errors else 0
 
 
 def command_error(args: argparse.Namespace, console: Console, *, root_resolver: RootResolver) -> int:
     root = root_resolver()
     record = load_diagnostic(root)
+    state_data: dict[str, Any] = {}
     if record is None:
         try:
-            state = load_json(root / ".cw/state.json")
-            record = legacy_diagnostic(state.get("last_error") if isinstance(state, dict) else None)
+            loaded = load_json(root / ".cw/state.json")
+            state_data = loaded if isinstance(loaded, dict) else {}
+            record = legacy_diagnostic(state_data.get("last_error"))
         except CwError:
             record = None
-    payload = {"error": record}
+    elif (root / ".cw/state.json").is_file():
+        try:
+            loaded = load_json(root / ".cw/state.json")
+            state_data = loaded if isinstance(loaded, dict) else {}
+        except CwError:
+            pass
+    recovery = state_data.get("infrastructure_error") if isinstance(state_data, dict) else None
+    context = {
+        "phase": recovery.get("phase") if isinstance(recovery, dict) else state_data.get("current_phase"),
+        "retryable": recovery.get("retryable") if isinstance(recovery, dict) else False,
+        "operation": recovery.get("operation") if isinstance(recovery, dict) else None,
+        "attempt_consumed": False if isinstance(recovery, dict) else None,
+    }
+    payload = {"error": record, "context": context}
     if args.json:
         emit_json(payload)
     else:
         console.header("Error")
-        if record and args.raw:
-            console.line(raw_diagnostic(record))
-        elif record:
+        if record:
             title, detail = error_summary(record["code"], record["message"])
             console.item("✕", title)
-            console.field("Code", record["code"])
-            console.field("When", record["timestamp"])
+            console.field("Type", record["code"])
+            if context["phase"]:
+                console.field("Phase", context["phase"])
+            console.field("Retryable", "YES" if context["retryable"] else "NO")
+            if context["attempt_consumed"] is not None:
+                console.field("Attempt", "not consumed" if not context["attempt_consumed"] else "consumed")
+            if args.verbose:
+                console.field("When", record["timestamp"])
+                if context["operation"]:
+                    console.field("Operation", context["operation"])
+            console.line()
+            console.section("Summary")
             console.wrapped(detail)
-            if record.get("details"):
+            diagnostic = raw_diagnostic(record)
+            if args.raw or record.get("details"):
                 console.line()
-                console.line("Details")
-                console.wrapped(str(record["details"]))
+                console.section("Raw diagnostic")
+                console.line("─" * 72)
+                console.line(diagnostic)
+                console.line("─" * 72)
             if args.verbose and record.get("traceback"):
                 console.line()
-                console.line("Traceback")
+                console.section("Traceback")
                 console.line(str(record["traceback"]))
-            if record.get("hint"):
+            if context["retryable"]:
+                console.run("cw retry")
+            elif record.get("hint"):
                 console.run(str(record["hint"]).removeprefix("Run: "))
         else:
             console.item("✓", "No stored workflow error")

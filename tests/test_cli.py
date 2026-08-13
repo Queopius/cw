@@ -80,7 +80,8 @@ class CliTests(unittest.TestCase):
         with patch("cw.cli.main.CodexAdapter.run_implementer", side_effect=implement):
             code, _ = self.invoke("start")
         self.assertEqual(0, code)
-        self.assertEqual("APPROVED", self.repo.state()["status"])
+        self.assertEqual("IN_PROGRESS", self.repo.state()["status"])
+        self.assertEqual("02-phase-2", self.repo.state()["current_phase"])
         self.assertTrue((self.repo.root / ".cw/gates/01-phase-1.approved.json").is_file())
 
     def test_start_fails_closed_when_implementer_mutates_state(self):
@@ -166,7 +167,8 @@ class CliTests(unittest.TestCase):
             code, _ = self.invoke("retry")
         self.assertEqual(0, code)
         implementer.assert_not_called()
-        self.assertEqual("APPROVED", self.repo.state()["status"])
+        self.assertEqual("IN_PROGRESS", self.repo.state()["status"])
+        self.assertEqual("02-phase-2", self.repo.state()["current_phase"])
 
     def test_hook_review_rejects_wrong_session_environment(self):
         from cw.core.session import create_session
@@ -205,6 +207,8 @@ class CliTests(unittest.TestCase):
             "decision": "APPROVE",
             "gate": ".cw/gates/01-phase-1.approved.json",
             "human": True,
+            "next_phase": "02-phase-2",
+            "workflow_completed": False,
         }, json.loads(output))
         approver.assert_called_once()
 
@@ -262,7 +266,7 @@ class CliTests(unittest.TestCase):
     def test_history_empty(self):
         code, output = self.invoke("history")
         self.assertEqual(0, code)
-        self.assertIn("No workflow events", output)
+        self.assertIn("Current", output)
 
     def test_version_json(self):
         code, output = self.invoke("version", "--json")

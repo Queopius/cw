@@ -29,6 +29,15 @@ class ReviewDecision(str, Enum):
     HUMAN_REVIEW_REQUIRED = "HUMAN_REVIEW_REQUIRED"
 
 
+class PlanStatus(str, Enum):
+    """Public lifecycle values persisted in the static workflow document."""
+
+    NOT_CREATED = "NOT_CREATED"
+    PROPOSED = "PROPOSED"
+    APPROVED = "APPROVED"
+    COMPLETED = "COMPLETED"
+
+
 @dataclass(frozen=True, slots=True)
 class Criterion:
     id: str

@@ -10,7 +10,7 @@ from typing import Any, Callable
 from cw.checks.deterministic import inspect_completed_work, validate_phase
 from cw.core.diagnostics import state_error
 from cw.core.errors import CwError, ErrorCode
-from cw.core.gates import validate_dependencies, validate_gate
+from cw.core.gates import validate_dependencies
 from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
 from cw.core.initialize import backup_metadata
 from cw.core.locking import operation_lock
@@ -24,7 +24,7 @@ from cw.core.recovery import (
     migrate_legacy_reviewer_error,
 )
 from cw.core.session import create_session, finish_session, load_session, readiness_path
-from cw.core.state import load_state, save_state, transition
+from cw.core.state import advance_after_approval, load_state, save_state, transition
 from cw.core.utils import utc_now
 from cw.ui.console import Console, emit_json
 
@@ -73,16 +73,21 @@ def command_start(
             raise CwError("A readiness manifest already exists", ErrorCode.INVALID_STATE, "Run: cw review")
         status = WorkflowState(state["status"])
         if status is WorkflowState.APPROVED:
-            validate_gate(root, workflow, phase.id)
-            index = workflow.index(phase.id)
-            if index == len(workflow.phases) - 1:
-                transition(root, state, WorkflowState.COMPLETED)
+            # Compatibility for v0.1.3 projects that deferred advancement until
+            # the next start. New approvals advance inside the domain operation.
+            next_phase = advance_after_approval(
+                root,
+                state,
+                workflow,
+                phase,
+                f".cw/gates/{phase.id}.approved.json",
+                attempt=max(1, int(state.get("attempt", 0))),
+                record_event=False,
+            )
+            if next_phase is None:
                 console.item("✓", "Workflow completed")
                 return 0
-            state["current_phase"] = workflow.phases[index + 1].id
-            state["attempt"] = 0
-            phase = workflow.phases[index + 1]
-            transition(root, state, WorkflowState.IN_PROGRESS)
+            phase = next_phase
         elif status in {WorkflowState.READY, WorkflowState.REVISION_REQUIRED, WorkflowState.PAUSED}:
             transition(root, state, WorkflowState.IN_PROGRESS)
         elif status is not WorkflowState.IN_PROGRESS:
@@ -102,8 +107,15 @@ When complete, create .cw/runtime/READY_FOR_REVIEW.json matching the installed s
 including this exact session_id, and stop normally.
 """
     console.header("Start")
-    console.item("→", f"{phase.id} · {phase.name}")
+    console.item("→", f"{phase.id.split('-', 1)[0]} · {phase.name}")
+    console.line()
+    console.field("Attempt", f"{state.get('attempt', 0)} / {workflow.max_review_attempts}")
     console.field("Sandbox", "workspace-write")
+    console.field("Reviewer", "read-only")
+    console.line()
+    console.item("✓", "Workflow ready")
+    console.line()
+    console.line("Starting Codex…")
     failure: CwError | None = None
     result = 0
     try:
@@ -144,6 +156,22 @@ including this exact session_id, and stop normally.
         raise failure
     state = load_state(root)
     status = WorkflowState(state["status"])
+    if state.get("current_phase") != phase.id or status is WorkflowState.COMPLETED:
+        # A trusted Stop hook may have completed review and advanced the phase
+        # while the implementer process was still active.
+        from cw.core.gates import validate_gate
+
+        validate_gate(root, workflow, phase.id)
+        console.line()
+        console.item("✓", f"Phase {phase.id.split('-', 1)[0]} approved")
+        console.wrapped("Gate verified", 2)
+        if status is WorkflowState.COMPLETED:
+            console.item("✓", "Workflow completed")
+        else:
+            following = workflow.phase(str(state["current_phase"]))
+            console.line()
+            console.item("→", f"Phase {following.id.split('-', 1)[0]} · {following.name}")
+        return result
     if status is WorkflowState.ERROR:
         raw_error = str(state.get("last_error") or "")
         code_value = raw_error.split(":", 1)[0]
@@ -216,9 +244,12 @@ def command_validate(
 def render_review(console: Console, phase: Any, report: dict[str, Any], workflow: Any) -> None:
     decision = report["decision"]
     console.header("Review")
-    console.item("→", f"{phase.id} · {phase.name}")
+    console.item("→", f"{phase.id.split('-', 1)[0]} · {phase.name}")
     console.line()
-    if decision == "APPROVE" and not phase.requires_human_approval:
+    console.item("✓", "Deterministic checks")
+    console.item("✓", "Independent reviewer completed")
+    console.line()
+    if decision == "APPROVE" and (not phase.requires_human_approval or report.get("human")):
         console.item("✓", "APPROVED")
         configured = {criterion.id: criterion for criterion in phase.acceptance_criteria}
         advisory = [
@@ -229,16 +260,22 @@ def render_review(console: Console, phase: Any, report: dict[str, Any], workflow
         ]
         for observation in advisory:
             console.item("!", f"{observation['id']} · advisory observation")
-        console.field("Gate", f".cw/gates/{phase.id}.approved.json")
-        index = workflow.index(phase.id)
-        if index + 1 < len(workflow.phases):
-            following = workflow.phases[index + 1]
-            console.field("Next", f"{following.id} · {following.name}")
+        console.line()
+        console.field("Gate", f"{phase.id}.approved.json")
+        next_id = report.get("next_phase")
+        if next_id:
+            following = workflow.phase(next_id)
+            console.field("Next", f"{following.id.split('-', 1)[0]} · {following.name}")
+        elif report.get("workflow_completed"):
+            console.field("State", "COMPLETED")
     elif decision == "REVISE":
         console.item("✕", "REVISION REQUIRED")
         console.line()
+        console.field("Issues", len(report.get("blocking_issues", [])))
         for issue in report.get("blocking_issues", []):
             console.wrapped(issue)
+        console.line()
+        console.wrapped(f"Phase {phase.id.split('-', 1)[0]} remains active.")
     else:
         console.item("!", "HUMAN REVIEW REQUIRED")
 
@@ -277,6 +314,9 @@ def command_review(
                 "gate": gate.relative_to(root).as_posix(),
                 "human": True,
             }
+            index = workflow.index(phase.id)
+            report["next_phase"] = workflow.phases[index + 1].id if index + 1 < len(workflow.phases) else None
+            report["workflow_completed"] = index + 1 == len(workflow.phases)
         else:
             report = reviewer(root, workflow, phase, state)
     if args.hook:
