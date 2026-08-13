@@ -53,6 +53,15 @@ def _status_actions(console: Console, data: dict[str, Any]) -> None:
     batch = data.get("batch")
     if isinstance(batch, dict) and batch.get("status") in {"INTERRUPTED", "STOPPED"}:
         console.action("cw run --resume", "Resume the interrupted batch budget")
+    managed_run = data.get("run")
+    if isinstance(managed_run, dict) and managed_run.get("alive"):
+        console.action("cw inspect session", "Inspect the active Codex execution")
+        console.action(f"cw logs --run {managed_run.get('run_id')}", "View structured execution events")
+        return
+    if isinstance(managed_run, dict) and managed_run.get("stale"):
+        console.action("cw inspect session", "Inspect the interrupted execution")
+        console.action("cw repair", "Archive the stale run and resume safely")
+        return
     if data.get("gate_error"):
         console.action("cw error", "View gate integrity details")
         console.action("cw repair", "Repair workflow metadata")
@@ -85,10 +94,15 @@ def _render_completed(console: Console, data: dict[str, Any], *, verbose: bool) 
     _progress(console, data["approved_count"], data["phase_count"])
     console.line()
     _metric(console, "Approved", f"{data['approved_count']} / {data['phase_count']} phases")
+    _metric(console, "State", "COMPLETED")
+    _metric(console, "Plan", str(data["plan"]))
     console.line()
     for phase in data["phases"]:
         marker = SUCCESS if data["gate_states"].get(phase["id"]) == "approved" else WARNING
         console.phase(marker, phase["number"], phase["name"], indent=4)
+    console.line()
+    console.rule()
+    console.wrapped(f"{data['approved_count']} approved · 0 active · 0 remaining", 2)
     console.line()
     console.wrapped("All configured gates are valid.", 2)
     _status_actions(console, data)
@@ -148,6 +162,31 @@ def _render_no_plan(console: Console, data: dict[str, Any], *, verbose: bool) ->
 
 
 def render_status(console: Console, data: dict[str, Any], *, verbose: bool = False) -> None:
+    if not data.get("consistent", True):
+        console.header("Workflow Integrity")
+        console.line()
+        console.line(f"  {console.style(ERROR, '31')} {console.style('STATE INCONSISTENT', '1;31')}")
+        console.line()
+        _metric(console, "Current phase", str(data.get("phase") or "none"), 18)
+        _metric(console, "Valid gates", f"through {data.get('approved_through') or 'none'}", 18)
+        _metric(console, "Expected phase", str(data.get("expected_phase") or "workflow complete"), 18)
+        console.line()
+        console.wrapped("CW will not continue with contradictory state.", 2)
+        if data.get("invalid_gates"):
+            console.line()
+            console.line(f"  {console.style(WARNING, '33')} {console.style('Approval gate invalidated', '1;33')}")
+            for phase_id in data["invalid_gates"]:
+                phase = next((item for item in data.get("phases", []) if item["id"] == phase_id), None)
+                label = f"{phase['number']}  {phase['name']}" if phase else phase_id
+                console.wrapped(f"{WARNING} {label}", 4)
+        if verbose:
+            console.line()
+            console.subsection("Consistency details")
+            for issue in data.get("consistency_issues", []):
+                console.wrapped(f"{WARNING} {issue}", 2)
+        console.line()
+        console.run("cw repair")
+        return
     if not data["phases"]:
         _render_no_plan(console, data, verbose=verbose)
         return
@@ -230,6 +269,20 @@ def render_status(console: Console, data: dict[str, Any], *, verbose: bool = Fal
         _metric(console, "Completed", f"{batch.get('completed_phases', 0)} / {batch.get('requested_phases', 0)}", 14)
         remaining = max(0, int(batch.get("requested_phases", 0)) - int(batch.get("completed_phases", 0)))
         _metric(console, "Remaining", str(remaining), 14)
+
+    managed_run = data.get("run")
+    if isinstance(managed_run, dict):
+        console.line()
+        console.subsection("Execution")
+        console.rule()
+        console.line()
+        _metric(console, "Run", str(managed_run.get("run_id", "unknown")), 14)
+        run_state = "INTERRUPTED" if managed_run.get("stale") else str(managed_run.get("status", "UNKNOWN")).replace("_", " ")
+        _metric(console, "State", run_state, 14)
+        _metric(console, "Activity", str(managed_run.get("last_activity", "Codex working")), 14)
+        if managed_run.get("stale"):
+            console.line()
+            console.wrapped(f"{WARNING} The CW supervisor and managed Codex process are no longer running.", 2)
 
     _status_actions(console, data)
     if verbose:
@@ -328,7 +381,28 @@ def render_start(console: Console, data: dict[str, Any]) -> None:
     console.line(f"{console.style(SUCCESS, '32')} Previous gates verified")
     console.line(f"{console.style(SUCCESS, '32')} Project ready")
     console.line()
-    console.line(console.style("Starting Codex…", "36"))
+    console.line(console.style(f"{ACTIVE} Starting Codex session…", "36"))
+
+
+def render_completed_action(
+    console: Console,
+    workflow: Any,
+    *,
+    title: str = "Codex Workflow",
+    detail: str = "All configured approval gates are valid. No implementation session was started.",
+) -> None:
+    console.header(title)
+    console.line(f"  {console.style(SUCCESS, '32')} {console.style('WORKFLOW COMPLETE', '1;32')}")
+    console.line()
+    console.field("Approved", f"{len(workflow.phases)} / {len(workflow.phases)} phases")
+    console.wrapped(detail, 2)
+
+
+def render_completed_start(console: Console, workflow: Any) -> None:
+    render_completed_action(console, workflow)
+    console.line()
+    console.action("cw status", "View the completed workflow")
+    console.action("cw history", "View the audit trail")
 
 
 def render_transition(console: Console, approved: Any, following: Any | None) -> None:
@@ -489,7 +563,10 @@ def render_help(console: Console) -> None:
             ("review", "Run independent review"),
             ("retry", "Retry failed operation"),
             ("history", "View workflow audit trail"),
+            ("explain", "Explain workflow integrity or blockers"),
             ("run", "Run a bounded multi-phase batch"),
+            ("inspect", "Inspect a managed Codex execution"),
+            ("logs", "View structured execution events"),
         )),
         ("Maintenance", (
             ("doctor", "Check environment"),
@@ -518,6 +595,12 @@ def render_help(console: Console) -> None:
     console.line("  cw run --resume       Resume an interrupted batch")
     console.line("  --max-time DURATION   Set the wall-clock budget")
     console.line("  --dry-run             Preview without launching Codex")
+    console.line()
+    console.line(console.style("Observability", "1"))
+    console.line("  cw inspect session    Inspect the active/latest run")
+    console.line("  cw logs --run ID      View structured execution events")
+    console.line("  cw doctor --performance  Show measured startup timings")
+    console.line("  cw doctor --processes    Show CW-managed process state")
 
 
 def render_update_check(console: Console, data: dict[str, Any]) -> None:

@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from cw.core.errors import CwError, ErrorCode
 from cw.core.models import WorkflowState
+from cw.core.progress import derive_effective_workflow_state
 from cw.execution.batch import BatchOutcome, BatchRunner
 from cw.execution.budget import ExecutionBudget
 from cw.execution.config import load_execution_settings
@@ -15,7 +16,7 @@ from cw.execution.duration import format_duration, parse_duration
 from cw.execution.estimator import ExecutionEstimator
 from cw.execution.session import batch_lock, completed_phase_durations, load_batch, save_batch
 from cw.ui.console import Console, emit_json
-from cw.ui.renderers import render_batch_outcome, render_batch_preview
+from cw.ui.renderers import render_batch_outcome, render_batch_preview, render_completed_action
 
 
 RootResolver = Callable[[], Path]
@@ -36,6 +37,25 @@ def command_run(
     _, state, workflow = context(root)
     if not workflow.phases:
         raise CwError("Development plan required", ErrorCode.PLAN_REQUIRED, "Run: cw plan", exit_code=3)
+    effective_state = derive_effective_workflow_state(root, workflow, state)
+    if effective_state.is_complete:
+        payload = {
+            "status": "COMPLETED",
+            "approved": effective_state.approved_count,
+            "phases": len(workflow.phases),
+            "available_phases": 0,
+            "implementation_started": False,
+        }
+        if args.json:
+            emit_json(payload)
+        else:
+            render_completed_action(
+                console,
+                workflow,
+                title="Batch Run",
+                detail="0 phases are available to run. No implementation session was started.",
+            )
+        return 0
     settings = load_execution_settings(root)
     existing = load_batch(root)
     if (

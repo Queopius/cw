@@ -103,6 +103,18 @@ class CliCommandModuleTests(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertEqual("CW by Queopius", payload["brand"])
         self.assertEqual("Codex Workflow", payload["product"])
+        self.assertIn("executable", payload)
+        self.assertIn("runtime", payload)
+        self.assertIn("build", payload)
+
+    def test_version_verbose_exposes_build_and_stale_source_detection(self):
+        args = parse_args(["version", "--verbose"])
+        output = io.StringIO()
+        command_version(args, Console(stream=output))
+        rendered = output.getvalue()
+        self.assertIn("Executable", rendered)
+        self.assertIn("Runtime", rendered)
+        self.assertIn("Build", rendered)
 
 
 if __name__ == "__main__":

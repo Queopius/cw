@@ -36,6 +36,19 @@ environment surface is `CW_NO_UPDATE_CHECK=1` and
 `CW_UPDATE_CHANNEL=stable|beta|dev`; CI suppresses automatic checks by default.
 Stable never selects prereleases.
 
+Live execution uses conservative global observability thresholds:
+
+```toml
+[observability]
+heartbeat_seconds = 60
+quiet_threshold_seconds = 90
+```
+
+Set them with `cw config set observability.<key> N`. A heartbeat is emitted
+only after real events have been quiet; the later warning is advisory and never
+terminates Codex. Both use a monotonic clock. Quiet and JSON modes still retain
+the redacted structured run record.
+
 Integration requirements are project metadata, not connection configuration:
 
 ```toml
@@ -72,7 +85,7 @@ Command-line phase/time requests remain subject to the effective cap. This
 prevents a repository from silently raising a user's global unattended-execution
 limits.
 
-CW v0.3 enforces `max_review_attempts`, `command_timeout`, `review_timeout`,
+CW v0.4 enforces `max_review_attempts`, `command_timeout`, `review_timeout`,
 `allow_network`, and `human_gate_categories` at runtime. Positive integers are
 required. Network access is denied by default for implementer shell commands;
 when denied, live web search is disabled for that Codex invocation as well.

@@ -11,6 +11,7 @@ from .reviews import validate_reviewer_result
 from .schema import schema_version
 from .state import load_state
 from .utils import load_json, safe_project_path, sha256_file
+from .utils import sha256_bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +19,50 @@ class ProtectedSnapshot:
     roots: tuple[str, ...]
     entries: dict[str, str]
     state: dict[str, Any] | None
+    phase_contract: str | None = None
+
+
+def phase_contract_fingerprint(workflow: Workflow, phase: Phase) -> str:
+    """Hash immutable semantic inputs for one implementation session.
+
+    Operational metadata such as project/state writer versions and timestamps
+    is deliberately absent. Those files remain separately protected against
+    implementation-agent writes by the managed-metadata snapshot.
+    """
+    import json
+
+    payload = {
+        "workflow": workflow.id,
+        "workflow_version": workflow.version,
+        "phase": {
+            "id": phase.id,
+            "name": phase.name,
+            "objective": phase.objective,
+            "depends_on": list(phase.depends_on),
+            "artifacts": list(phase.artifacts),
+            "review_paths": list(phase.review_paths),
+            "required_commands": [
+                {"command": command.command, "timeout_seconds": command.timeout_seconds}
+                for command in phase.required_commands
+            ],
+            "acceptance_criteria": [
+                {"id": criterion.id, "description": criterion.description, "severity": criterion.severity.value}
+                for criterion in phase.acceptance_criteria
+            ],
+            "blocking_criteria": list(phase.blocking_criteria),
+            "requires_human_approval": phase.requires_human_approval,
+            "required_integrations": list(phase.required_integrations),
+        },
+        "policy": {
+            "max_review_attempts": workflow.max_review_attempts,
+            "allow_network": workflow.allow_network,
+            "command_timeout": workflow.command_timeout,
+            "review_timeout": workflow.review_timeout,
+            "protected_paths": list(workflow.protected_paths),
+            "human_gate_categories": list(workflow.human_gate_categories),
+        },
+    }
+    return sha256_bytes(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
 
 
 def _normalized_root(root: Path, value: str) -> tuple[str, Path]:
@@ -30,7 +75,13 @@ def _normalized_root(root: Path, value: str) -> tuple[str, Path]:
     return relative, path
 
 
-def snapshot_protected_paths(root: Path, paths: tuple[str, ...]) -> ProtectedSnapshot:
+def snapshot_protected_paths(
+    root: Path,
+    paths: tuple[str, ...],
+    *,
+    workflow: Workflow | None = None,
+    phase: Phase | None = None,
+) -> ProtectedSnapshot:
     entries: dict[str, str] = {}
     normalized: list[str] = []
     state: dict[str, Any] | None = None
@@ -61,7 +112,8 @@ def snapshot_protected_paths(root: Path, paths: tuple[str, ...]) -> ProtectedSna
                 entries[child_relative] = sha256_file(child)
             else:
                 raise CwError(f"Protected path contains a special file: {child_relative}", ErrorCode.PROTECTED_PATH_MODIFIED)
-    return ProtectedSnapshot(tuple(normalized), entries, state)
+    contract = phase_contract_fingerprint(workflow, phase) if workflow is not None and phase is not None else None
+    return ProtectedSnapshot(tuple(normalized), entries, state, contract)
 
 
 def _is_new_review(path: str) -> bool:
@@ -240,6 +292,8 @@ def verify_protected_paths(
     phase: Phase,
     before: ProtectedSnapshot,
 ) -> None:
+    if before.phase_contract is not None and before.phase_contract != phase_contract_fingerprint(workflow, phase):
+        raise CwError("Phase contract changed during implementation", ErrorCode.PROTECTED_PATH_MODIFIED)
     try:
         after = snapshot_protected_paths(root, before.roots)
     except CwError as exc:

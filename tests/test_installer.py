@@ -8,8 +8,22 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.install import copy_runtime
+from cw.core.build import git_build
+
 
 class InstallerTests(unittest.TestCase):
+    def test_runtime_contains_source_build_fingerprint(self):
+        project = Path(__file__).resolve().parents[1]
+        expected = git_build(project)
+        with tempfile.TemporaryDirectory(prefix="cw-build-") as temporary:
+            destination = Path(temporary) / "runtime"
+            destination.mkdir()
+            copy_runtime(project, destination)
+            metadata = json.loads((destination / "BUILD.json").read_text(encoding="utf-8"))
+        self.assertEqual(expected, metadata["commit"])
+        self.assertEqual("source-install", metadata["source"])
+
     def test_idempotent_source_independent_install(self):
         project = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory(prefix="cw-installer-") as temporary:

@@ -96,7 +96,7 @@ class SchemaCompatibilityTests(unittest.TestCase):
             self.assertEqual(1, _json(path)["schema_version"], path.name)
         workflow = load_workflow(self.repo.root)
         result = audit_history(self.repo.root, workflow, load_state(self.repo.root))
-        self.assertEqual({"reviews": 1, "gates": 1, "events": 0}, result)
+        self.assertEqual({"reviews": 1, "gates": 1, "events": 1}, result)
 
 
 class HistoricalAuditTests(unittest.TestCase):
