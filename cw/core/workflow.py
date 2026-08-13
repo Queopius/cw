@@ -8,8 +8,9 @@ from typing import Any
 from .commands import command_arguments
 from .errors import CwError, ErrorCode
 from .layout import safe_file
-from .models import Workflow
+from .models import PlanStatus, Workflow
 from .schema import schema_version
+from .severity import CANONICAL_CRITERION_SEVERITIES
 from .utils import atomic_write, safe_project_path, sha256_bytes
 
 
@@ -40,6 +41,11 @@ def load_workflow(root: Path, *, allow_empty: bool = True) -> Workflow:
             raise CwError("Plan has not been created.", ErrorCode.INVALID_STATE, "Run: cw plan")
         raise CwError("Missing phases.yaml", ErrorCode.SCHEMA_VALIDATION_ERROR)
     data = _read_document(path)
+    return workflow_from_document(root, data)
+
+
+def workflow_from_document(root: Path, data: dict[str, Any]) -> Workflow:
+    """Parse and strictly validate an already-loaded canonical workflow."""
     schema_version(data, "Workflow plan")
     meta = data.get("workflow", {})
     settings = data.get("settings", {})
@@ -64,6 +70,10 @@ def load_workflow(root: Path, *, allow_empty: bool = True) -> Workflow:
 
 
 def validate_workflow(root: Path, workflow: Workflow) -> None:
+    try:
+        PlanStatus(workflow.status)
+    except ValueError as exc:
+        raise CwError("Workflow plan status is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR) from exc
     if not workflow.id or workflow.id != workflow.repository:
         raise CwError("Workflow identity is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
     ids = [phase.id for phase in workflow.phases]
@@ -78,6 +88,16 @@ def validate_workflow(root: Path, workflow: Workflow) -> None:
             raise CwError(f"Phase ID is invalid: {phase.id}", ErrorCode.SCHEMA_VALIDATION_ERROR)
         if any(dep not in known for dep in phase.depends_on):
             raise CwError(f"Phase {phase.id} has a missing or future dependency", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if len(phase.depends_on) != len(set(phase.depends_on)):
+            raise CwError(f"Phase {phase.id} has duplicate dependencies", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if len(phase.artifacts) != len(set(phase.artifacts)):
+            raise CwError(f"Phase {phase.id} has duplicate artifacts", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if len(phase.review_paths) != len(set(phase.review_paths)):
+            raise CwError(f"Phase {phase.id} has duplicate review paths", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if len(phase.required_integrations) != len(set(phase.required_integrations)) or any(
+            not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", value) for value in phase.required_integrations
+        ):
+            raise CwError(f"Phase {phase.id} has invalid required integrations", ErrorCode.SCHEMA_VALIDATION_ERROR)
         for artifact in phase.artifacts:
             if any(char in artifact for char in "*?["):
                 raise CwError(f"Phase {phase.id} artifact cannot be a glob", ErrorCode.SCHEMA_VALIDATION_ERROR)
@@ -87,7 +107,7 @@ def validate_workflow(root: Path, workflow: Workflow) -> None:
                 raise CwError(f"Phase {phase.id} targets protected workflow metadata", ErrorCode.SCHEMA_VALIDATION_ERROR)
             safe_project_path(root, value)
         for criterion in phase.acceptance_criteria:
-            if criterion.severity not in {"blocking", "advisory"}:
+            if criterion.severity.value not in CANONICAL_CRITERION_SEVERITIES:
                 raise CwError(f"Criterion severity is invalid: {criterion.id}", ErrorCode.SCHEMA_VALIDATION_ERROR)
             if criterion.id in criteria:
                 raise CwError(f"Duplicate criterion: {criterion.id}", ErrorCode.SCHEMA_VALIDATION_ERROR)
@@ -112,7 +132,11 @@ def write_workflow(path: Path, payload: dict[str, Any]) -> None:
 
 
 def set_plan_status(root: Path, status: str) -> None:
+    try:
+        canonical = PlanStatus(status).value
+    except ValueError as exc:
+        raise CwError("Workflow plan status is invalid", ErrorCode.INVALID_STATE) from exc
     path = root / ".codex" / "workflow" / "phases.yaml"
     data = _read_document(path)
-    data.setdefault("workflow", {})["status"] = status
+    data.setdefault("workflow", {})["status"] = canonical
     write_workflow(path, data)

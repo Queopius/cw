@@ -186,7 +186,7 @@ class InitAndSecurityTests(unittest.TestCase):
             state = load_state(target.root)
             self.assertEqual("NOT_CREATED", workflow.status)
             self.assertEqual((), workflow.phases)
-            self.assertEqual("UNINITIALIZED", state["status"])
+            self.assertEqual("INITIALIZED", state["status"])
             self.assertEqual([], list((target.root / ".cw/reviews").iterdir()))
             self.assertEqual([], list((target.root / ".cw/gates").iterdir()))
             self.assertEqual([], list((target.root / ".cw/logs").iterdir()))

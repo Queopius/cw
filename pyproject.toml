@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-workflow"
-version = "0.1.3"
+dynamic = ["version"]
 description = "CW by Queopius — plan, build, validate, and review software one verified phase at a time."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,12 +25,17 @@ cw = "cw.cli.main:main"
 [tool.setuptools]
 include-package-data = true
 
+[tool.setuptools.dynamic]
+version = {file = ["VERSION"]}
+
 [tool.setuptools.packages.find]
 include = ["cw*"]
 
 [tool.setuptools.package-data]
 cw = [
   "schemas/*.json",
+  "schemas/codex/*.json",
+  "release_history.json",
   "templates/*.md",
   "templates/.codex/*.json",
   "templates/.codex/hooks/*.py",

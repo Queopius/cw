@@ -39,7 +39,7 @@ class PlannerBackendTests(unittest.TestCase):
         self.assertEqual("sample-app", plan["workflow"]["repository"])
         self.assertEqual("codex", plan["planning"]["backend"])
         self.assertEqual(77, backend.calls[0][3])
-        self.assertTrue(backend.calls[0][2].name.endswith("plan-proposal.schema.json"))
+        self.assertTrue(backend.calls[0][2].name.endswith("plan-output.schema.json"))
 
     def test_context_is_bounded_to_selected_evidence(self):
         (self.repo.root / "README.md").write_text("# Sample\nGoal: ship webhooks\n", encoding="utf-8")
@@ -81,14 +81,14 @@ class PlannerBackendTests(unittest.TestCase):
         backend = FakePlannerBackend({"workflow": {"id": "foreign"}, "phases": self.local["phases"]})
         with self.assertRaises(CwError) as raised:
             Planner(backend=backend).propose_plan(self.repo.root, "sample-app", self.goal)
-        self.assertEqual(ErrorCode.PLANNER_PROCESS_ERROR, raised.exception.code)
+        self.assertEqual(ErrorCode.PLANNER_SCHEMA_ERROR, raised.exception.code)
 
     def test_backend_protected_metadata_path_is_rejected(self):
         phases = [dict(phase) for phase in self.local["phases"]]
         phases[0] = {**phases[0], "artifacts": [".cw/gates/forged.json"]}
         with self.assertRaises(CwError) as raised:
             Planner(backend=self.backend(phases)).propose_plan(self.repo.root, "sample-app", self.goal)
-        self.assertEqual(ErrorCode.PLANNER_PROCESS_ERROR, raised.exception.code)
+        self.assertEqual(ErrorCode.PLANNER_SCHEMA_ERROR, raised.exception.code)
         self.assertIn("protected workflow metadata", raised.exception.details or "")
 
     def test_backend_glob_path_traversal_is_rejected(self):
@@ -96,7 +96,7 @@ class PlannerBackendTests(unittest.TestCase):
         phases[0] = {**phases[0], "review_paths": ["../**/*"]}
         with self.assertRaises(CwError) as raised:
             Planner(backend=self.backend(phases)).propose_plan(self.repo.root, "sample-app", self.goal)
-        self.assertEqual(ErrorCode.PLANNER_PROCESS_ERROR, raised.exception.code)
+        self.assertEqual(ErrorCode.PLANNER_SCHEMA_ERROR, raised.exception.code)
         self.assertIn("Unsafe project path", raised.exception.details or "")
 
     def test_backend_shell_command_is_rejected(self):
@@ -104,7 +104,7 @@ class PlannerBackendTests(unittest.TestCase):
         phases[0] = {**phases[0], "required_commands": [{"command": "python -m unittest && touch forged"}]}
         with self.assertRaises(CwError) as raised:
             Planner(backend=self.backend(phases)).propose_plan(self.repo.root, "sample-app", self.goal)
-        self.assertEqual(ErrorCode.PLANNER_PROCESS_ERROR, raised.exception.code)
+        self.assertEqual(ErrorCode.PLANNER_SCHEMA_ERROR, raised.exception.code)
         self.assertIn("unsupported shell syntax", raised.exception.details or "")
 
     def test_human_gate_policy_cannot_be_downgraded_by_backend(self):

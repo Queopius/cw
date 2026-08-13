@@ -28,6 +28,9 @@ existing project-relative file inside the phase's artifacts or `review_paths`.
 
 Approval fails closed for missing, duplicated, or invented criteria; unknown or
 ambiguous evidence; any failed blocking criterion; or remaining blocking issues.
+An advisory criterion is still evaluated and requires evidence, but its failure
+alone does not block approval. CW records the configured canonical severity in
+the review evidence and does not accept severity as reviewer-controlled input.
 
 Semantic `REVISE` results increment the phase attempt. Timeouts, network errors,
 transport errors, process crashes, and invalid reviewer transport output set

@@ -4,6 +4,121 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.3.0 — 2026-08-13
+
+- Add controlled multi-phase execution through `cw run N`, `--phases`,
+  `--until`, bounded duration budgets, safe previews, and interrupted-session
+  resume without introducing an unlimited autopilot mode.
+- Enforce default one-phase, two-hour, three-revision budgets; warn for extended
+  runs; require explicit confirmation for large runs; and reject more than ten
+  phases under the default global policy.
+- Reuse the canonical single-phase implement/validate/review/gate supervisor and
+  verify every new approval gate before advancement and again at batch completion.
+- Persist batch state separately from workflow state, retain structured duration
+  history, use monotonic runtime accounting, stop on human gates and errors, and
+  preserve completed progress across interruption.
+- Add safe global/project execution-policy precedence, dry-run JSON, batch status
+  presentation, fake-clock regression tests, and an independent update lock guard.
+- Isolate optional Codex MCP failures from planner/reviewer results, add required
+  phase integration preflight, structured MCP diagnostics, deduplication, and
+  read-oriented integration health commands without storing credentials.
+- Recover a narrowly recognized orphan readiness after a retained REVISE result
+  by backing up metadata, rerunning approved deterministic checks, binding a new
+  session, and returning the same phase to review without reimplementation.
+
+## 0.2.0 — 2026-08-13
+
+- Add an explicit, consent-based CW update command with cached release checks,
+  stable/beta/dev channels, release information, and machine-readable output.
+- Introduce strict release manifests, trusted GitHub release origins, mandatory
+  SHA-256 verification, hardened archive extraction, staged smoke tests, and an
+  atomic managed-installation switch.
+- Preserve the prior healthy installation for rollback, serialize updates with
+  a global lock, recover interrupted staging, and retain a bounded version set.
+- Migrate the canonical user installer to independent version directories and a
+  stable launcher while protecting editable/source installations from updates.
+- Keep CW application updates separate from project workflow migrations and
+  make background update-check failures non-blocking and private by design.
+- Fix planner structured-output compatibility and introduce the intentional
+  `INITIALIZED` lifecycle/no-plan interface for clean repositories.
+
+## 0.1.6 — 2026-08-13
+
+- Persist clean repositories as `INITIALIZED` after `cw init` and render a
+  dedicated no-plan screen without phase, validation, readiness, or gate UI.
+- Prevent start and validation from running before a plan exists, with concise
+  human-action guidance and no implementer invocation or workflow mutation.
+- Separate full internal schemas from Codex-facing structured-output schemas,
+  guard the latter centrally against unsupported keywords, and retain semantic
+  uniqueness checks in the Python domain.
+- Fix planning against Codex structured output by removing unsupported
+  `uniqueItems` constraints from the Codex-facing plan schema while retaining
+  them in CW's internal contract.
+- Prioritize explicit API schema errors over unrelated MCP startup noise,
+  classify schema incompatibility as non-retryable, and preserve successful
+  structured results even when diagnostic stderr contains MCP failures.
+- Run planner requests as direct external, ephemeral, read-only `codex exec`
+  children using the user's normal authentication environment and separated
+  stdout/stderr capture.
+
+## 0.1.5 — 2026-08-13
+
+- Replace the prototype-style flat status view with a width-aware workflow
+  dashboard, a semantic progress bar, a dominant current-phase panel, a spaced
+  plan timeline, concise health summaries, and contextual next actions.
+- Establish a restrained reusable terminal visual system for headers, sections,
+  alignment, wrapping, symbols, semantic color, and compact phase transitions.
+- Redesign start, validation, review, doctor, history, diagnostics, help, and
+  completed-workflow views around consistent daily, verbose, and machine modes.
+- Preserve readable ASCII progress in colorless and redirected output, disable
+  ANSI for `NO_COLOR` and non-TTY streams, and cap wide layouts while degrading
+  cleanly in narrow terminals.
+- Add colorless golden UI fixtures and visual regression coverage without adding
+  a runtime presentation dependency.
+
+## 0.1.4 — 2026-08-13
+
+- Advance non-final approvals directly to the next configured phase with
+  `IN_PROGRESS`, attempt zero, pending gate, and consumed readiness; complete
+  the workflow immediately when the final configured phase is approved.
+- Normalize legacy `PROPOSED` plans only when verified gates prove execution,
+  and repair stale post-approval state without altering review or gate evidence.
+- Reconstruct the phase audit view from validated gates and reviews, retaining
+  revisions and recovered infrastructure failures while deduplicating legacy
+  approval records around the canonical gate.
+- Separate current position from verified approval count in status output and
+  render invalid, approved, current, and pending phases from actual gate state.
+- Add a dedicated terminal theme, symbols, and renderer layer with compact
+  status, history, doctor, plan, start, review, and diagnostic presentation.
+- Keep JSON free of presentation formatting, honor `NO_COLOR`, disable ANSI for
+  non-TTY output, wrap long phase names, and reserve paths/details for verbose
+  mode.
+
+- Begin the v0.2 CLI modularization by extracting lifecycle, execution,
+  validation, review, retry, status, history, doctor, diagnostics,
+  configuration, and version use cases behind injected command services while
+  preserving the public parser and compatibility seams.
+- Separate argument normalization and the public grammar from injected command
+  dispatch and its structured top-level error boundary.
+- Add atomic, locked `cw config set` project overrides with strict typed value
+  validation, safe-path enforcement, and consistent global flag placement.
+- Recover prototype-era reviewer infrastructure failures through structured,
+  retryable operation metadata without consuming semantic review attempts.
+- Make `cw repair` back up and classify legacy reviewer system errors, preserve
+  valid readiness, and correct historically inflated attempt counts.
+- Make `cw retry` perform deterministic recovery: reuse valid readiness or
+  validate existing artifacts and regenerate only the readiness manifest before
+  invoking the independent reviewer.
+- Centralize criterion severity as `blocking` and `advisory`, normalize the
+  documented prototype alias `non-blocking` to `advisory` during backup-first
+  repair, and keep unknown values fail-closed.
+- Preserve and strictly validate prototype review/gate evidence without rewriting
+  it, including hashes created before schema metadata was appended and archived
+  inactive gates.
+- Persist configured canonical severity in CW review records, reject reviewer
+  severity reinterpretation, and surface failed advisory criteria as non-blocking
+  observations.
+
 ## 0.1.3 — 2026-08-13
 
 - Preserve review evidence as append-only records with exclusive atomic creation,
