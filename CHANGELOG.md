@@ -4,6 +4,8 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.5.1 — 2026-08-14
+
 - Upgrade the public documentation experience with a task-oriented homepage,
   verified CLI and error references, responsive light/dark styling, and
   deterministic offline checks for command drift and internal links.
