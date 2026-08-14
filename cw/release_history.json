@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.5.2",
+      "changes": [
+        "Added native Windows installation and centralized cross-platform process, path, locking, and runtime activation boundaries.",
+        "Added installed-wheel deterministic acceptance across Linux, Windows, macOS Intel, and macOS arm64.",
+        "Removed public per-page documentation edit actions while preserving canonical GitHub source access."
+      ]
+    },
+    {
       "version": "0.5.1",
       "changes": [
         "Published reproducible Read the Docs configuration with the release snapshot.",
