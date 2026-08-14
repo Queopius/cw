@@ -28,7 +28,6 @@ theme:
     - navigation.footer
     - navigation.top
     - navigation.tracking
-    - content.action.edit
     - content.code.copy
     - search.suggest
     - search.highlight
@@ -60,7 +59,7 @@ nav:
   - Project:
       - Brand Assets: assets/brand/README.md
 
-edit_uri: edit/prod/docs/
+edit_uri: ""
 
 extra_css:
   - stylesheets/brand.css
