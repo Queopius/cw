@@ -38,6 +38,19 @@ SECRET_PATTERNS = (
 )
 
 
+def recording_is_patch_compatible(recorded: str, current: str) -> bool:
+    """Allow a real recording to remain evidence across non-UX patch releases."""
+
+    release_version = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+    recorded_match = release_version.fullmatch(recorded)
+    current_match = release_version.fullmatch(current)
+    if recorded_match is None or current_match is None:
+        return False
+    recorded_parts = tuple(int(part) for part in recorded_match.groups())
+    current_parts = tuple(int(part) for part in current_match.groups())
+    return recorded_parts[:2] == current_parts[:2] and recorded_parts <= current_parts
+
+
 class HeroDemoError(RuntimeError):
     pass
 

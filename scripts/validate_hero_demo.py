@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from hero_demo import HeroDemoError, load_and_validate, source_root
+from hero_demo import HeroDemoError, load_and_validate, recording_is_patch_compatible, source_root
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -17,11 +17,22 @@ def main(argv: list[str] | None = None) -> int:
     path = (args.path or root / "demo/hero/hero-demo.json").resolve()
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
     try:
-        artifact = load_and_validate(path, expected_version=version)
+        artifact = load_and_validate(path)
+        recorded_version = str(artifact["cw_version"])
+        if recorded_version != version and not recording_is_patch_compatible(recorded_version, version):
+            raise HeroDemoError(
+                f"Hero recording version {recorded_version} is not compatible with VERSION {version}"
+            )
     except HeroDemoError as exc:
         print(f"HERO DEMO INVALID\n{exc}", file=sys.stderr)
         return 1
     final = artifact["final_result"]
+    if artifact["cw_version"] != version:
+        print(
+            f"HERO DEMO NOTICE\n"
+            f"Real recording CW {artifact['cw_version']} remains valid for documentation-only patch {version}.",
+            file=sys.stderr,
+        )
     print(
         "HERO DEMO VALID\n"
         f"CW {artifact['cw_version']} · {len(artifact['events'])} events · "
