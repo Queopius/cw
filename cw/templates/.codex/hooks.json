@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/phase_gate.py\"",
+            "command": "cw review --hook",
             "timeout": 1200,
             "statusMessage": "Validating current CW phase"
           }

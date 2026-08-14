@@ -53,6 +53,8 @@ nav:
   - Engineering:
       - Architecture: architecture.md
       - Project Layout: project-layout.md
+      - Platform Support: testing/platform-support.md
+      - Windows VM Acceptance: testing/windows-vm-acceptance.md
       - Security: security.md
       - Release Process: release-process.md
   - Project:

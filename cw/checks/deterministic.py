@@ -55,7 +55,10 @@ def load_readiness(root: Path, phase: Phase) -> dict[str, Any]:
 
 
 def _redacted_environment() -> dict[str, str]:
-    allowed = {"PATH", "LANG", "LC_ALL", "TERM", "TMPDIR", "CI", "HOME"}
+    allowed = {
+        "PATH", "PATHEXT", "LANG", "LC_ALL", "TERM", "TMPDIR", "TMP", "TEMP", "CI", "HOME",
+        "USERPROFILE", "SYSTEMROOT", "WINDIR", "COMSPEC", "LOCALAPPDATA", "APPDATA",
+    }
     return {key: value for key, value in os.environ.items() if key in allowed}
 
 
@@ -78,7 +81,7 @@ def _validate_completed_work(root: Path, workflow: Workflow, phase: Phase, resul
             ))
         command_started = time.monotonic()
         completed = subprocess.run(
-            arguments, cwd=root, shell=False, text=True,
+            arguments, cwd=root, shell=False, text=True, encoding="utf-8", errors="replace",
             capture_output=True, timeout=timeout, env=_redacted_environment(), check=False,
         )
         if sink is not None:

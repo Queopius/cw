@@ -11,6 +11,7 @@ from .layout import safe_file
 from .models import Workflow
 from .utils import atomic_write, safe_project_path
 from .toml import load_toml
+from .platform import global_config_dir
 
 CORE_PROTECTED_PATHS = (
     ".cw/state.json",
@@ -78,7 +79,7 @@ def load_config(root: Path, *, workflow: Workflow | None = None) -> dict[str, An
             "command_timeout": workflow.command_timeout,
             "review_timeout": workflow.review_timeout,
         })
-    global_path = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cw" / "config.toml"
+    global_path = global_config_dir() / "config.toml"
     project_path = root / ".cw" / "config.toml"
     safe_file(project_path, ".cw/config.toml")
     for path in (global_path, project_path):
@@ -212,7 +213,7 @@ def _render_toml(config: dict[str, Any]) -> str:
 
 
 def set_project_config(root: Path, workflow: Workflow, key: str, raw_value: str) -> tuple[Any, dict[str, Any]]:
-    global_path = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cw" / "config.toml"
+    global_path = global_config_dir() / "config.toml"
     project_path = root / ".cw" / "config.toml"
     safe_file(project_path, ".cw/config.toml")
     project = _toml(project_path)

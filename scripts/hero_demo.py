@@ -38,6 +38,19 @@ SECRET_PATTERNS = (
 )
 
 
+def recording_is_patch_compatible(recorded: str, current: str) -> bool:
+    """Allow a real recording to remain evidence across non-UX patch releases."""
+
+    release_version = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+    recorded_match = release_version.fullmatch(recorded)
+    current_match = release_version.fullmatch(current)
+    if recorded_match is None or current_match is None:
+        return False
+    recorded_parts = tuple(int(part) for part in recorded_match.groups())
+    current_parts = tuple(int(part) for part in current_match.groups())
+    return recorded_parts[:2] == current_parts[:2] and recorded_parts <= current_parts
+
+
 class HeroDemoError(RuntimeError):
     pass
 
@@ -100,7 +113,7 @@ def _run(
 ) -> CommandResult:
     started = time.monotonic()
     completed = subprocess.run(
-        list(argv), cwd=cwd, env=environment, text=True, capture_output=True,
+        list(argv), cwd=cwd, env=environment, text=True, encoding="utf-8", errors="replace", capture_output=True,
         stdin=subprocess.DEVNULL, timeout=timeout, check=False,
     )
     return CommandResult(
@@ -265,7 +278,7 @@ def _normalize_execution_events(
 
 def _source_commit(root: Path) -> str | None:
     completed = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=root, text=True,
+        ["git", "rev-parse", "HEAD"], cwd=root, text=True, encoding="utf-8", errors="replace",
         capture_output=True, timeout=5, check=False,
     )
     value = completed.stdout.strip()

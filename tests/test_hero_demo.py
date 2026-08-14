@@ -13,6 +13,7 @@ from scripts.hero_demo import (
     _normalize_execution_events,
     atomic_write_artifact,
     load_and_validate,
+    recording_is_patch_compatible,
     sanitize_public_text,
     sha256_tree,
     validate_artifact,
@@ -127,10 +128,11 @@ class HeroSanitizationTests(unittest.TestCase):
 
 
 class HeroArtifactTests(unittest.TestCase):
-    def test_committed_real_recording_matches_current_release(self) -> None:
+    def test_committed_real_recording_is_compatible_with_current_patch(self) -> None:
         path = ROOT / "demo/hero/hero-demo.json"
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-        artifact = load_and_validate(path, expected_version=version)
+        artifact = load_and_validate(path)
+        self.assertTrue(recording_is_patch_compatible(artifact["cw_version"], version))
         self.assertTrue(artifact["provenance"]["recorded_from_real_workflow"])
         self.assertEqual("COMPLETED", artifact["final_result"]["workflow_status"])
 
@@ -197,6 +199,13 @@ class HeroArtifactTests(unittest.TestCase):
     def test_version_mismatch_fails(self) -> None:
         with self.assertRaisesRegex(HeroDemoError, "does not match VERSION"):
             validate_artifact(valid_artifact(), expected_version="99.0.0")
+
+    def test_real_recording_remains_valid_for_documentation_patch(self) -> None:
+        self.assertTrue(recording_is_patch_compatible("0.5.0", "0.5.1"))
+        self.assertTrue(recording_is_patch_compatible("0.5.1", "0.5.1"))
+        self.assertFalse(recording_is_patch_compatible("0.5.1", "0.5.0"))
+        self.assertFalse(recording_is_patch_compatible("0.5.0", "0.6.0"))
+        self.assertFalse(recording_is_patch_compatible("not-a-version", "0.5.1"))
 
     def test_private_posix_path_fails(self) -> None:
         value = valid_artifact()

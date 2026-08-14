@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "cw_version", "source_commit", "generated_at", "os",
+    "os_version", "architecture", "python_version", "install_method", "tests", "delegated"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "cw_version": {"type": "string"},
+    "source_commit": {"type": "string"},
+    "generated_at": {"type": "string"},
+    "os": {"type": "string"},
+    "os_version": {"type": "string"},
+    "architecture": {"type": "string"},
+    "python_version": {"type": "string"},
+    "install_method": {"type": "string"},
+    "tests": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "detail"],
+        "properties": {
+          "status": {"enum": ["PASS", "FAIL", "SKIPPED", "NOT_CONFIGURED"]},
+          "detail": {"type": "string"}
+        }
+      }
+    },
+    "delegated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["windows", "macos", "real_codex"],
+      "properties": {
+        "windows": {"type": "string"},
+        "macos": {"type": "string"},
+        "real_codex": {"type": "string"}
+      }
+    }
+  }
+}
