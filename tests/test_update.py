@@ -93,12 +93,12 @@ class UpdateFixture:
         old_install = self.paths.versions / "0.1.5"
         old.rename(old_install)
         self.paths.share.mkdir(parents=True, exist_ok=True)
-        os.symlink(Path("versions/0.1.5"), self.paths.current)
+        module_path = old_install / "cw/update/installation.py"
+        self.installation = ManagedInstallation(self.paths, module_path=module_path)
+        self.installation.pointer.activate("0.1.5")
         self.archive = archive_tree(base, make_release_tree(base, target, smoke_ok=smoke_ok), target)
         self.manifest_path = base / "manifest.json"
         self.manifest_path.write_text(json.dumps(manifest_dict(target, self.archive)), encoding="utf-8")
-        module_path = old_install / "cw/update/installation.py"
-        self.installation = ManagedInstallation(self.paths, module_path=module_path)
         self.provider = CountingProvider(self.manifest_path)
         self.cache = UpdateCache(base / "config/update.json")
         self.service = UpdateService(
@@ -191,7 +191,11 @@ class UpdateServiceTests(unittest.TestCase):
         _, result = self.fixture.service.install()
         self.assertIsNotNone(result)
         self.assertEqual("0.2.0", self.fixture.installation.active_version())
-        self.assertEqual(Path("versions/0.2.0"), self.fixture.paths.current.readlink())
+        self.assertEqual("0.2.0", self.fixture.installation.pointer.active_version())
+        if os.name == "nt":
+            self.assertEqual("0.2.0", self.fixture.paths.current.read_text(encoding="utf-8").strip())
+        else:
+            self.assertEqual(Path("versions/0.2.0"), self.fixture.paths.current.readlink())
         self.assertTrue((self.fixture.paths.versions / "0.1.5").is_dir())
         state = json.loads(self.fixture.paths.state.read_text())
         self.assertEqual("0.1.5", state["previous_version"])
