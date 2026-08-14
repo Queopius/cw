@@ -35,8 +35,8 @@ development. It separates planning from implementation, runs deterministic
 checks before semantic review, invokes an independent read-only reviewer, and
 records SHA-256 approval gates before allowing another phase to begin.
 
-CW v0.4 is an early release. It is designed for local Git repositories and
-offers bounded—not unlimited—autonomy.
+CW is designed for local Git repositories and offers bounded—not unlimited—
+autonomy. Use `cw version --verbose` for the installed build identity.
 
 ## Quick start
 
@@ -61,7 +61,7 @@ atomically selects it through `current`, and creates the stable launcher
 
 ```text
 ╭──────────────────────────────────────────────────────────────╮
-│ CW · Codex Workflow                                   v0.4.2 │
+│ CW · Codex Workflow                                <version> │
 │ by Queopius                                                  │
 ╰──────────────────────────────────────────────────────────────╯
 

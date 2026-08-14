@@ -1,104 +1,244 @@
-# Troubleshooting
+# Troubleshooting CW by symptom
 
-Start with:
+Start with local, read-only evidence:
 
 ```bash
+cw status
 cw doctor
+cw error
+```
+
+`cw error` reads the independent diagnostic store even when workflow state is
+corrupt. Add `--raw` only when you need the complete redacted diagnostic and
+internal traceback.
+
+## Workflow state invalid
+
+**Symptom:** `STATE_INCONSISTENT`, a current phase that appears behind valid
+gates, or a completed workflow that still has an active phase.
+
+**Likely cause:** cached `.cw/state.json`, readiness, `last_gate`, or history no
+longer agrees with the validated contiguous approval chain.
+
+**Safe diagnosis and recovery:**
+
+```bash
+cw explain
+cw doctor
+cw repair
 cw status
 ```
 
-Normal status output shows a short classified error. Use `cw error` for the
-structured stored details and `cw error --raw` for the complete redacted
-diagnostic, including an internal traceback when available. This command reads
-the independent diagnostic store and can still work if workflow state is corrupt.
+CW validates phase order, dependencies, every relevant gate, linked reviews,
+and artifacts before repair. It creates a backup, reconciles operational state,
+archives stale readiness/errors, and preserves valid gates. If all configured
+gates validate, repair sets `COMPLETED` with no current phase.
 
-- **Project workflow mismatch:** run `cw repair`; CW backs up metadata first.
-  If the fingerprint proves this is the same Git repository under a new name,
-  repair rebinds identity and preserves its plan. If the fingerprint belongs to
-  another repository, repair quarantines that metadata in the backup and resets
-  the active project to `NOT_CREATED` / `INITIALIZED`; run `cw plan` next.
-- **Schema requires migration:** run `cw repair`. CW creates a metadata backup,
-  upgrades known schema-less prototype records atomically, and leaves application
-  source files untouched.
-- **Criterion severity `non-blocking`:** this is a recognized prototype value.
-  `cw repair` backs up the exact workflow and migrates it to the canonical
-  `advisory` value. Current plans accept only `blocking` and `advisory`; every
-  other value fails closed.
-- **Metadata created by a newer CW schema:** upgrade CW before continuing. Do not
-  use repair to downgrade it; CW deliberately leaves the newer document intact.
-- **History integrity failure:** inspect `cw doctor --json` and the referenced
-  file under `.cw/reviews/`, `.cw/gates/`, or `.cw/state.json`. CW will not delete
-  or regenerate historical approval evidence automatically.
-- **State/gate mismatch:** run `cw explain`, then `cw repair`. CW validates the
-  contiguous gate chain, preserves every valid approval, archives the prior state
-  in `.cw/backups/`, and advances cached state to the first phase without a gate.
-  `cw status` deliberately does not repair or render a contradictory timeline.
-- **Reviewer unavailable or timed out:** preserve readiness and run `cw retry`.
-  CW records the failure as a retryable `review` operation and does not consume
-  a semantic attempt. If an older project has only `reviewer_result: null` plus
-  `system_error`, run `cw repair` first; repair backs up and classifies that
-  record, corrects the attempt count, and preserves a valid readiness manifest.
-  Direct `cw retry` also performs this backup-first migration when needed.
-- **Legacy reviewer error with no readiness:** run `cw retry`. CW first checks
-  current artifacts, dependency gates, and configured deterministic commands.
-  If they pass, it regenerates only readiness and invokes the reviewer; it never
-  reruns the complete implementation automatically. Missing or failing work
-  remains in `ERROR` with an actionable validation failure.
-- **Planner unavailable, invalid, or timed out:** CW preserves the pending goal,
-  writes no partial plan, and `cw retry` reruns planning.
-- **Implementer stopped unexpectedly:** CW preserves the current phase, records
-  the process failure without consuming a semantic review attempt, and `cw retry`
-  restarts the implementer rather than the reviewer. If the implementer already
-  produced valid readiness, retry continues directly with review instead.
-- **Codex configuration invalid:** inspect `cw error` and
-  `cw doctor --codex --verbose`. CW classifies errors such as `invalid
-  transport in mcp_servers.<id>` as deterministic `CODEX_CONFIG_ERROR`; blind
-  retry is not offered. `cw version --verbose` shows the executable, runtime,
-  build commit, and source comparison so an outdated managed install is visible.
-  CW never writes a `transport` field, injects a partial `mcp_servers.*`
-  override, or edits global Codex configuration. Redacted child stdout/stderr
-  is retained in `.cw/logs/codex-runs.jsonl`; optional MCP warnings are
-  diagnostic only when the Codex operation succeeds.
-- **Approval gate invalidated:** do not overwrite the gate; run
-  `cw repair --reopen <phase>`. CW backs up metadata and invalidates dependent
-  gates before returning that phase to implementation.
-- **Hook trust required:** review the hook in Codex with `/hooks`.
-- **Readiness session mismatch:** the manifest belongs to an earlier implementer
-  invocation. Inspect it, then restart the phase; do not copy runtime manifests
-  between sessions or repositories. `cw repair` backs up and removes corrupt
-  session/readiness pairs.
-- **Orphan readiness after a retained revision:** when a valid `REVISE` review
-  and protected-path stop prove the phase context, `cw repair` backs up the
-  original metadata, reruns only commands from the approved plan, binds a fresh
-  session, and returns that same phase to `READY_FOR_REVIEW`. It does not create
-  a gate, reuse the prior review as approval, or modify application files.
-- **Stale implementer session:** if no readiness exists, run `cw repair`; CW
-  backs up metadata and removes the orphan lease. If readiness exists, run
-  `cw review` so completed implementation is not restarted unnecessarily.
-- **Implementer stopped without readiness:** inspect `cw error`, then run
-  `cw retry`. CW removes the incomplete lease and starts a new implementer
-  session without consuming a semantic review attempt.
-- **Another operation is active:** wait; if its process died, the next operation
-  automatically recognizes the stale lock.
-- **Managed path cannot be a symlink:** replace the reported `.cw`, `.codex`, or
-  managed file with a real repository-local directory/file. CW will not follow
-  it or repair through it because doing so could modify data outside the repo.
-- **Plan goal unclear:** improve local documentation or pass `cw plan --goal`.
-- **Optional MCP returns HTTP 500:** run `cw integrations check`. CW reports the
-  normalized provider error and impact without printing response HTML. Optional
-  failures do not block unrelated phases.
-- **MCP authentication required:** authenticate through Codex/provider tooling;
-  CW does not own credentials. `invalid_token`/`AuthRequired` is classified
-  separately from a provider HTTP 500.
-- **Required MCP disabled or missing:** inspect `cw integrations` and the current
-  phase's `required_integrations`. CW fails closed before implementation and
-  never enables or edits global Codex configuration automatically.
-- **Update check unavailable:** continue normal workflow use. Checks are cached
-  and non-critical. Use `cw update --check` later for an explicit retry.
-- **Update checksum or smoke test failed:** the active version was not switched.
-  Inspect `cw error`; project data was not touched.
+**Do not:** delete gate files, edit `state.json`, or reopen an approved phase to
+make counters line up. Normal `cw repair` fabricates no approval and changes no
+application file.
 
-Detailed local diagnostics live under `.cw/logs/`. CW never prints Python stack
-traces during normal daily commands. Common tokens, authorization headers,
-password assignments, and URL credentials are redacted before persistence, but
-diagnostics should still be handled as sensitive local metadata.
+## Protected workflow metadata changed
+
+**Symptom:** `PROTECTED_PATH_MODIFIED` after an implementation session.
+
+**Likely cause:** the implementer changed the phase contract or CW-owned
+evidence, or trusted CW metadata was changed without a coherent baseline update.
+
+**Safe diagnosis:**
+
+```bash
+cw error
+cw explain
+cw doctor --verbose
+```
+
+The phase contract includes phase definition, acceptance criteria, dependencies,
+policy, required commands, and human-gate requirements. CW-managed operational
+metadata is updated only through supervisor transactions.
+
+**Do not:** remove protected paths from policy or copy metadata from another
+repository. Run normal `cw repair` only when its explanation identifies a
+reconcilable CW-managed metadata mismatch.
+
+## Starting Codex appears stuck
+
+**Symptom:** no visible progress after session startup.
+
+**Safe diagnosis:**
+
+```bash
+cw inspect session
+cw doctor --processes
+cw doctor --performance
+```
+
+CW transitions away from startup when the child exists and the first structured
+event arrives. A quiet live process is not a dead process; an active child
+command is reported separately. Heartbeats and inactivity warnings are
+non-destructive.
+
+**Do not:** launch a second `cw` process in the same project. The project lock and
+run identity prevent duplicate implementers.
+
+## Codex process stopped unexpectedly
+
+**Symptom:** `IMPLEMENTER_PROCESS_ERROR` or an interrupted run.
+
+```bash
+cw error
+cw inspect session
+cw logs
+cw retry
+```
+
+CW preserves the current phase. If readiness is valid, retry proceeds to review;
+otherwise it starts a new implementer session without consuming a semantic
+review attempt.
+
+**Do not:** hand-create `READY_FOR_REVIEW.json` or reuse a manifest from another
+session.
+
+## Codex configuration is invalid
+
+**Symptom:** `CODEX_CONFIG_ERROR`, often before session initialization.
+
+```bash
+cw error
+cw doctor --codex --verbose
+cw version --verbose
+```
+
+The diagnostic shows sanitized argv and build identity. CW does not create MCP
+`transport` keys, inject partial `mcp_servers.*` overrides, or edit global Codex
+configuration. This deterministic error is not presented as blindly retryable.
+
+## Reviewer unavailable
+
+**Symptom:** `REVIEW_TIMEOUT`, `REVIEWER_NETWORK_ERROR`, or
+`REVIEWER_PROCESS_ERROR` after implementation is ready.
+
+```bash
+cw error
+cw retry
+```
+
+CW preserves session-bound readiness and reruns only the reviewer. Infrastructure
+failure does not increment the semantic attempt. Legacy reviewer records may
+require backup-first `cw repair` before retry.
+
+**Do not:** rerun implementation merely to clear a reviewer transport failure.
+
+## Optional MCP integration failed
+
+**Symptom:** authentication, HTTP, startup, or transport diagnostics for an
+integration not required by the current phase.
+
+```bash
+cw integrations check
+cw integrations info vercel
+```
+
+Optional diagnostics have impact `NONE` when Codex exits successfully with the
+expected result. Repeated noise is deduplicated and raw HTML is not shown.
+
+**Do not:** add `mcp_servers.<name>.enabled=false`, invent a transport, or edit
+global Codex configuration solely for CW.
+
+## Required integration unavailable
+
+**Symptom:** `MCP_REQUIRED_UNAVAILABLE`, `MCP_AUTH_REQUIRED`, `MCP_DISABLED`, or
+`MCP_NOT_CONFIGURED` before agent launch.
+
+```bash
+cw integrations
+cw integrations info <name>
+cw doctor --integrations
+```
+
+Authenticate or configure the integration through Codex/provider tooling. CW
+preflights required capabilities and fails closed before implementation.
+
+## Plan cannot be created
+
+**Symptom:** `PLAN_REQUIRED`, `PLAN_UNCLEAR`, planner timeout, transport,
+network, process, or schema failure.
+
+```bash
+cw plan --goal "Describe the intended change precisely"
+cw error
+cw retry
+```
+
+CW preserves a pending goal after retryable planner infrastructure failure and
+writes no partial plan. Improve repository documentation or provide `--goal` for
+an unclear objective.
+
+## Workflow already complete
+
+**Symptom:** `cw`, `cw retry`, or `cw run` reports no pending phase.
+
+This is a safety boundary, not an error:
+
+```bash
+cw status
+cw history
+```
+
+When all configured gates validate, state is `COMPLETED`, current phase is none,
+and no implementer launches.
+
+**Do not:** reopen the first phase or remove the final gate merely to make `cw`
+run again. Create and approve a new plan through the supported planning lifecycle
+when new work is intentionally defined.
+
+## Approval gate invalidated
+
+**Symptom:** `INVALID_GATE` after an approved artifact or linked review changed.
+
+Inspect the evidence first:
+
+```bash
+cw error
+cw history --phase <phase>
+```
+
+Only when that phase must intentionally be implemented and reviewed again:
+
+```bash
+cw repair --reopen <phase>
+```
+
+!!! warning
+    Reopen backs up metadata and invalidates dependent gates. It is not a generic
+    repair flag and must never be used blindly.
+
+## Project identity or schema mismatch
+
+- `WORKFLOW_PROJECT_MISMATCH`: `cw repair` may rebind a renamed copy only when
+  repository evidence proves identity; foreign metadata is quarantined.
+- known older schema: repair migrates backup-first and atomically.
+- newer unsupported schema: upgrade CW; repair does not downgrade future data.
+- managed path is a symlink: replace it with a real repository-local path; CW
+  will not follow or repair through it.
+
+## Hook trust or readiness mismatch
+
+- `HOOK_UNTRUSTED`: inspect and trust the repository hook through Codex's hook UI.
+- readiness/session mismatch: run `cw repair` to back up and remove the corrupt
+  runtime pair; never copy readiness between sessions or repositories.
+- stale session without readiness: `cw repair` archives the orphan lease.
+- stale session with valid readiness: use `cw review` so completed work is not
+  restarted.
+
+## Update failure
+
+- `UPDATE_CHECK_ERROR`: normal project work can continue; retry the check later.
+- checksum, manifest, install, or smoke-test error: the active version was not
+  switched. Inspect `cw error`; project data was not touched.
+- rollback error: inspect the managed runtime and retained version through
+  `cw version --verbose` before another update action.
+
+Detailed redacted diagnostics live under `.cw/logs/`. They may still contain
+private project information and should be handled as sensitive local metadata.
+See the [Error reference](errors.md) for code-by-code classification.
