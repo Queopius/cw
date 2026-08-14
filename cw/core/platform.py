@@ -4,7 +4,8 @@ import ctypes
 import os
 import signal
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +113,33 @@ def popen_process_group_kwargs() -> dict[str, Any]:
     if os.name == "nt":
         return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
     return {"start_new_session": True}
+
+
+@contextmanager
+def interrupt_bridge(
+    *, platform: str | None = None, signal_module: Any = signal,
+) -> Iterator[None]:
+    """Translate the Windows console break event into ``KeyboardInterrupt``.
+
+    CW creates a separate Windows process group so it can stop the managed
+    Codex tree. Windows delivers the corresponding console event as SIGBREAK,
+    whereas CW's safe-stop path is driven by KeyboardInterrupt.
+    """
+
+    if platform_name(platform) != "nt" or not hasattr(signal_module, "SIGBREAK"):
+        yield
+        return
+    break_signal = signal_module.SIGBREAK
+    previous = signal_module.getsignal(break_signal)
+
+    def request_stop(_signum: int, _frame: Any) -> None:
+        raise KeyboardInterrupt
+
+    signal_module.signal(break_signal, request_stop)
+    try:
+        yield
+    finally:
+        signal_module.signal(break_signal, previous)
 
 
 def stop_process_group(process: subprocess.Popen[Any], *, grace_seconds: float = 5.0) -> None:

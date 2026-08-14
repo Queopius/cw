@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from cw.core.platform import (
     global_config_dir,
+    interrupt_bridge,
     popen_process_group_kwargs,
     process_is_alive,
     stop_process_group,
@@ -128,6 +129,25 @@ class AtomicAndEncodingTests(unittest.TestCase):
 
 
 class NativeProcessTests(unittest.TestCase):
+    def test_windows_break_event_uses_the_safe_keyboard_interrupt_path(self):
+        class FakeSignals:
+            SIGBREAK = 21
+
+            def __init__(self):
+                self.current = "previous"
+
+            def getsignal(self, _signum):
+                return self.current
+
+            def signal(self, _signum, handler):
+                self.current = handler
+
+        signals = FakeSignals()
+        with interrupt_bridge(platform="nt", signal_module=signals):
+            with self.assertRaises(KeyboardInterrupt):
+                signals.current(signals.SIGBREAK, None)
+        self.assertEqual("previous", signals.current)
+
     def test_known_current_and_missing_process_liveness(self):
         self.assertTrue(process_is_alive(os.getpid()))
         self.assertFalse(process_is_alive(2_147_483_647))
