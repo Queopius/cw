@@ -15,6 +15,19 @@ dev → staging → release → prod
 Promote changes with reviewed pull requests in that order. Do not force-push
 long-lived branches.
 
+## GitHub branch protection (manual)
+
+Repository maintainers should configure GitHub rulesets for `dev`, `staging`,
+`release`, and `prod`. Each long-lived branch should require a pull request and
+required status checks before merge, block force pushes, and restrict branch
+deletion. For `staging`, `release`, and `prod`, require both **CI** and
+**Platform Acceptance** before promotion.
+
+Rulesets are repository settings, not source-controlled CW behavior. Verify
+them in GitHub and do not describe them as active until that external
+configuration has been confirmed. Public source and external pull requests
+remain welcome; only maintainers decide which reviewed changes are merged.
+
 ## Creating a release
 
 1. Confirm CI passes on `release`.
