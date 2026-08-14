@@ -133,12 +133,18 @@ class NativeProcessTests(unittest.TestCase):
         self.assertFalse(process_is_alive(2_147_483_647))
 
     def test_grouped_child_streams_utf8_and_can_be_terminated(self):
+        environment = {
+            **os.environ,
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
+        }
         process = subprocess.Popen(
             [
                 sys.executable, "-c",
                 "import sys,time; print('São Paulo', flush=True); time.sleep(30)",
             ],
             text=True, encoding="utf-8", stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=environment,
             **popen_process_group_kwargs(),
         )
         self.assertEqual("São Paulo", process.stdout.readline().strip())
