@@ -8,7 +8,7 @@ console, semantic theme, bounded layout, progress model, and command renderers.
 JSON is emitted directly from domain payloads and never parsed from terminal
 text.
 
-The v0.1 CLI intentionally uses only the Python standard library. A dependency
+The CLI intentionally uses only the Python standard library. A dependency
 such as Rich was not added because the current visual system needs deterministic
 width handling, `NO_COLOR`, non-TTY fallbacks, and stable test fixtures rather
 than animation or a full-screen terminal UI. The canvas caps at 88 columns and
@@ -87,7 +87,7 @@ are revalidated in Python. A shared adapter rejects known unsupported keywords
 before starting a Codex child process, preventing schema drift from being
 misreported as a network failure.
 
-No third-party CLI/UI framework is used in v0.2. This minimizes installation
+No third-party CLI/UI framework is used. This minimizes installation
 cost, enables a self-contained global copy, and keeps behavior auditable.
 
 ## Live execution observability

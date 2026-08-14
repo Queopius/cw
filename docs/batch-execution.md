@@ -72,7 +72,7 @@ estimates.
 ## Automation
 
 `cw run N --dry-run --json` produces a stable preview without launching Codex.
-Live batch JSON is intentionally not mixed with streamed agent output in v0.3.
+Live batch JSON is intentionally not mixed with streamed agent output.
 In CI/non-interactive use, large runs must be explicitly acknowledged and human
 gates always stop. Exit code 4 represents safe partial completion caused by a
 time budget; exit code 3 represents required human action.

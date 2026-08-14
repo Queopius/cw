@@ -22,12 +22,33 @@ project/
 
 Owned by CW for workflow operation, evidence, recovery, and history.
 
+Operational metadata such as current state, writer/schema version, history, and
+migration records is mutable only through trusted CW transactions. Gates and
+reviews are retained audit evidence. Runtime session/readiness files are scoped
+to one managed execution and cannot be copied between projects.
+
 ## `.codex/`
 
 Static Codex-facing integration/configuration for the project.
 
 ## Protected paths
 
-The implementer must not be allowed to rewrite workflow criteria or CW-owned evidence.
+The implementer must not rewrite workflow criteria or CW-owned evidence.
 
-Exact protected paths are version/schema dependent and should be documented from source in each release.
+CW protects the **phase contract**: current phase definition, acceptance
+criteria, dependencies, configured commands, relevant policy, integration
+requirements, and human-gate requirements. Those are semantic inputs to the
+review and cannot be changed by the agent whose work they judge.
+
+CW also owns mutable operational metadata. A supervisor operation such as gate
+creation, advancement, repair, or schema migration updates metadata and its
+integrity baseline coherently; this is different from an implementation-agent
+mutation.
+
+At read/execute boundaries CW derives canonical state from configured ordering,
+validated dependencies, the contiguous gate chain, cached state, readiness,
+reviews, and history. Contradiction fails closed with `STATE_INCONSISTENT`; read
+commands do not silently repair it.
+
+Exact protected paths are version/schema dependent. Inspect effective policy
+with `cw config` and integrity diagnostics with `cw doctor --verbose`.

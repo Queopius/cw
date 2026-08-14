@@ -18,8 +18,13 @@ mkdocs serve
 Run the release-equivalent documentation gate with:
 
 ```bash
-mkdocs build --strict
+make docs-check
 ```
+
+This runs the CLI/error-reference drift checks before `mkdocs build --strict`.
+When the public parser changes, refresh the machine-readable snapshot with
+`python scripts/check_cli_docs.py --write` and update the human reference in the
+same change.
 
 Keep workflow domain logic out of shell launchers and UI modules. New state
 transitions must be explicit and tested. Never add project-specific plans,
