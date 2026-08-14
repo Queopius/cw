@@ -38,6 +38,11 @@ class CodexAdapter:
     def check_availability(self) -> bool:
         return shutil.which(self.command) is not None
 
+    def _executable(self) -> str:
+        """Return the concrete launcher path selected by the host platform."""
+
+        return shutil.which(self.command) or self.command
+
     def _require(self) -> None:
         if not self.check_availability():
             raise CwError("Codex CLI was not found", ErrorCode.CODEX_NOT_FOUND, "Install Codex and run: cw doctor")
@@ -238,7 +243,7 @@ class CodexAdapter:
         global_arguments: list[str],
         environment: dict[str, str],
     ) -> None:
-        command = [self.command, *global_arguments, "--cd", str(root), "doctor", "--json"]
+        command = [self._executable(), *global_arguments, "--cd", str(root), "doctor", "--json"]
         invocation = record_invocation(root, "implementer-config", command, environment)
         result = self._run_captured(
             root, "implementer-config", command, environment, timeout=30,
@@ -277,7 +282,7 @@ class CodexAdapter:
         # integrations remain part of Codex's normal effective configuration;
         # CW never writes or overlays mcp_servers.* definitions.
         self._validate_implementer_configuration(root, global_arguments, environment)
-        command = [self.command, *global_arguments]
+        command = [self._executable(), *global_arguments]
         command.extend([
             "--cd", str(root), "--sandbox", "workspace-write",
             "--ask-for-approval", "never", "exec", "--color", "never",
@@ -322,7 +327,7 @@ class CodexAdapter:
             output = Path(temporary) / "result.json"
             environment = managed_codex_environment(role)
             command = [
-                self.command, "--strict-config", "--config", 'web_search="disabled"',
+                self._executable(), "--strict-config", "--config", 'web_search="disabled"',
                 "--config", "project_doc_max_bytes=0",
                 "--ask-for-approval", "never", "exec", "--ephemeral",
                 "--disable", "hooks", "--sandbox", "read-only",
