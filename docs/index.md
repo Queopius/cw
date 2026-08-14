@@ -8,9 +8,13 @@
 
 # CW — Codex Workflow
 
+**by Queopius**
+
 **Build with autonomy. Advance with evidence.**
 
 CW is a controlled workflow layer for AI-assisted software development.
+
+[Website](https://cwcli.dev) · [Source on GitHub](https://github.com/Queopius/cw)
 
 It is designed around bounded autonomy:
 

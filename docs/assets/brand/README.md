@@ -8,6 +8,12 @@ Codex Workflow
 by Queopius
 ```
 
+## Official digital identity
+
+- Website: [cwcli.dev](https://cwcli.dev)
+- Documentation: [docs.cwcli.dev](https://docs.cwcli.dev)
+- Source: [github.com/Queopius/cw](https://github.com/Queopius/cw)
+
 ## Canonical source
 
 File:
