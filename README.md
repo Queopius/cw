@@ -10,6 +10,8 @@
 
 **by Queopius**
 
+[Website](https://cwcli.dev) · [Documentation](https://docs.cwcli.dev) · [GitHub](https://github.com/Queopius/cw)
+
 [![Tests](https://github.com/Queopius/cw/actions/workflows/ci.yml/badge.svg?branch=prod)](https://github.com/Queopius/cw/actions/workflows/ci.yml)
 [![Python 3.10–3.14](https://img.shields.io/badge/python-3.10%E2%80%933.14-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![Latest release](https://img.shields.io/github/v/release/Queopius/cw?display_name=tag&sort=semver)](https://github.com/Queopius/cw/releases/latest)

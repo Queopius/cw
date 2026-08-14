@@ -58,6 +58,26 @@ make docs-check
 
 Warnings fail the documentation job and block release promotion.
 
+## Read the Docs publishing
+
+The canonical public documentation URL is <https://docs.cwcli.dev>. Read the
+Docs should build the production documentation from `prod`; `dev` may be
+activated separately as a non-default development version. Repository changes
+continue through the normal `dev → staging → release → prod` promotion path.
+The intended Read the Docs project name is `CW — Codex Workflow`, with the
+suggested slug `cw-codex-workflow`.
+
+The repository configuration prepares a reproducible strict MkDocs build, but
+domain attachment remains an external operation. After the first successful
+Read the Docs build:
+
+1. add `docs.cwcli.dev` in the Read the Docs project domain settings;
+2. obtain the exact DNS target assigned by Read the Docs;
+3. create only that supplied DNS record and verify HTTPS.
+
+Do not publish an interim `readthedocs.io` hostname as CW's canonical public
+documentation identity, and do not guess the custom-domain DNS target.
+
 Before promotion, run the offline installation/isolation demonstration:
 
 ```bash

@@ -15,7 +15,8 @@ keywords = ["cw", "codex", "workflow", "queopius"]
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/Queopius/cw"
+Homepage = "https://cwcli.dev"
+Documentation = "https://docs.cwcli.dev"
 Repository = "https://github.com/Queopius/cw.git"
 Issues = "https://github.com/Queopius/cw/issues"
 
