@@ -4,12 +4,17 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.5.2 — 2026-08-14
+
 - Add native Windows user-local installation, centralized process/path/runtime
   activation portability boundaries, and UTF-8-safe subprocess and persistence
   behavior without changing workflow or gate schemas.
 - Add installed-wheel deterministic acceptance with an external fake Codex,
   native Linux/Windows/macOS CI, manual real-Codex certification, recovery and
   update/rollback evidence, and an explicit evidence-based support policy.
+- Remove public per-page documentation edit actions while preserving the
+  canonical GitHub source link, strict MkDocs validation, and Read the Docs
+  navigation, search, themes, and technical content.
 
 ## 0.5.1 — 2026-08-14
 
