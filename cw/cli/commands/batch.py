@@ -9,6 +9,7 @@ from typing import Any, Callable
 from cw.core.errors import CwError, ErrorCode
 from cw.core.models import WorkflowState
 from cw.core.progress import derive_effective_workflow_state
+from cw.core.platform import process_is_alive
 from cw.execution.batch import BatchOutcome, BatchRunner
 from cw.execution.budget import ExecutionBudget
 from cw.execution.config import load_execution_settings
@@ -167,8 +168,4 @@ def command_run(
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except (OSError, ProcessLookupError):
-        return False
-    return True
+    return process_is_alive(pid)

@@ -72,5 +72,11 @@ jobs:
           python -m pip install -r docs/requirements.txt
       - name: Build documentation
         run: mkdocs build --strict
+      - name: Validate CLI reference
+        run: |
+          python scripts/check_cli_docs.py
+          python scripts/check_error_docs.py
+          python scripts/check_doc_links.py
+          python scripts/check_docs_policy.py
       - name: Validate committed real-workflow hero demo
         run: make demo-check

@@ -9,14 +9,10 @@ import sys
 import uuid
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-def atomic_symlink(link: Path, target: Path) -> None:
-    temporary = link.parent / f".{link.name}-{uuid.uuid4().hex}"
-    os.symlink(target, temporary)
-    try:
-        os.replace(temporary, link)
-    finally:
-        temporary.unlink(missing_ok=True)
+from cw.core.platform import platform_name
+from cw.update.installation import InstallPaths, RuntimePointer
 
 
 def copy_runtime(source: Path, destination: Path) -> None:
@@ -27,13 +23,13 @@ def copy_runtime(source: Path, destination: Path) -> None:
     for name in ("VERSION", "LICENSE", "NOTICE", "CHANGELOG.md"):
         shutil.copy2(source / name, destination / name)
     completed = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=source, text=True,
+        ["git", "rev-parse", "HEAD"], cwd=source, text=True, encoding="utf-8", errors="replace",
         capture_output=True, timeout=5, check=False,
     )
     commit = completed.stdout.strip() if completed.returncode == 0 else "unknown"
     dirty = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=source,
-        text=True, capture_output=True, timeout=5, check=False,
+        text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=5, check=False,
     )
     if commit != "unknown" and dirty.returncode == 0 and dirty.stdout.strip():
         commit += "-dirty"
@@ -54,7 +50,7 @@ def smoke(directory: Path, version: str) -> None:
     environment["CW_NO_UPDATE_CHECK"] = "1"
     result = subprocess.run(
         [sys.executable, str(directory / "entrypoint.py"), "version", "--json"],
-        cwd=directory, env=environment, text=True, capture_output=True,
+        cwd=directory, env=environment, text=True, encoding="utf-8", errors="replace", capture_output=True,
         timeout=20, check=False,
     )
     if result.returncode != 0:
@@ -87,24 +83,74 @@ def migrate_legacy(share: Path, versions: Path) -> str | None:
     return version
 
 
-def install(source: Path) -> None:
+def _launcher_script(share: Path) -> str:
+    return f'''from __future__ import annotations
+import os
+import runpy
+import sys
+from pathlib import Path
+
+share = Path({str(share)!r})
+os.environ["CW_INSTALL_ROOT"] = str(share)
+os.environ["CW_BIN_DIR"] = str(Path(__file__).resolve().parent)
+current = share / "current"
+if current.is_symlink():
+    runtime = current.resolve(strict=True)
+else:
+    version = current.read_text(encoding="utf-8").strip()
+    runtime = share / "versions" / version
+entrypoint = runtime / "entrypoint.py"
+if not entrypoint.is_file():
+    raise SystemExit("CW managed runtime is unavailable; reinstall CW")
+sys.path.insert(0, str(runtime))
+sys.argv = ["cw", *sys.argv[1:]]
+runpy.run_path(str(entrypoint), run_name="__main__")
+'''
+
+
+def _install_launcher(paths: InstallPaths, platform: str) -> Path:
+    launcher_py = paths.bin / "cw-launcher.py"
+    temporary_py = paths.bin / f".cw-launcher-{uuid.uuid4().hex}.py"
+    temporary_py.write_text(_launcher_script(paths.share), encoding="utf-8")
+    os.replace(temporary_py, launcher_py)
+    if platform == "nt":
+        launcher = paths.bin / "cw.cmd"
+        temporary = paths.bin / f".cw-{uuid.uuid4().hex}.cmd"
+        temporary.write_text(
+            f'@echo off\r\n"{sys.executable}" "{launcher_py}" %*\r\n',
+            encoding="utf-8",
+        )
+    else:
+        launcher = paths.bin / "cw"
+        temporary = paths.bin / f".cw-{uuid.uuid4().hex}"
+        temporary.write_text(
+            f'#!/usr/bin/env sh\nset -eu\nexec "{sys.executable}" "{launcher_py}" "$@"\n',
+            encoding="utf-8",
+        )
+        temporary.chmod(0o755)
+    os.replace(temporary, launcher)
+    return launcher
+
+
+def install(
+    source: Path, *, paths: InstallPaths | None = None, platform: str | None = None,
+) -> None:
     home = Path.home()
-    share = home / ".local" / "share" / "cw"
-    versions = share / "versions"
-    bin_dir = home / ".local" / "bin"
+    selected_platform = platform_name(platform)
+    install_paths = paths or InstallPaths.user(platform=selected_platform)
+    share = install_paths.share
+    versions = install_paths.versions
+    bin_dir = install_paths.bin
+    pointer = RuntimePointer(install_paths, selected_platform)
     share.mkdir(parents=True, exist_ok=True)
     versions.mkdir(parents=True, exist_ok=True)
     bin_dir.mkdir(parents=True, exist_ok=True)
 
     version = (source / "VERSION").read_text(encoding="utf-8").strip()
     previous = None
-    current = share / "current"
-    if current.is_symlink():
-        try:
-            previous = current.resolve(strict=True).name
-        except OSError:
-            previous = None
-    else:
+    current = install_paths.current
+    previous = pointer.active_version()
+    if previous is None and selected_platform == "posix":
         previous = migrate_legacy(share, versions)
 
     final = versions / version
@@ -119,17 +165,22 @@ def install(source: Path) -> None:
             if final.is_symlink() or not final.is_dir():
                 raise RuntimeError("managed version path is not a regular directory")
             replaced = versions / f".replaced-{version}-{uuid.uuid4().hex}"
-            active_final = current.is_symlink() and current.resolve(strict=False) == final.resolve()
+            active_final = pointer.active_version() == version
             if active_final:
-                atomic_symlink(current, Path("versions") / stage.name)
-            os.replace(final, replaced)
+                pointer.activate(stage.name)
+            try:
+                os.replace(final, replaced)
+            except Exception:
+                if active_final:
+                    pointer.activate(version)
+                raise
             try:
                 os.replace(stage, final)
-                atomic_symlink(current, Path("versions") / version)
+                pointer.activate(version)
             except Exception:
                 if not final.exists() and replaced.exists():
                     os.replace(replaced, final)
-                atomic_symlink(current, Path("versions") / version)
+                pointer.activate(version)
                 raise
             shutil.rmtree(replaced)
     except Exception:
@@ -137,7 +188,7 @@ def install(source: Path) -> None:
             shutil.rmtree(stage)
         raise
 
-    atomic_symlink(current, Path("versions") / version)
+    pointer.activate(version)
     state = {
         "schema_version": 1,
         "current_version": version,
@@ -149,26 +200,24 @@ def install(source: Path) -> None:
     state_tmp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     os.replace(state_tmp, share / "update-state.json")
 
-    launcher_tmp = bin_dir / f".cw-{uuid.uuid4().hex}"
-    launcher_tmp.write_text(
-        '#!/usr/bin/env sh\nset -eu\nexec python3 "$HOME/.local/share/cw/current/entrypoint.py" "$@"\n',
-        encoding="utf-8",
-    )
-    launcher_tmp.chmod(0o755)
-    os.replace(launcher_tmp, bin_dir / "cw")
+    launcher = _install_launcher(install_paths, selected_platform)
 
-    path_line = 'export PATH="$HOME/.local/bin:$PATH"'
-    for rc in (home / ".profile", home / ".zshrc"):
-        rc.touch()
-        lines = rc.read_text(encoding="utf-8").splitlines()
-        if path_line not in lines:
-            with rc.open("a", encoding="utf-8") as stream:
-                stream.write(f"\n{path_line}\n")
+    if selected_platform == "posix" and not os.environ.get("CW_BIN_DIR"):
+        path_line = 'export PATH="$HOME/.local/bin:$PATH"'
+        for rc in (home / ".profile", home / ".zshrc"):
+            rc.touch()
+            lines = rc.read_text(encoding="utf-8").splitlines()
+            if path_line not in lines:
+                with rc.open("a", encoding="utf-8") as stream:
+                    stream.write(f"\n{path_line}\n")
 
     print(f"Installed CW by Queopius {version}")
-    print(f"Executable: {bin_dir / 'cw'}")
+    print(f"Executable: {launcher}")
     if str(bin_dir) not in os.environ.get("PATH", "").split(os.pathsep):
-        print('Restart your shell or run: export PATH="$HOME/.local/bin:$PATH"')
+        if selected_platform == "nt":
+            print("Open a new PowerShell session after adding the CW bin directory to your user PATH.")
+        else:
+            print('Restart your shell or run: export PATH="$HOME/.local/bin:$PATH"')
 
 
 if __name__ == "__main__":

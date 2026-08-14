@@ -17,7 +17,14 @@ from typing import Any, Iterator
 
 from cw import __version__
 from cw.core.errors import CwError, ErrorCode
-from cw.core.utils import atomic_json, sha256_file, utc_now
+from cw.core.utils import atomic_json, atomic_write, sha256_file, utc_now
+from cw.core.platform import (
+    fsync_directory,
+    platform_name,
+    process_is_alive,
+    user_bin_dir,
+    user_install_root,
+)
 
 from .models import ReleaseArtifact, ReleaseManifest, Version
 
@@ -33,8 +40,11 @@ class InstallPaths:
     bin: Path
 
     @classmethod
-    def user(cls) -> "InstallPaths":
-        return cls(Path.home() / ".local" / "share" / "cw", Path.home() / ".local" / "bin")
+    def user(cls, *, platform: str | None = None) -> "InstallPaths":
+        return cls(
+            user_install_root(platform=platform),
+            user_bin_dir(platform=platform),
+        )
 
     @property
     def versions(self) -> Path:
@@ -60,16 +70,75 @@ class InstallResult:
     rollback_available: bool
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimePointer:
+    """Cross-platform selector for the active, already-verified runtime.
+
+    POSIX retains the existing atomic symlink contract.  Native Windows uses
+    an atomically replaced UTF-8 version marker because creating symlinks can
+    require Developer Mode or elevated privileges.
+    """
+
+    paths: InstallPaths
+    platform: str = os.name
+
+    @property
+    def uses_symlink(self) -> bool:
+        return platform_name(self.platform) == "posix"
+
+    def active_version(self) -> str | None:
+        if self.uses_symlink:
+            if not self.paths.current.is_symlink():
+                return None
+            try:
+                target = self.paths.current.resolve(strict=True)
+                target.relative_to(self.paths.versions.resolve())
+            except (OSError, ValueError):
+                return None
+            return target.name
+        if not self.paths.current.is_file() or self.paths.current.is_symlink():
+            return None
+        try:
+            version = self.paths.current.read_text(encoding="utf-8").strip()
+            target = self.paths.versions / version
+        except OSError:
+            return None
+        return version if version and target.is_dir() and not target.is_symlink() else None
+
+    def activate(self, version: str) -> None:
+        target = self.paths.versions / version
+        if not target.is_dir() or target.is_symlink():
+            raise CwError("Target CW installation is invalid", ErrorCode.UPDATE_INSTALL_ERROR)
+        if not self.uses_symlink:
+            atomic_write(self.paths.current, version + "\n")
+            return
+        temporary = self.paths.share / f".current-{uuid.uuid4().hex}"
+        os.symlink(Path("versions") / version, temporary)
+        try:
+            os.replace(temporary, self.paths.current)
+        finally:
+            temporary.unlink(missing_ok=True)
+        fsync_directory(self.paths.share)
+
+
 class ManagedInstallation:
-    def __init__(self, paths: InstallPaths | None = None, *, module_path: Path | None = None) -> None:
-        self.paths = paths or InstallPaths.user()
+    def __init__(
+        self, paths: InstallPaths | None = None, *, module_path: Path | None = None,
+        platform: str | None = None,
+    ) -> None:
+        self.platform = platform_name(platform)
+        self.paths = paths or InstallPaths.user(platform=self.platform)
+        self.pointer = RuntimePointer(self.paths, self.platform)
         self.module_path = (module_path or Path(__file__)).resolve()
 
     @property
     def managed(self) -> bool:
+        active = self.pointer.active_version()
+        if active is None:
+            return False
         try:
             self.module_path.relative_to(self.paths.versions.resolve())
-            return self.paths.current.is_symlink()
+            return True
         except (OSError, ValueError):
             return False
 
@@ -78,12 +147,7 @@ class ManagedInstallation:
         return "managed" if self.managed else "development"
 
     def active_version(self) -> str:
-        if self.paths.current.is_symlink():
-            try:
-                return self.paths.current.resolve(strict=True).name
-            except OSError:
-                pass
-        return __version__
+        return self.pointer.active_version() or __version__
 
     def install_release(
         self,
@@ -194,7 +258,7 @@ class ManagedInstallation:
         environment["CW_NO_UPDATE_CHECK"] = "1"
         result = subprocess.run(
             [sys.executable, str(entrypoint), "version", "--json"],
-            cwd=directory, env=environment, text=True, capture_output=True,
+            cwd=directory, env=environment, text=True, encoding="utf-8", errors="replace", capture_output=True,
             timeout=20, check=False,
         )
         if result.returncode != 0:
@@ -256,16 +320,7 @@ class ManagedInstallation:
         return True
 
     def _switch(self, version: str) -> None:
-        target = self.paths.versions / version
-        if not target.is_dir() or target.is_symlink():
-            raise CwError("Target CW installation is invalid", ErrorCode.UPDATE_INSTALL_ERROR)
-        temporary = self.paths.share / f".current-{uuid.uuid4().hex}"
-        os.symlink(Path("versions") / version, temporary)
-        try:
-            os.replace(temporary, self.paths.current)
-        finally:
-            temporary.unlink(missing_ok=True)
-        _fsync_directory(self.paths.share)
+        self.pointer.activate(version)
 
     def _validate_staged(self, stage: Path, version: str) -> None:
         required = (stage / "cw", stage / "entrypoint.py", stage / "VERSION", stage / "LICENSE", stage / "NOTICE")
@@ -355,23 +410,7 @@ def safe_extract_release(archive: Path, destination: Path) -> None:
 
 
 def _pid_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def _fsync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    return process_is_alive(pid)
 
 
 @contextmanager

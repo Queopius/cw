@@ -1,11 +1,50 @@
-# Gates and reviews
+# Understanding gates and independent review
 
-Review records are append-only. Each semantic or infrastructure result receives
-a unique timestamped name and is created atomically without replacing an existing
-file. Reopening a phase may restart its semantic attempt counter, but it never
-rewrites evidence from the earlier review cycle.
+CW deliberately gives implementation, review, and state transition to different
+actors:
 
-Validation order is fixed:
+```text
+                         CW SUPERVISOR
+                    policy · state · evidence
+                         /           \
+                        /             \
+             IMPLEMENTER             REVIEWER
+             workspace-write          read-only
+             current phase only       separate process
+                        \             /
+                         \           /
+                  validation → verified gate
+```
+
+The implementer and reviewer are sibling Codex processes supervised by CW. The
+reviewer is not a continuation of the implementation session and cannot modify
+the workspace to make its own findings pass.
+
+## What a gate means
+
+A gate is durable evidence that one configured phase passed its complete trust
+boundary. It is not a status label and is never inferred from a successful
+process exit.
+
+Approval writes `.cw/gates/<phase>.approved.json` with workflow/version, review
+reference, timestamp, optional Git commit, CW version, and artifact hashes. Gate
+validation requires:
+
+- the configured phase identity and dependencies;
+- the referenced semantic review;
+- an exact and complete acceptance-criterion set;
+- a consistent approval decision and no blocking issues;
+- the complete declared artifact set and current SHA-256 values;
+- explicit human approval when the phase requires it.
+
+Changed artifacts, review evidence, or dependencies invalidate the gate. CW
+never recreates it silently.
+
+> **No valid gate. No next phase.**
+
+## Validation before review
+
+The order is fixed:
 
 1. readiness structure and state;
 2. dependency gates;
@@ -16,36 +55,70 @@ Validation order is fixed:
 7. final SHA-256 artifact capture;
 8. independent semantic review.
 
-Commands run before the authoritative artifact hashes are captured. CW then
-revalidates dependency gates, preventing a test or formatter from silently
-changing current artifacts or previously approved dependency evidence.
+Commands run before authoritative hashes are captured. CW then revalidates
+dependencies, preventing a test or formatter from silently changing current
+artifacts or previously approved evidence.
 
-The reviewer uses a separate ephemeral `codex exec` process with `read-only`,
-approval policy `never`, hooks disabled, and a JSON output schema. It reviews
-only current-phase paths and must evaluate every acceptance criterion and every
-configured blocking criterion exactly once. Each evidence entry begins with an
-existing project-relative file inside the phase's artifacts or `review_paths`.
+## Independent reviewer contract
+
+The reviewer uses a separate ephemeral `codex exec` process with:
+
+| Property | Reviewer behavior |
+| --- | --- |
+| Sandbox | `read-only` |
+| Approval policy | `never` |
+| Hooks | disabled |
+| Output | validated structured schema |
+| Scope | current-phase artifacts and configured review paths |
+
+It evaluates every acceptance criterion and every blocking criterion exactly
+once. Each evidence entry must begin with an existing repository-relative file
+inside the allowed review scope.
 
 Approval fails closed for missing, duplicated, or invented criteria; unknown or
-ambiguous evidence; any failed blocking criterion; or remaining blocking issues.
-An advisory criterion is still evaluated and requires evidence, but its failure
-alone does not block approval. CW records the configured canonical severity in
-the review evidence and does not accept severity as reviewer-controlled input.
+ambiguous evidence; failed blocking criteria; or unresolved blocking issues. An
+advisory criterion still requires evaluation and evidence, but its failure alone
+does not block approval. Criterion severity comes from the approved plan, never
+from reviewer-controlled output.
 
-Semantic `REVISE` results increment the phase attempt. Timeouts, network errors,
-transport errors, process crashes, and invalid reviewer transport output set
-`ERROR` without consuming a semantic attempt. `cw retry` reuses the existing
-session-bound readiness manifest and does not restart implementation. If the
-implementer itself exits after writing readiness but before the Stop hook
-finishes, retry also proceeds directly to review.
+## Semantic decisions and infrastructure failures
 
-Approval writes `.cw/gates/<phase>.approved.json` with workflow/version, review
-reference, timestamp, optional Git commit, CW version, and artifact hashes.
-Gate validation requires the referenced semantic review, an exact criterion set,
-a consistent decision, the complete declared artifact set, and the required
-human-approval marker. Changed approved artifacts or review evidence invalidate
-the gate; CW never recreates it silently.
-After semantic approval of a human-gated phase, `cw review --human-approve` is
-the explicit local action that creates its gate. CW revalidates the review
-identity, decision, complete criterion set, blocking issues, and artifact hashes
-before accepting that human approval; invalid evidence creates no gate.
+These outcomes have different accounting:
+
+| Outcome | Meaning | Semantic attempt consumed? | Normal recovery |
+| --- | --- | ---: | --- |
+| `APPROVE` | Criteria pass | No additional revision | CW verifies and creates the gate |
+| `REVISE` | Implementation needs semantic correction | Yes | Same phase runs again |
+| `HUMAN_REVIEW_REQUIRED` | Policy requires a person | No | Explicit human approval |
+| Timeout/network/process/schema failure | Review could not produce a decision | No | `cw retry` when classified retryable |
+
+Infrastructure failures preserve valid session-bound readiness so retry can run
+only the reviewer. If the implementer exits after writing readiness but before
+the Stop hook completes, retry also proceeds directly to review.
+
+!!! note "Optional integrations"
+    Optional MCP startup or authentication diagnostics cannot turn an otherwise
+    successful structured reviewer result into a semantic failure. Required
+    integrations are preflighted before the agent starts.
+
+## Human gates
+
+After technical approval of a human-gated phase:
+
+```bash
+cw review --human-approve
+```
+
+CW revalidates review identity, decision, complete criteria, blocking issues,
+and artifact hashes before accepting the human action. This command cannot
+bypass invalid evidence or approve a different phase.
+
+## Append-only audit evidence
+
+Review records are append-only. Each semantic or infrastructure result receives
+a unique timestamped file created atomically without replacing earlier records.
+Reopening a phase may restart its semantic counter, but it never rewrites the
+previous review cycle.
+
+Use `cw history` for the phase audit view and `cw history --phase PHASE` to
+focus on one phase.

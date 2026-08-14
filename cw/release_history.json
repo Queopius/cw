@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.5.1",
+      "changes": [
+        "Published reproducible Read the Docs configuration with the release snapshot.",
+        "Upgraded the public documentation UX and source-verified CLI reference.",
+        "Added deterministic documentation drift, error-code, and internal-link checks."
+      ]
+    },
+    {
       "version": "0.5.0",
       "changes": [
         "Added a reproducible real-workflow hero demo recording pipeline.",

@@ -9,6 +9,7 @@ from typing import Any
 from .errors import CwError, ErrorCode
 from .schema import SCHEMA_VERSION
 from .utils import atomic_json, load_json, utc_now
+from .platform import global_config_dir
 
 
 LAST_ERROR = ".cw/logs/last-error.json"
@@ -114,7 +115,7 @@ def record_diagnostic(
 
 
 def global_diagnostic_path() -> Path:
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cw" / "last-error.json"
+    return global_config_dir() / "last-error.json"
 
 
 def record_global_diagnostic(

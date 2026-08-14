@@ -33,11 +33,16 @@ class IntegrationManager:
         self.runner = runner
         self.cache_path = cache_path or config_dir() / "integrations.json"
 
+    def _executable(self) -> str:
+        """Resolve platform launchers such as the npm-provided ``codex.cmd``."""
+
+        return shutil.which(self.command) or self.command
+
     def configured(self, required: set[str] | None = None) -> tuple[Integration, ...]:
         required = required or set()
         if shutil.which(self.command) is None and self.command == "codex":
             raise CwError("Codex CLI was not found", ErrorCode.CODEX_NOT_FOUND)
-        command = [self.command, "mcp"]
+        command = [self._executable(), "mcp"]
         command.append("list")
         completed = self.runner(
             command, text=True, capture_output=True,
@@ -71,7 +76,7 @@ class IntegrationManager:
                 return cached
         configured = self.configured(required)
         command = [
-            self.command, "--strict-config", "--disable", "hooks", "--cd", str(root),
+            self._executable(), "--strict-config", "--disable", "hooks", "--cd", str(root),
             "--sandbox", "read-only", "--ask-for-approval", "never", "exec",
             "--ephemeral", "--ignore-rules", "--color", "never",
             "Integration health check only. Do not inspect project files. Reply exactly: INTEGRATIONS_OK",

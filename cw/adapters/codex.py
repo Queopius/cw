@@ -28,6 +28,7 @@ from cw.execution.events import (
     StartupProfile,
 )
 from cw.execution.observability import load_observability_settings
+from cw.core.platform import popen_process_group_kwargs, stop_process_group
 
 
 class CodexAdapter:
@@ -36,6 +37,11 @@ class CodexAdapter:
 
     def check_availability(self) -> bool:
         return shutil.which(self.command) is not None
+
+    def _executable(self) -> str:
+        """Return the concrete launcher path selected by the host platform."""
+
+        return shutil.which(self.command) or self.command
 
     def _require(self) -> None:
         if not self.check_availability():
@@ -100,10 +106,13 @@ class CodexAdapter:
             cwd=root,
             env=environment,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
             bufsize=1,
+            **popen_process_group_kwargs(),
         )
         spawned = time.monotonic()
         profile = StartupProfile(spawn_ms=max(0, round((spawned - started) * 1000)))
@@ -143,12 +152,7 @@ class CodexAdapter:
         try:
             while len(closed) < 2 or process.poll() is None:
                 if timeout is not None and time.monotonic() - started >= timeout:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=5)
+                    stop_process_group(process)
                     raise subprocess.TimeoutExpired(command, timeout)
                 try:
                     stream_name, line = output_queue.get(timeout=0.5)
@@ -184,13 +188,7 @@ class CodexAdapter:
                 sink(event)
             return_code = process.wait()
         except BaseException:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
+            stop_process_group(process)
             raise
         finally:
             stdout_thread.join(timeout=1)
@@ -229,10 +227,13 @@ class CodexAdapter:
             cwd=root,
             env=environment,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             stdin=subprocess.DEVNULL,
             timeout=timeout,
             check=False,
+            **popen_process_group_kwargs(),
         )
         return self._result(root, role, completed)
 
@@ -242,7 +243,7 @@ class CodexAdapter:
         global_arguments: list[str],
         environment: dict[str, str],
     ) -> None:
-        command = [self.command, *global_arguments, "--cd", str(root), "doctor", "--json"]
+        command = [self._executable(), *global_arguments, "--cd", str(root), "doctor", "--json"]
         invocation = record_invocation(root, "implementer-config", command, environment)
         result = self._run_captured(
             root, "implementer-config", command, environment, timeout=30,
@@ -281,7 +282,7 @@ class CodexAdapter:
         # integrations remain part of Codex's normal effective configuration;
         # CW never writes or overlays mcp_servers.* definitions.
         self._validate_implementer_configuration(root, global_arguments, environment)
-        command = [self.command, *global_arguments]
+        command = [self._executable(), *global_arguments]
         command.extend([
             "--cd", str(root), "--sandbox", "workspace-write",
             "--ask-for-approval", "never", "exec", "--color", "never",
@@ -326,7 +327,7 @@ class CodexAdapter:
             output = Path(temporary) / "result.json"
             environment = managed_codex_environment(role)
             command = [
-                self.command, "--strict-config", "--config", 'web_search="disabled"',
+                self._executable(), "--strict-config", "--config", 'web_search="disabled"',
                 "--config", "project_doc_max_bytes=0",
                 "--ask-for-approval", "never", "exec", "--ephemeral",
                 "--disable", "hooks", "--sandbox", "read-only",

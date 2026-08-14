@@ -8,7 +8,7 @@ console, semantic theme, bounded layout, progress model, and command renderers.
 JSON is emitted directly from domain payloads and never parsed from terminal
 text.
 
-The v0.1 CLI intentionally uses only the Python standard library. A dependency
+The CLI intentionally uses only the Python standard library. A dependency
 such as Rich was not added because the current visual system needs deterministic
 width handling, `NO_COLOR`, non-TTY fallbacks, and stable test fixtures rather
 than animation or a full-screen terminal UI. The canvas caps at 88 columns and
@@ -87,7 +87,7 @@ are revalidated in Python. A shared adapter rejects known unsupported keywords
 before starting a Codex child process, preventing schema drift from being
 misreported as a network failure.
 
-No third-party CLI/UI framework is used in v0.2. This minimizes installation
+No third-party CLI/UI framework is used. This minimizes installation
 cost, enables a self-contained global copy, and keeps behavior auditable.
 
 ## Live execution observability
@@ -132,20 +132,26 @@ Windows.
 GitHub release provider -> strict manifest -> download -> SHA-256
                                                        |
                                                        v
-~/.local/share/cw/                         safe extract + smoke test
+per-user CW data/                          safe extract + smoke test
 ├── versions/0.1.6/                                    |
 ├── versions/0.2.0/
 ├── versions/0.3.0/ <----------------------------------+
-├── current -> versions/0.3.0  (atomic pointer switch)
+├── current                                (atomic pointer switch)
 └── update-state.json
 ```
 
-`~/.local/bin/cw` is a stable launcher that resolves `current`; it never points
-at the development checkout. Provider, downloader, cache, installation, and
-service layers are independently injected in tests. Strict release manifests
-describe platform artifacts, SHA-256, channel, publication data, project-schema
-compatibility, and a reserved future signature field. Production accepts only
-trusted HTTPS GitHub hosts.
+On POSIX, the per-user root defaults to `~/.local/share/cw`, `current` is an
+atomically selected relative symlink, and `~/.local/bin/cw` is the stable
+launcher. On Windows, the root is `%LOCALAPPDATA%\Queopius\CW`, `current` is an
+atomically replaced UTF-8 version marker, and `bin\cw.cmd` is the stable
+launcher. The Windows representation avoids Administrator and Developer Mode
+requirements while retaining the same staged, verified, rollback-capable
+semantics. Neither launcher points at the development checkout.
+
+Provider, downloader, cache, installation, and service layers are independently
+injected in tests. Strict release manifests describe platform artifacts,
+SHA-256, channel, publication data, project-schema compatibility, and a reserved
+future signature field. Production accepts only trusted HTTPS GitHub hosts.
 
 The global update lock covers download through switch. Extraction accepts only
 bounded regular files/directories and rejects absolute paths, traversal,

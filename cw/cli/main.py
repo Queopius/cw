@@ -19,6 +19,7 @@ from cw.core.config import apply_policy, load_policy
 from cw.core.diagnostics import record_diagnostic, record_global_diagnostic
 from cw.core.errors import CwError, ErrorCode
 from cw.core.layout import validate_project_layout
+from cw.core.platform import interrupt_bridge
 from cw.core.project import load_project, repository_root
 from cw.core.state import load_state, validate_state
 from cw.core.workflow import load_workflow
@@ -256,7 +257,8 @@ def _record_error(exc: CwError, *, source: str | None = None, traceback_text: st
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    return run(parse_args(argv), commands=COMMANDS, record_error=_record_error)
+    with interrupt_bridge():
+        return run(parse_args(argv), commands=COMMANDS, record_error=_record_error)
 
 
 if __name__ == "__main__":

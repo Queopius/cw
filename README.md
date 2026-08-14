@@ -35,8 +35,8 @@ development. It separates planning from implementation, runs deterministic
 checks before semantic review, invokes an independent read-only reviewer, and
 records SHA-256 approval gates before allowing another phase to begin.
 
-CW v0.4 is an early release. It is designed for local Git repositories and
-offers bounded—not unlimited—autonomy.
+CW is designed for local Git repositories and offers bounded—not unlimited—
+autonomy. Use `cw version --verbose` for the installed build identity.
 
 ## Quick start
 
@@ -57,11 +57,34 @@ Installation creates a versioned runtime under `~/.local/share/cw/versions/`,
 atomically selects it through `current`, and creates the stable launcher
 `~/.local/bin/cw`. The installed command does not depend on this source checkout.
 
+Native Windows installation uses PowerShell and requires no Administrator
+rights:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
+```
+
+It installs under `%LOCALAPPDATA%\Queopius\CW`, activates a version through an
+atomic regular-file marker (not a privileged symlink), and exposes `cw.cmd` on
+the user `PATH`.
+
+## Platform evidence
+
+CW validates Python 3.10–3.14 on Linux and runs installed-wheel acceptance on
+Linux x86_64, Windows x86_64, macOS Apple Silicon, and macOS Intel. Platform
+support is evidence-driven: a configured job or Linux-only result is not a
+native platform PASS. Until the corresponding hosted job succeeds for a
+candidate commit, Windows/macOS remain experimental for that candidate.
+
+See [Platform support and acceptance evidence](docs/testing/platform-support.md)
+and the [native Windows VM checklist](docs/testing/windows-vm-acceptance.md).
+
 ## How it feels
 
 ```text
 ╭──────────────────────────────────────────────────────────────╮
-│ CW · Codex Workflow                                   v0.4.2 │
+│ CW · Codex Workflow                                <version> │
 │ by Queopius                                                  │
 ╰──────────────────────────────────────────────────────────────╯
 
