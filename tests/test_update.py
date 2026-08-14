@@ -20,7 +20,13 @@ from cw.update.cache import UpdateCache
 from cw.update.config import UpdateSettings, load_update_settings, set_update_setting
 from cw.update.installation import InstallPaths, ManagedInstallation, safe_extract_release
 from cw.update.models import ReleaseArtifact, ReleaseManifest, Version
-from cw.update.provider import HttpsDownloader, LocalDownloader, LocalReleaseProvider, require_trusted_url
+from cw.update.provider import (
+    HttpsDownloader,
+    LocalDownloader,
+    LocalReleaseProvider,
+    _local_file_path,
+    require_trusted_url,
+)
 from cw.update.service import UpdateService
 from cw.update.service import automatic_update_notice
 
@@ -108,6 +114,16 @@ class UpdateFixture:
 
 
 class UpdateModelTests(unittest.TestCase):
+    def test_local_file_url_paths_are_native_and_percent_decoded(self):
+        self.assertEqual(
+            r"C:\Users\Ada Lovelace\release.tar.gz",
+            _local_file_path("/C:/Users/Ada%20Lovelace/release.tar.gz", platform="nt"),
+        )
+        self.assertEqual(
+            "/tmp/CW release.tar.gz",
+            _local_file_path("/tmp/CW%20release.tar.gz", platform="posix"),
+        )
+
     def test_semver_order_and_prerelease(self):
         self.assertLess(Version.parse("0.2.0-beta.1"), Version.parse("0.2.0"))
         self.assertLess(Version.parse("0.1.9"), Version.parse("0.2.0"))

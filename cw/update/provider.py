@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import ssl
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from cw.core.errors import CwError, ErrorCode
 
@@ -23,6 +24,17 @@ TRUSTED_RELEASE_HOSTS = {
 }
 MANIFEST_ASSET = "cw-release-manifest.json"
 MAX_DOWNLOAD_BYTES = 128 * 1024 * 1024
+
+
+def _local_file_path(value: str, *, platform: str = os.name) -> str:
+    """Convert a URL path to one native local path without weakening trust checks."""
+
+    path = unquote(value)
+    if platform == "nt":
+        if len(path) >= 3 and path[0] == "/" and path[1].isalpha() and path[2] == ":":
+            path = path[1:]
+        return path.replace("/", "\\")
+    return path
 
 
 class ReleaseProvider(Protocol):
@@ -186,9 +198,9 @@ class LocalDownloader:
 
     def download(self, url: str, destination: Path) -> None:
         parsed = urlparse(url)
-        if parsed.scheme != "file":
+        if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
             raise CwError("Local downloader only accepts file URLs", ErrorCode.UPDATE_DOWNLOAD_ERROR)
-        source = Path(parsed.path).resolve()
+        source = Path(_local_file_path(parsed.path)).resolve()
         try:
             source.relative_to(self.allowed_root.resolve())
         except ValueError as exc:
