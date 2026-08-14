@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from cw.ui.console import Console, emit_json
 from cw.core.errors import CwError, ErrorCode
+from cw.core.platform import process_is_alive
 from cw.ui.renderers import (
     render_changelog, render_rollback, render_update_check, render_update_info,
     render_update_result,
@@ -101,8 +102,4 @@ def command_changelog(args: argparse.Namespace, console: Console) -> int:
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except (OSError, ProcessLookupError):
-        return False
-    return True
+    return process_is_alive(pid)

@@ -8,6 +8,7 @@ from typing import Any
 from cw.core.errors import CwError, ErrorCode
 from cw.core.toml import load_toml
 from cw.update.config import load_global_document, write_global_document
+from cw.core.platform import global_config_dir
 
 from .duration import parse_duration
 
@@ -22,7 +23,7 @@ class ExecutionSettings:
 
 
 def load_execution_settings(root: Path) -> ExecutionSettings:
-    global_path = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cw/config.toml"
+    global_path = global_config_dir() / "config.toml"
     project_path = root / ".cw/config.toml"
     global_values = _section(global_path)
     project_values = _section(project_path)

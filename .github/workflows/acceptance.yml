@@ -1,0 +1,73 @@
+name: Real Codex Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Hosted OS runner to certify
+        required: true
+        type: choice
+        default: ubuntu-24.04
+        options:
+          - ubuntu-24.04
+          - windows-2025
+          - macos-15
+          - macos-15-intel
+      codex-version:
+        description: Exact @openai/codex version to install
+        required: true
+        default: "0.147.0"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  real-codex:
+    name: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
+    env:
+      CODEX_ACCESS_TOKEN: ${{ secrets.CODEX_ACCESS_TOKEN }}
+    steps:
+      - name: Require explicitly configured Codex credentials
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CODEX_ACCESS_TOKEN)) {
+            "Real Codex acceptance is NOT CONFIGURED: add the repository secret CODEX_ACCESS_TOKEN." | Out-File -Append $env:GITHUB_STEP_SUMMARY
+            exit 1
+          }
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Set up Node.js for the pinned Codex CLI
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: "22"
+      - name: Install exact Codex and current CW
+        shell: pwsh
+        run: |
+          npm install --global "@openai/codex@${{ inputs.codex-version }}"
+          python -m pip install --no-deps .
+          codex --version
+          cw version --json
+      - name: Authenticate Codex without logging the token
+        shell: pwsh
+        run: |
+          $env:CODEX_ACCESS_TOKEN | codex login --with-access-token
+          codex login status
+      - name: Run the normal real planner, implementer, reviewer and gate path
+        shell: pwsh
+        run: |
+          $cw = (Get-Command cw -ErrorAction Stop).Source
+          $output = Join-Path $env:RUNNER_TEMP "real-codex-acceptance.json"
+          python scripts/record_hero_demo.py --yes --cw-executable $cw --output $output
+      - name: Upload sanitized real-workflow evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: real-codex-${{ inputs.runner }}
+          path: ${{ runner.temp }}/real-codex-acceptance.json
+          if-no-files-found: error

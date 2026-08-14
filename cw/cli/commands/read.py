@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import shutil
+import sys
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
@@ -52,7 +53,7 @@ DoctorProvider = Callable[[Path | None, bool, bool, bool], list[dict[str, Any]]]
 def git_branch(root: Path) -> str:
     result = subprocess.run(
         ["git", "branch", "--show-current"], cwd=root,
-        text=True, capture_output=True, check=False,
+        text=True, encoding="utf-8", errors="replace", capture_output=True, check=False,
     )
     return result.stdout.strip() or "detached HEAD"
 
@@ -238,12 +239,16 @@ def doctor_checks(
 ) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     phase = None
-    for name in ("git", "python3", "codex"):
+    for name in ("git", "codex"):
         path = shutil.which(name)
         checks.append({
-            "section": "Environment", "name": "Python" if name == "python3" else name.capitalize(),
+            "section": "Environment", "name": name.capitalize(),
             "status": "pass" if path else "error", "detail": path or "not found",
         })
+    checks.insert(1, {
+        "section": "Environment", "name": "Python", "status": "pass",
+        "detail": sys.executable,
+    })
     if root is None:
         checks.append({"section": "Environment", "name": "Repository", "status": "error", "detail": "not in a Git repository"})
         return checks

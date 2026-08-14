@@ -8,7 +8,7 @@ implementation phase.
 - Git;
 - Python 3.10 or newer;
 - the Codex CLI, installed and authenticated for planning, implementation, and review;
-- a POSIX-compatible shell for the current managed source installer.
+- a POSIX shell on Linux/macOS, or PowerShell for native Windows installation.
 
 CW resolves the active project with `git rev-parse --show-toplevel`. It never
 derives application identity from the directory where CW itself is installed.
@@ -16,6 +16,8 @@ derives application identity from the directory where CW itself is installed.
 ## Install CW
 
 Clone the canonical repository and run the managed installer:
+
+### Linux and macOS
 
 ```bash
 git clone https://github.com/Queopius/cw.git
@@ -31,10 +33,37 @@ installation.
 If the command is not immediately on `PATH`, restart the shell or run the exact
 line reported by the installer.
 
-!!! note "Native Windows installation"
-    CW's execution core includes a Windows process abstraction, but the current
-    managed source installer uses POSIX shell and symlink semantics. Do not infer
-    a native Windows installation workflow from the Linux/macOS command above.
+### Native Windows PowerShell
+
+```powershell
+git clone https://github.com/Queopius/cw.git
+Set-Location cw
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
+```
+
+The native installer requires no Administrator rights. It stages versioned
+runtimes under `%LOCALAPPDATA%\Queopius\CW`, uses an atomically replaced version
+marker instead of a privileged symlink, creates `cw.cmd`, and adds only its
+user-local bin directory to the user `PATH`. Open a new PowerShell window after
+the first installation.
+
+!!! warning "Evidence status"
+    The native Windows path is implemented and exercised by the Windows GitHub
+    Actions job. Until that job has run successfully on the candidate commit,
+    treat Windows support as **experimental**, not certified. See the current
+    [platform support and evidence policy](testing/platform-support.md).
+
+### Remove a managed installation
+
+CW does not currently provide an uninstall command. To remove it, first confirm
+the managed locations with `cw version --verbose`, close active CW processes,
+then remove only the reported CW runtime and launcher. The default POSIX paths
+are `~/.local/share/cw` and `~/.local/bin/cw`; the default Windows runtime and
+launcher are both beneath `%LOCALAPPDATA%\Queopius\CW`. On Windows, also remove
+that exact `bin` entry from the **user** PATH through Environment Variables.
+Project-local `.cw/` evidence is separate and is not removed by uninstalling the
+CLI.
 
 ## Verify the installation
 
@@ -128,7 +157,9 @@ bounded multi-phase batch.
 
 ### CW is not found
 
-Restart the shell or add `~/.local/bin` to `PATH`, then run `cw version` again.
+Restart the shell or add the reported installer bin directory to `PATH`, then
+run `cw version` again. On Windows, verify the user `PATH` contains
+`%LOCALAPPDATA%\Queopius\CW\bin` exactly once.
 
 ### Codex is missing or cannot start
 
@@ -143,8 +174,9 @@ credentials.
 ### The managed build is stale
 
 `cw version --verbose` reports `Source match NO` when the installed runtime and
-current checkout differ. Re-run `./install.sh` from the intended source build
-before testing undocumented source behavior.
+current checkout differ. Re-run `./install.sh` (POSIX) or `install.ps1`
+(PowerShell) from the intended source build before testing undocumented source
+behavior.
 
 ### An optional integration reports an error
 
