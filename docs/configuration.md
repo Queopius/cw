@@ -1,5 +1,7 @@
 # Configuration
 
+## Precedence and effective policy
+
 Configuration precedence is:
 
 ```text
@@ -10,6 +12,8 @@ defaults < ~/.config/cw/config.toml < .cw/config.toml < command-line flags
 first, then global and project files override them. A newly initialized project
 leaves its overrides commented out so it does not accidentally mask global
 preferences.
+
+## Writing validated project settings
 
 Project overrides can be written safely through the CLI:
 
@@ -23,6 +27,9 @@ The setter accepts only known settings, validates the complete effective policy
 before mutation, acquires the project operation lock, and atomically replaces
 `.cw/config.toml`. Invalid values leave the file unchanged. List values use JSON
 array syntax. Project policy settings change only the current repository.
+
+## Update preferences
+
 Update preferences are explicitly global:
 
 ```bash
@@ -35,6 +42,8 @@ Equivalent `[updates]` keys live in `~/.config/cw/config.toml`. The supported
 environment surface is `CW_NO_UPDATE_CHECK=1` and
 `CW_UPDATE_CHANNEL=stable|beta|dev`; CI suppresses automatic checks by default.
 Stable never selects prereleases.
+
+## Live execution observability
 
 Live execution uses conservative global observability thresholds:
 
@@ -49,6 +58,8 @@ only after real events have been quiet; the later warning is advisory and never
 terminates Codex. Both use a monotonic clock. Quiet and JSON modes still retain
 the redacted structured run record.
 
+## Integration requirements
+
 Integration requirements are project metadata, not connection configuration:
 
 ```toml
@@ -59,6 +70,8 @@ required = false
 CW stores no MCP URLs, tokens, or provider credentials. A phase may additionally
 declare `required_integrations`; only required capabilities participate in its
 start preflight.
+
+## Bounded execution budgets
 
 Bounded execution preferences are global:
 
@@ -85,7 +98,9 @@ Command-line phase/time requests remain subject to the effective cap. This
 prevents a repository from silently raising a user's global unattended-execution
 limits.
 
-CW v0.4 enforces `max_review_attempts`, `command_timeout`, `review_timeout`,
+## Workflow and sandbox policy
+
+CW enforces `max_review_attempts`, `command_timeout`, `review_timeout`,
 `allow_network`, and `human_gate_categories` at runtime. Positive integers are
 required. Network access is denied by default for implementer shell commands;
 when denied, live web search is disabled for that Codex invocation as well.

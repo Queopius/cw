@@ -1,4 +1,27 @@
-# Workflow
+# Workflow model
+
+CW separates five responsibilities that are often collapsed into one autonomous
+agent loop:
+
+```text
+PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW → GATE → NEXT PHASE
+```
+
+| Stage | Owner | Result |
+| --- | --- | --- |
+| Plan | Read-only planner | Explicit phases, dependencies, criteria, and commands |
+| Implement | Workspace-write implementer | Current-phase artifacts and readiness |
+| Validate | CW supervisor | Deterministic checks and final artifact hashes |
+| Review | Separate read-only reviewer | `APPROVE`, `REVISE`, or human review required |
+| Gate | CW supervisor | Verified evidence permitting advancement |
+
+Implementation is not review, deterministic validation is not semantic review,
+and reviewer approval is not yet permission to advance until CW verifies and
+persists the gate.
+
+> **No valid gate. No next phase.**
+
+## State transitions
 
 CW uses explicit states and rejects transitions outside the state graph:
 
@@ -16,12 +39,40 @@ state. A non-final phase moves immediately to the next configured phase as
 `IN_PROGRESS` with attempt zero. Approval of the final configured phase writes
 `COMPLETED`; CW never invents a successor.
 
+## Completion is a first-class state
+
+Completion comes from the complete contiguous chain of configured gates:
+
+```text
+all configured phases have valid dependency-ordered gates
+                         ↓
+                    COMPLETED
+                         ↓
+              current_phase = none
+                         ↓
+             no implementer is launched
+```
+
+The normal command, `cw retry`, and `cw run` all stop at this boundary. They do
+not retain the final approved phase as current and never wrap to the first
+phase.
+
+> **All valid gates. No next phase.**
+
+## Implementation session boundary
+
 The implementer cannot update state. It works only on the current phase, creates
 `.cw/runtime/READY_FOR_REVIEW.json`, and stops. The Stop hook delegates to the
 installed `cw review --hook`; it writes mutable data only under `.cw`.
 CW snapshots protected workflow metadata around that session and admits only the
 precise state, history, review, and gate delta produced by a valid current-phase
 review. Any other protected mutation stops the workflow in `ERROR`.
+
+CW distinguishes the immutable **phase contract**—phase definition, acceptance
+criteria, dependencies, required commands, policy, and human-gate requirements—
+from **CW-managed mutable metadata** such as runtime state, current writer
+version, history, and migration records. The supervisor may update operational
+metadata through trusted transactions; the implementation agent may not.
 
 Each `cw start` creates an atomic `.cw/runtime/implementer-session.json` and
 passes its random session ID to the implementer and Stop hook. The session also
@@ -72,6 +123,17 @@ projects an audit-oriented phase view from gates first, then reviews and
 structured events. It does not invent missing timestamps and treats the gate's
 linked review as the canonical final approval, avoiding duplicate prototype
 approval records.
+
+## Canonical state and reconciliation
+
+Renderers do not independently guess progress. CW derives effective state from
+configured phase order, dependencies, validated gates, cached state, readiness,
+reviews, and history. Only the highest contiguous valid gate chain counts.
+
+If a later gate exists beyond a broken dependency, that later file does not
+advance the workflow. If cached state points behind a healthy chain, read
+commands fail closed and `cw repair` performs backup-first reconciliation. See
+[Repairing inconsistent workflow state](troubleshooting.md#workflow-state-invalid).
 
 ## Bounded multi-phase runs
 
