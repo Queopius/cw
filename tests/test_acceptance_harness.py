@@ -6,7 +6,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.run_acceptance import AcceptanceFailure, _environment, _install_fake_codex, _result, _validate_report
+from scripts.run_acceptance import (
+    AcceptanceFailure,
+    _environment,
+    _install_fake_codex,
+    _result,
+    _sanitize_detail,
+    _validate_report,
+)
 
 
 class AcceptanceHarnessTests(unittest.TestCase):
@@ -50,6 +57,14 @@ class AcceptanceHarnessTests(unittest.TestCase):
             self.assertNotIn("PYTHONPATH", environment)
             self.assertEqual("1", environment["PYTHONUTF8"])
             self.assertIn(str(fake), environment["PATH"])
+
+    def test_failure_detail_redacts_secrets_and_private_windows_paths(self):
+        detail = _sanitize_detail(
+            r"C:\Users\Ada\AppData\Temp\fixture Authorization: Bearer private-token",
+        )
+        self.assertNotIn(r"C:\Users", detail)
+        self.assertNotIn("private-token", detail)
+        self.assertIn("[REDACTED]", detail)
 
 
 if __name__ == "__main__":

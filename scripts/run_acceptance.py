@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import signal
 import shutil
 import subprocess
@@ -20,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from cw.core.platform import popen_process_group_kwargs, process_is_alive
+from cw.core.diagnostics import redact
 
 
 FAKE_CODEX = ROOT / "tests/fixtures/fake_codex/fake_codex.py"
@@ -32,6 +34,18 @@ REPORT_KEYS = {
 
 class AcceptanceFailure(RuntimeError):
     pass
+
+
+def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str:
+    """Preserve actionable failure evidence without publishing host identity."""
+
+    clean = redact(value) or ""
+    for root in sorted({str(path) for path in private_roots if str(path)}, key=len, reverse=True):
+        clean = re.sub(re.escape(root), "<PRIVATE_ROOT>", clean, flags=re.IGNORECASE)
+        clean = re.sub(re.escape(root.replace("/", "\\")), "<PRIVATE_ROOT>", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"(?i)\b[A-Z]:\\Users\\[^\\/\r\n]+", "~", clean)
+    clean = re.sub(r"/(?:home|Users)/[^/\s\"']+", "~", clean)
+    return clean
 
 
 def _run(
@@ -433,7 +447,10 @@ def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
             tests["rollback"] = _result("PASS", "manual and failed rollback preserve healthy runtime")
         except (AcceptanceFailure, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
             exit_code = 1
-            tests.setdefault("acceptance", _result("FAIL", str(exc)))
+            tests.setdefault("acceptance", _result(
+                "FAIL",
+                _sanitize_detail(str(exc), private_roots=(base, ROOT, Path.home())),
+            ))
     tests.setdefault("interrupts", _result("SKIPPED", "native platform process suite did not complete"))
     tests.setdefault("update", _result("SKIPPED", "deterministic update transaction suite did not complete"))
     tests.setdefault("rollback", _result("SKIPPED", "deterministic rollback suite did not complete"))
