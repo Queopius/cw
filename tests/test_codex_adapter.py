@@ -13,6 +13,24 @@ from cw.core.errors import CwError, ErrorCode
 
 
 class CodexAdapterTests(unittest.TestCase):
+    def test_planner_executes_the_platform_resolved_launcher(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            schema = root / "schema.json"
+            schema.write_text("{}", encoding="utf-8")
+
+            def fake_run(command, **_kwargs):
+                output = Path(command[command.index("--output-last-message") + 1])
+                output.write_text(json.dumps({"phases": []}), encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with patch(
+                "cw.adapters.codex.shutil.which", return_value="C:/Codex/bin/codex.cmd",
+            ), patch("cw.adapters.codex.subprocess.run", side_effect=fake_run) as call:
+                CodexAdapter().run_planner(root, "plan", schema, 10)
+
+        self.assertEqual("C:/Codex/bin/codex.cmd", call.call_args.args[0][0])
+
     def test_implementer_denies_network_and_web_search_by_default(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

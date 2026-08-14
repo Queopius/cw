@@ -9,6 +9,7 @@ from typing import Any, Iterator
 
 from cw.core.errors import CwError, ErrorCode
 from cw.core.utils import atomic_json, utc_now
+from cw.core.platform import process_is_alive
 
 
 BATCH_FILE = ".cw/runtime/batch.json"
@@ -52,7 +53,7 @@ def active_batch(root: Path, *, own_pid: int | None = None) -> dict[str, Any] | 
     if not session or session.get("status") != "RUNNING":
         return None
     pid = session.get("pid")
-    if not isinstance(pid, int) or pid <= 0 or not _alive(pid):
+    if not isinstance(pid, int) or pid <= 0 or not process_is_alive(pid):
         return None
     if own_pid is not None and pid == own_pid:
         return None
@@ -115,7 +116,7 @@ def batch_lock(root: Path) -> Iterator[None]:
             data = json.loads(lock.read_text(encoding="utf-8")); pid = int(data.get("pid", 0))
         except Exception:
             pid = 0
-        if pid and _alive(pid):
+        if pid and process_is_alive(pid):
             raise CwError("Workflow batch is already running", ErrorCode.LOCKED, "Run: cw status")
         lock.unlink(missing_ok=True)
         descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -125,13 +126,3 @@ def batch_lock(root: Path) -> Iterator[None]:
         yield
     finally:
         lock.unlink(missing_ok=True)
-
-
-def _alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except (OSError, ProcessLookupError):
-        return False
-    return True

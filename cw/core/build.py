@@ -14,7 +14,7 @@ def runtime_root() -> Path:
 
 def git_build(root: Path) -> str | None:
     completed = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=root, text=True,
+        ["git", "rev-parse", "HEAD"], cwd=root, text=True, encoding="utf-8", errors="replace",
         capture_output=True, timeout=5, check=False,
     )
     value = completed.stdout.strip()
@@ -22,7 +22,7 @@ def git_build(root: Path) -> str | None:
         return None
     dirty = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=root,
-        text=True, capture_output=True, timeout=5, check=False,
+        text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=5, check=False,
     )
     return f"{value}-dirty" if dirty.returncode == 0 and dirty.stdout.strip() else value
 

@@ -10,6 +10,7 @@ from .errors import CwError, ErrorCode
 from .models import Phase, Workflow
 from .schema import SCHEMA_VERSION, schema_version
 from .utils import atomic_json, load_json, utc_now
+from .platform import process_is_alive
 
 
 SESSION_FILE = ".cw/runtime/implementer-session.json"
@@ -87,16 +88,6 @@ def load_session(root: Path, workflow: Workflow, phase: Phase) -> dict[str, Any]
     ):
         raise CwError("Implementer session metadata is invalid", ErrorCode.INVALID_STATE, "Run: cw repair")
     return data
-
-
-def process_is_alive(process_id: int) -> bool:
-    try:
-        os.kill(process_id, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
 
 
 def finish_session(root: Path) -> None:

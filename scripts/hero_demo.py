@@ -113,7 +113,7 @@ def _run(
 ) -> CommandResult:
     started = time.monotonic()
     completed = subprocess.run(
-        list(argv), cwd=cwd, env=environment, text=True, capture_output=True,
+        list(argv), cwd=cwd, env=environment, text=True, encoding="utf-8", errors="replace", capture_output=True,
         stdin=subprocess.DEVNULL, timeout=timeout, check=False,
     )
     return CommandResult(
@@ -278,7 +278,7 @@ def _normalize_execution_events(
 
 def _source_commit(root: Path) -> str | None:
     completed = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=root, text=True,
+        ["git", "rev-parse", "HEAD"], cwd=root, text=True, encoding="utf-8", errors="replace",
         capture_output=True, timeout=5, check=False,
     )
     value = completed.stdout.strip()

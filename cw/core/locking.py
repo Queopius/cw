@@ -9,14 +9,7 @@ from typing import Iterator
 from .errors import CwError, ErrorCode
 from .layout import safe_directory, safe_file
 from .utils import utc_now
-
-
-def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except (OSError, ProcessLookupError):
-        return False
+from .platform import process_is_alive
 
 
 @contextmanager
@@ -33,7 +26,7 @@ def operation_lock(root: Path, operation: str) -> Iterator[None]:
             pid = int(data.get("pid", 0))
         except Exception:
             pid = 0
-        if pid and _alive(pid):
+        if pid and process_is_alive(pid):
             raise CwError("Another CW operation is active", ErrorCode.LOCKED, "Wait for it to finish, then retry.")
         lock.unlink(missing_ok=True)
         descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)

@@ -8,6 +8,7 @@ from typing import Any
 from cw.core.errors import CwError, ErrorCode
 from cw.core.utils import atomic_write
 from cw.core.toml import load_toml
+from cw.core.platform import global_config_dir
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,7 +19,7 @@ class UpdateSettings:
 
 
 def config_dir() -> Path:
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cw"
+    return global_config_dir()
 
 
 def update_cache_path() -> Path:

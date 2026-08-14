@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import CwError, ErrorCode
+from .platform import fsync_directory
 
 
 def utc_now() -> str:
@@ -39,16 +40,12 @@ def atomic_write(path: Path, content: str) -> None:
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temporary = Path(temporary_name)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        fsync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -59,17 +56,13 @@ def atomic_write_new(path: Path, content: str) -> None:
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temporary = Path(temporary_name)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
         os.link(temporary, path)
         temporary.unlink()
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        fsync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
 
