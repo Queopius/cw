@@ -4,6 +4,10 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+- Prepare the existing MkDocs Material documentation for strict Read the Docs
+  builds at `https://docs.cwcli.dev`, with reproducible Python 3.13 build
+  configuration and canonical product/source metadata.
+
 ## 0.5.0 — 2026-08-13
 
 - Add a reproducible real-workflow recording pipeline for the future public CW
