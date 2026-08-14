@@ -56,7 +56,9 @@ Run the same strict validation used by CI with:
 make docs-check
 ```
 
-Warnings fail the documentation job and block release promotion.
+This validates the public CLI snapshot/reference, complete error-code coverage,
+local documentation links/anchors, and the strict MkDocs build. Warnings fail
+the documentation job and block release promotion.
 
 ## Read the Docs publishing
 

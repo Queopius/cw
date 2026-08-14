@@ -12,9 +12,23 @@ theme:
   name: material
   logo: assets/brand/cw-mark.png
   favicon: assets/brand/cw-mark-32.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
   features:
     - navigation.sections
+    - navigation.footer
     - navigation.top
+    - navigation.tracking
+    - content.action.edit
     - content.code.copy
     - search.suggest
     - search.highlight
@@ -25,7 +39,8 @@ nav:
       - Getting Started: getting-started.md
       - Planning: planning.md
       - Workflow: workflow.md
-  - Workflow:
+      - CLI Reference: cli-reference.md
+  - Core Workflow:
       - Gates and Reviews: gates-and-reviews.md
       - Batch Execution: batch-execution.md
       - Live Execution: live-execution.md
@@ -40,11 +55,29 @@ nav:
       - Project Layout: project-layout.md
       - Security: security.md
       - Release Process: release-process.md
+  - Project:
       - Brand Assets: assets/brand/README.md
+
+edit_uri: edit/prod/docs/
+
+extra_css:
+  - stylesheets/brand.css
+
+extra:
+  social:
+    - icon: fontawesome/solid/globe
+      link: https://cwcli.dev
+      name: CW product website
+    - icon: fontawesome/brands/github
+      link: https://github.com/Queopius/cw
+      name: CW source on GitHub
+
+copyright: Copyright 2026 Fantomid LLC · CW by Queopius · Apache-2.0
 
 markdown_extensions:
   - admonition
   - attr_list
+  - md_in_html
   - tables
   - toc:
       permalink: true

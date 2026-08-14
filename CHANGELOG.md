@@ -4,6 +4,9 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+- Upgrade the public documentation experience with a task-oriented homepage,
+  verified CLI and error references, responsive light/dark styling, and
+  deterministic offline checks for command drift and internal links.
 - Prepare the existing MkDocs Material documentation for strict Read the Docs
   builds at `https://docs.cwcli.dev`, with reproducible Python 3.13 build
   configuration and canonical product/source metadata.
