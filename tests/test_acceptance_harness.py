@@ -60,11 +60,13 @@ class AcceptanceHarnessTests(unittest.TestCase):
 
     def test_failure_detail_redacts_secrets_and_private_windows_paths(self):
         detail = _sanitize_detail(
-            r"C:\Users\Ada\AppData\Temp\fixture Authorization: Bearer private-token",
+            r"C:\\Users\\Ada\\AppData\\Temp\\fixture Authorization: Bearer private-token",
         )
-        self.assertNotIn(r"C:\Users", detail)
+        self.assertNotIn("users", detail.lower())
+        self.assertNotIn("authorization", detail.lower())
+        self.assertNotIn("bearer", detail.lower())
         self.assertNotIn("private-token", detail)
-        self.assertIn("[REDACTED]", detail)
+        self.assertIn("[REDACTED CREDENTIAL]", detail)
 
 
 if __name__ == "__main__":

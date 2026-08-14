@@ -43,8 +43,23 @@ def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str
     for root in sorted({str(path) for path in private_roots if str(path)}, key=len, reverse=True):
         clean = re.sub(re.escape(root), "<PRIVATE_ROOT>", clean, flags=re.IGNORECASE)
         clean = re.sub(re.escape(root.replace("/", "\\")), "<PRIVATE_ROOT>", clean, flags=re.IGNORECASE)
-    clean = re.sub(r"(?i)\b[A-Z]:\\Users\\[^\\/\r\n]+", "~", clean)
+    clean = re.sub(
+        r"(?i)(?:\b[A-Z]:)?[\\/]+(?:Users|Documents and Settings)[\\/]+[^\\/\r\n]+",
+        "~",
+        clean,
+    )
     clean = re.sub(r"/(?:home|Users)/[^/\s\"']+", "~", clean)
+    clean = re.sub(
+        r"(?i)authorization\s*:\s*(?:bearer|basic)\s+\S+",
+        "[REDACTED CREDENTIAL]",
+        clean,
+    )
+    clean = re.sub(
+        r"(?i)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret)"
+        r"\s*[=:]\s*\S+",
+        "[REDACTED CREDENTIAL]",
+        clean,
+    )
     return clean
 
 
