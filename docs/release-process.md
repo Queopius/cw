@@ -15,6 +15,19 @@ dev → staging → release → prod
 Promote changes with reviewed pull requests in that order. Do not force-push
 long-lived branches.
 
+## GitHub branch protection (manual)
+
+Repository maintainers should configure GitHub rulesets for `dev`, `staging`,
+`release`, and `prod`. Each long-lived branch should require a pull request and
+required status checks before merge, block force pushes, and restrict branch
+deletion. For `staging`, `release`, and `prod`, require both **CI** and
+**Platform Acceptance** before promotion.
+
+Rulesets are repository settings, not source-controlled CW behavior. Verify
+them in GitHub and do not describe them as active until that external
+configuration has been confirmed. Public source and external pull requests
+remain welcome; only maintainers decide which reviewed changes are merged.
+
 ## Creating a release
 
 1. Confirm CI passes on `release`.
@@ -24,9 +37,20 @@ long-lived branches.
    mkdocs build --strict
    ```
 
-3. Update `VERSION`, `cw.__version__`, `pyproject.toml`, and `CHANGELOG.md` in the
+3. Confirm platform acceptance for the exact release candidate:
+
+   ```bash
+   make acceptance-local
+   ```
+
+   GitHub checks must also pass for Linux x86_64, Windows x86_64, macOS arm64,
+   and macOS Intel while an official Intel runner remains available. A Linux
+   local result is not evidence for another OS. Review the uploaded sanitized
+   compatibility reports before promotion.
+
+4. Update `VERSION`, `cw.__version__`, `pyproject.toml`, and `CHANGELOG.md` in the
    release candidate.
-4. Create an annotated tag while checked out on `release`:
+5. Create an annotated tag while checked out on `release`:
 
    ```bash
    git switch release
@@ -34,11 +58,25 @@ long-lived branches.
    git push origin release v0.2.0
    ```
 
-5. Promote the tagged release commit to `prod` through review.
+6. Promote the tagged release commit to `prod` through review.
 
 The Release Check workflow rejects tags whose commit is not reachable from
 `origin/release` or whose name does not match the repository `VERSION`. It builds
 artifacts for inspection but does not publish them to PyPI.
+
+## Platform release gate
+
+The deterministic platform workflow builds and installs the wheel outside the
+checkout, executes `cw` as an external command, runs a real subprocess fake for
+the public Codex contract, and exercises completion and recovery. A stable
+release requires installation, CLI smoke, deterministic E2E, and core recovery
+to pass on each claimed supported OS.
+
+Update/rollback and native process/interrupt tests are required for the stronger
+**verified** status. The manual `Real Codex Acceptance` workflow is an additional
+attestation: it is never replaced by fake-Codex evidence and reports
+`NOT CONFIGURED` when its explicit credential is absent. See [Platform support
+and certification](testing/platform-support.md).
 
 ## Documentation validation
 

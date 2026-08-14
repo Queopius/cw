@@ -1,4 +1,4 @@
-.PHONY: test install check docs-check demo demo-hero demo-check
+.PHONY: test install check docs-check acceptance-local demo demo-hero demo-check
 
 test:
 	python3 -m unittest discover -s tests -v
@@ -9,13 +9,18 @@ check:
 	python3 scripts/check_cli_docs.py
 	python3 scripts/check_error_docs.py
 	python3 scripts/check_doc_links.py
+	python3 scripts/check_docs_policy.py
 	python3 scripts/validate_hero_demo.py
 
 docs-check:
 	python3 scripts/check_cli_docs.py
 	python3 scripts/check_error_docs.py
 	python3 scripts/check_doc_links.py
+	python3 scripts/check_docs_policy.py
 	python3 -m mkdocs build --strict
+
+acceptance-local: check docs-check
+	python3 scripts/run_acceptance.py --output artifacts/compatibility-report.json
 
 install:
 	./install.sh

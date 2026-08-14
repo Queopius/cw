@@ -176,12 +176,13 @@ def _validate_review(
         ReviewDecision.REVISE: WorkflowState.REVISION_REQUIRED,
         ReviewDecision.HUMAN_REVIEW_REQUIRED: WorkflowState.HUMAN_REVIEW_REQUIRED,
     }[decision]
-    expected_phase = phase.id if index == len(workflow.phases) - 1 else workflow.phases[index + 1].id
+    final = index == len(workflow.phases) - 1
+    expected_phase = None if final else workflow.phases[index + 1].id
     advanced = decision is ReviewDecision.APPROVE and not phase.requires_human_approval
     attempt_matches = (
-        report["attempt"] == state.get("attempt")
-        if not advanced or expected_status is WorkflowState.COMPLETED
-        else state.get("attempt") == 0
+        state.get("attempt") == 0
+        if advanced
+        else report["attempt"] == state.get("attempt")
     )
     phase_matches = not advanced or state.get("current_phase") == expected_phase
     if (
@@ -257,9 +258,9 @@ def _validate_state_evolution(
         if approved_and_advanced:
             index = workflow.index(phase.id)
             final = index == len(workflow.phases) - 1
-            expected_phase = phase.id if final else workflow.phases[index + 1].id
+            expected_phase = None if final else workflow.phases[index + 1].id
             valid_position = after.get("current_phase") == expected_phase
-            valid_attempt = after.get("attempt") == semantic_attempt if final else after.get("attempt") == 0
+            valid_attempt = after.get("attempt") == 0
         else:
             valid_position = after.get("current_phase") == before.get("current_phase")
             valid_attempt = after.get("attempt") == semantic_attempt

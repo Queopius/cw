@@ -20,7 +20,13 @@ from cw.update.cache import UpdateCache
 from cw.update.config import UpdateSettings, load_update_settings, set_update_setting
 from cw.update.installation import InstallPaths, ManagedInstallation, safe_extract_release
 from cw.update.models import ReleaseArtifact, ReleaseManifest, Version
-from cw.update.provider import HttpsDownloader, LocalDownloader, LocalReleaseProvider, require_trusted_url
+from cw.update.provider import (
+    HttpsDownloader,
+    LocalDownloader,
+    LocalReleaseProvider,
+    _local_file_path,
+    require_trusted_url,
+)
 from cw.update.service import UpdateService
 from cw.update.service import automatic_update_notice
 
@@ -93,12 +99,12 @@ class UpdateFixture:
         old_install = self.paths.versions / "0.1.5"
         old.rename(old_install)
         self.paths.share.mkdir(parents=True, exist_ok=True)
-        os.symlink(Path("versions/0.1.5"), self.paths.current)
+        module_path = old_install / "cw/update/installation.py"
+        self.installation = ManagedInstallation(self.paths, module_path=module_path)
+        self.installation.pointer.activate("0.1.5")
         self.archive = archive_tree(base, make_release_tree(base, target, smoke_ok=smoke_ok), target)
         self.manifest_path = base / "manifest.json"
         self.manifest_path.write_text(json.dumps(manifest_dict(target, self.archive)), encoding="utf-8")
-        module_path = old_install / "cw/update/installation.py"
-        self.installation = ManagedInstallation(self.paths, module_path=module_path)
         self.provider = CountingProvider(self.manifest_path)
         self.cache = UpdateCache(base / "config/update.json")
         self.service = UpdateService(
@@ -108,6 +114,16 @@ class UpdateFixture:
 
 
 class UpdateModelTests(unittest.TestCase):
+    def test_local_file_url_paths_are_native_and_percent_decoded(self):
+        self.assertEqual(
+            r"C:\Users\Ada Lovelace\release.tar.gz",
+            _local_file_path("/C:/Users/Ada%20Lovelace/release.tar.gz", platform="nt"),
+        )
+        self.assertEqual(
+            "/tmp/CW release.tar.gz",
+            _local_file_path("/tmp/CW%20release.tar.gz", platform="posix"),
+        )
+
     def test_semver_order_and_prerelease(self):
         self.assertLess(Version.parse("0.2.0-beta.1"), Version.parse("0.2.0"))
         self.assertLess(Version.parse("0.1.9"), Version.parse("0.2.0"))
@@ -191,7 +207,11 @@ class UpdateServiceTests(unittest.TestCase):
         _, result = self.fixture.service.install()
         self.assertIsNotNone(result)
         self.assertEqual("0.2.0", self.fixture.installation.active_version())
-        self.assertEqual(Path("versions/0.2.0"), self.fixture.paths.current.readlink())
+        self.assertEqual("0.2.0", self.fixture.installation.pointer.active_version())
+        if os.name == "nt":
+            self.assertEqual("0.2.0", self.fixture.paths.current.read_text(encoding="utf-8").strip())
+        else:
+            self.assertEqual(Path("versions/0.2.0"), self.fixture.paths.current.readlink())
         self.assertTrue((self.fixture.paths.versions / "0.1.5").is_dir())
         state = json.loads(self.fixture.paths.state.read_text())
         self.assertEqual("0.1.5", state["previous_version"])

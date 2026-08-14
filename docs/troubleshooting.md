@@ -12,6 +12,31 @@ cw error
 corrupt. Add `--raw` only when you need the complete redacted diagnostic and
 internal traceback.
 
+## Installation or `cw` launcher fails on one platform
+
+**Symptom:** `cw` is not found after installation, a managed runtime cannot be
+selected, or the launcher works only from the source checkout.
+
+**Safe diagnosis:**
+
+```bash
+cw version --verbose
+cw doctor
+```
+
+On Linux/macOS, inspect the installer-reported user bin directory and the
+versioned runtime under `~/.local/share/cw`. On native Windows, inspect the user
+`PATH`, `%LOCALAPPDATA%\Queopius\CW\bin\cw.cmd`, the regular `current` version
+marker, and `versions\`.
+
+Re-run the appropriate installer from the intended source commit. Both
+installers stage and smoke-test before activation; failed activation must leave
+the prior runtime usable.
+
+**Do not:** run the PowerShell installer as Administrator to work around a user
+`PATH` problem, replace the Windows marker with a Developer Mode symlink, or
+test only `python -m cw` and call the installed command healthy.
+
 ## Workflow state invalid
 
 **Symptom:** `STATE_INCONSISTENT`, a current phase that appears behind valid
@@ -242,3 +267,7 @@ cw repair --reopen <phase>
 Detailed redacted diagnostics live under `.cw/logs/`. They may still contain
 private project information and should be handled as sensitive local metadata.
 See the [Error reference](errors.md) for code-by-code classification.
+
+For OS-specific evidence and manual Windows VM execution, see [Platform
+support](testing/platform-support.md) and [Windows VM
+acceptance](testing/windows-vm-acceptance.md).

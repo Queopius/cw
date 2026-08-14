@@ -29,13 +29,13 @@ def main() -> int:
         for item in ("VERSION", "LICENSE", "NOTICE", "CHANGELOG.md"):
             shutil.copy2(root / item, stage / item)
         completed = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=root, text=True,
+            ["git", "rev-parse", "HEAD"], cwd=root, text=True, encoding="utf-8", errors="replace",
             capture_output=True, timeout=5, check=False,
         )
         commit = completed.stdout.strip() if completed.returncode == 0 else "unknown"
         dirty = subprocess.run(
             ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=root,
-            text=True, capture_output=True, timeout=5, check=False,
+            text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=5, check=False,
         )
         if commit != "unknown" and dirty.returncode == 0 and dirty.stdout.strip():
             commit += "-dirty"
