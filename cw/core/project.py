@@ -31,8 +31,9 @@ class Project:
 
 def repository_root(cwd: Path | None = None) -> Path:
     result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"], cwd=cwd, text=True,
-        encoding="utf-8", errors="replace", capture_output=True, check=False,
+        ["git", "--no-pager", "rev-parse", "--show-toplevel"], cwd=cwd,
+        stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
+        capture_output=True, check=False, timeout=5,
     )
     if result.returncode or not result.stdout.strip():
         raise CwError("Current directory is not inside a Git repository.", ErrorCode.USAGE_ERROR, "Run CW from a Git repository.", exit_code=2)
@@ -48,14 +49,16 @@ def repository_fingerprint(root: Path) -> str:
     # A non-secret repository-local UUID survives ordinary directory moves while preventing two
     # unrelated repositories with the same basename from accepting each other's CW metadata.
     identity = subprocess.run(
-        ["git", "config", "--local", "--get", "cw.repository-id"], cwd=root,
-        text=True, encoding="utf-8", errors="replace", capture_output=True, check=False,
+        ["git", "--no-pager", "config", "--local", "--get", "cw.repository-id"], cwd=root,
+        stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
+        capture_output=True, check=False, timeout=5,
     ).stdout.strip()
     if not identity:
         identity = str(uuid.uuid4())
         completed = subprocess.run(
-            ["git", "config", "--local", "cw.repository-id", identity], cwd=root,
-            text=True, encoding="utf-8", errors="replace", capture_output=True, check=False,
+            ["git", "--no-pager", "config", "--local", "cw.repository-id", identity], cwd=root,
+            stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
+            capture_output=True, check=False, timeout=5,
         )
         if completed.returncode:
             raise CwError("Unable to store repository identity", ErrorCode.RUNTIME_NOT_WRITABLE, details=completed.stderr.strip())

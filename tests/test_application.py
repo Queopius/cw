@@ -27,6 +27,7 @@ from cw.core.audit import audit_history
 from cw.core.completion import run_completion_review
 from cw.core.errors import CwError
 from cw.core.locking import operation_lock
+from cw.core.project import repository_fingerprint, repository_root
 from cw.core.state import save_state
 from cw.core.workflow import load_workflow, write_workflow, workflow_hash
 from cw.planning.planner import Planner
@@ -134,6 +135,20 @@ class ApplicationReadTests(unittest.TestCase):
             side_effect=subprocess.TimeoutExpired(["git"], 5),
         ):
             self.assertEqual("unavailable", git_branch(self.repo.root))
+
+    def test_project_identity_git_probes_cannot_consume_adapter_stdin(self) -> None:
+        responses = [
+            subprocess.CompletedProcess([], 0, stdout=f"{self.repo.root}\n", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="stable-repository-id\n", stderr=""),
+        ]
+        with patch("cw.core.project.subprocess.run", side_effect=responses) as run:
+            self.assertEqual(self.repo.root, repository_root(self.repo.root))
+            self.assertEqual(64, len(repository_fingerprint(self.repo.root)))
+        self.assertEqual(2, run.call_count)
+        for call in run.call_args_list:
+            self.assertEqual(subprocess.DEVNULL, call.kwargs["stdin"])
+            self.assertEqual(5, call.kwargs["timeout"])
+            self.assertIn("--no-pager", call.args[0])
 
     def test_project_can_be_opened_explicitly_and_exposes_opaque_handle(self) -> None:
         opened = self.application.open_project(self.repo.root / ".cw")
