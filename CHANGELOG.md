@@ -4,6 +4,22 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.7.0 — 2026-08-15
+
+- Add an OpenAI-independent application facade with structured operation
+  results, stable errors, explicit project handles, and reusable status,
+  explain, history, completion, repair, and completion-review operations.
+- Make the CLI status/context path delegate to the same application semantics
+  future adapters consume while preserving terminal UX and shared `.cw` state.
+- Add a machine-readable capability model, cross-adapter operation lifecycle,
+  canonical project scoping, shared locking, and idempotent operation identity.
+- Enforce short-lived, proposal-bound explicit human authorization for workflow
+  extensions; internal planner/reviewer origins and prompt-injected repository
+  text cannot self-approve.
+- Document the future narrow MCP tool/resource contract, plugin skill boundary,
+  local runtime threat model, package isolation, and stdio-first transport ADR
+  without shipping an MCP server or public plugin.
+
 ## 0.6.0 — 2026-08-15
 
 - Add goal-derived Completion Contracts with extensible readiness templates and

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import getpass
 import json
 import re
 import secrets
@@ -12,6 +11,7 @@ from typing import Any, Protocol
 from cw import __version__
 from cw.adapters.structured_output import codex_schema
 
+from .authorization import AuthorizationGrant, validate_authorization
 from .diagnostics import redact, state_error
 from .errors import CwError, ErrorCode
 from .gates import gate_path, validate_gate
@@ -600,19 +600,68 @@ def load_extension_proposal(root: Path, state: dict[str, Any], workflow: Workflo
     return proposal
 
 
+def _authorization_replay(
+    root: Path,
+    workflow: Workflow,
+    state: dict[str, Any],
+    grant: AuthorizationGrant,
+) -> dict[str, Any] | None:
+    directory = completion_root(root) / "authorizations"
+    if not directory.is_dir() or directory.is_symlink():
+        return None
+    for path in sorted(directory.glob("*.json")):
+        value = load_json(path)
+        if not isinstance(value, dict) or value.get("operation_id") != grant.operation_id:
+            continue
+        evidence = grant.as_evidence()
+        if any(value.get(key) != expected for key, expected in evidence.items()):
+            raise CwError(
+                "Operation identifier was already used for another authorization",
+                ErrorCode.OPERATION_CONFLICT,
+            )
+        reference = value.get("proposal_reference")
+        proposal = load_json(safe_project_path(root, str(reference), must_exist=True))
+        phases = proposal.get("phases") if isinstance(proposal, dict) else None
+        if not isinstance(phases, list) or not phases:
+            raise CwError("Authorized proposal evidence is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if value.get("decision") == "APPROVED":
+            if recover_approved_extension(root, workflow, state):
+                save_state(root, state)
+            return {
+                **value,
+                "phases": phases,
+                "current_phase": str(phases[0]["id"]),
+                "idempotent_replay": True,
+            }
+        return {**value, "idempotent_replay": True}
+    return None
+
+
 def authorize_extension(
-    root: Path, workflow: Workflow, state: dict[str, Any], *, approve: bool,
+    root: Path,
+    workflow: Workflow,
+    state: dict[str, Any],
+    *,
+    approve: bool,
+    authorization: AuthorizationGrant | None,
 ) -> dict[str, Any]:
+    if authorization is not None:
+        replay = _authorization_replay(root, workflow, state, authorization)
+        if replay is not None:
+            return replay
     if WorkflowState(str(state["status"])) is not WorkflowState.EXTENSION_PROPOSED:
         raise CwError("No extension proposal is awaiting authorization", ErrorCode.INVALID_STATE)
     proposal = load_extension_proposal(root, state, workflow)
     proposal_reference = str(state["extension_proposal"])
+    action = "extension.approve" if approve else "extension.reject"
+    grant = validate_authorization(authorization, action=action, resource_id=proposal_reference)
     decision = "APPROVED" if approve else "REJECTED"
     authorization = {
         "schema_version": SCHEMA_VERSION, "workflow": workflow.id, "target": proposal["target"],
         "cycle": proposal["cycle"], "kind": "extension_authorization", "decision": decision,
         "proposal_reference": proposal_reference, "proposal_sha256": sha256_file(root / proposal_reference),
-        "authorized_by": getpass.getuser() or "operator", "authorized_at": utc_now(),
+        **grant.as_evidence(),
+        "authorized_by": grant.actor.actor_id, "authorized_at": utc_now(),
     }
     approval_path = _persist_new(
         _directory(root, "authorizations"), f"cycle-{int(proposal['cycle']):02d}-{decision.lower()}", authorization,
@@ -701,6 +750,7 @@ def audit_completion_history(root: Path, workflow: Workflow) -> dict[str, int]:
             proposal_references.add(path.relative_to(root).as_posix())
             counts["proposals"] += 1
     directory = base / "authorizations"
+    operation_ids: set[str] = set()
     if directory.exists():
         if directory.is_symlink() or not directory.is_dir():
             raise CwError("Completion authorizations directory is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
@@ -718,6 +768,29 @@ def audit_completion_history(root: Path, workflow: Workflow) -> dict[str, int]:
                 or approval.get("proposal_sha256") != sha256_file(root / str(reference))
             ):
                 raise CwError("Extension authorization is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
+            operation_id = approval.get("operation_id")
+            if operation_id is not None:
+                expected_action = (
+                    "extension.approve" if approval.get("decision") == "APPROVED"
+                    else "extension.reject"
+                )
+                required_authorization = {
+                    "action", "resource_id", "operation_id", "actor_id", "actor_origin",
+                    "issued_at", "expires_at", "authorization_nonce",
+                }
+                if (
+                    not required_authorization.issubset(approval)
+                    or approval.get("action") != expected_action
+                    or approval.get("resource_id") != reference
+                    or approval.get("actor_origin") not in {
+                        "human_cli", "chatgpt_app", "codex_plugin",
+                    }
+                    or approval.get("authorized_by") != approval.get("actor_id")
+                    or any(not isinstance(approval.get(key), str) or not approval.get(key) for key in required_authorization)
+                    or operation_id in operation_ids
+                ):
+                    raise CwError("Extension authorization context is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
+                operation_ids.add(operation_id)
             counts["authorizations"] += 1
     if completion_gate_path(root).exists():
         validate_completion_gate(root, workflow)

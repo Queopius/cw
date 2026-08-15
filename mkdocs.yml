@@ -52,6 +52,10 @@ nav:
       - Error Reference: errors.md
   - Engineering:
       - Architecture: architecture.md
+      - Plugin Readiness: plugin-readiness.md
+      - Future MCP Contract: mcp-tool-contract.md
+      - ADR — Multi-adapter Engine: adr/0001-multi-adapter-engine.md
+      - ADR — MCP Transport: adr/0002-mcp-transport.md
       - Project Layout: project-layout.md
       - Platform Support: testing/platform-support.md
       - Windows VM Acceptance: testing/windows-vm-acceptance.md

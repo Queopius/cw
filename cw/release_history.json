@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.7.0",
+      "changes": [
+        "Added a UI-independent CW application facade and structured operation contracts.",
+        "Added scoped project handles, shared adapter locking, and idempotent human authorization.",
+        "Defined plugin skill, MCP capability, security, and transport architecture without shipping a server."
+      ]
+    },
+    {
       "version": "0.6.0",
       "changes": [
         "Separated planned-scope completion from Completion Contract satisfaction.",

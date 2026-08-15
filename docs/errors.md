@@ -103,6 +103,14 @@ with the expected structured result.
 | --- | --- | --- | --- |
 | `USAGE_ERROR` | Arguments, configuration values, or command combinations are invalid | No | Correct the command/configuration; exit code is `2` |
 
+## Application and adapter boundary errors
+
+| Code | Meaning | Retryable? | Normal recovery |
+| --- | --- | --- | --- |
+| `AUTHORIZATION_REQUIRED` | A high-consequence mutation lacks matching, current, explicit human authorization | New confirmation | Ask the operator to confirm the exact current proposal and action |
+| `OPERATION_CONFLICT` | An operation identifier was reused for a different request or another adapter holds the project lock | Context | Reuse the original request exactly, or wait and issue a new operation ID |
+| `PROJECT_SCOPE_VIOLATION` | A requested path or project handle is outside the adapter's authorized roots | No | Select an explicitly authorized CW repository |
+
 ## Safe diagnostic sequence
 
 ```bash

@@ -19,6 +19,8 @@ CW is a standard-library Python package with a console entry point.
 ```text
 cw.cli      argument parsing and thin command orchestration
 cw.cli.commands  independently testable command implementations
+cw.application UI-independent project scope, capabilities, operation results,
+               authorization context, and stable adapter facade
 cw.ui       text/ANSI/JSON presentation
 cw.core     project identity, workflow, state, locks, gates, completion, persistence
 cw.planning repository inspection and plan proposal
@@ -44,6 +46,11 @@ services explicitly. This keeps public dispatch stable while allowing commands
 to be extracted and tested without turning the entry point back into a monolith.
 Mutable configuration has its own command module; read-oriented status and
 diagnostic commands never acquire responsibility for configuration writes.
+
+`CWApplication` is the stable internal multi-adapter boundary. The CLI delegates
+context loading and canonical status construction to it; future adapters call
+the same Python operations rather than spawning `cw`. See
+[Plugin readiness architecture](plugin-readiness.md).
 
 `cw.ui.theme`, `cw.ui.symbols`, and `cw.ui.renderers` form the presentation
 boundary. Commands pass structured status, history, and diagnostic data to that

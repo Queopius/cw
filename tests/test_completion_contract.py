@@ -10,6 +10,7 @@ from unittest.mock import patch
 from cw.adapters.result import CodexRunResult
 from cw.agents.reviewer import run_review
 from cw.cli.commands.execution import command_retry
+from cw.core.authorization import Actor, ActorOrigin, issue_user_authorization
 from cw.core.completion import (
     authorize_extension,
     completion_gate_path,
@@ -118,6 +119,16 @@ class CompletionContractTests(unittest.TestCase):
             "completion_requirements": [requirement],
         }
 
+    def authorization(self, action: str = "extension.approve"):
+        reference = self.repo.state().get("extension_proposal")
+        assert isinstance(reference, str)
+        return issue_user_authorization(
+            action=action,
+            resource_id=reference,
+            operation_id=f"test-operation-{action}-{self.repo.state().get('completion_cycle', 0)}",
+            actor=Actor("test-operator", ActorOrigin.HUMAN_CLI, explicit_user_intent=True),
+        )
+
     def test_legacy_completion_semantics_are_preserved(self) -> None:
         self.approve_phases()
         state = self.repo.state()
@@ -165,6 +176,7 @@ class CompletionContractTests(unittest.TestCase):
 
         authorization = authorize_extension(
             self.repo.root, self.repo.workflow, self.repo.state(), approve=True,
+            authorization=self.authorization(),
         )
         extended = load_workflow(self.repo.root)
         self.assertEqual("03-system-hardening", authorization["current_phase"])
@@ -180,7 +192,10 @@ class CompletionContractTests(unittest.TestCase):
             CompletionBackend(self.completion_result("EXTENSION_REQUIRED", missing), [self.extension_phase(missing)]),
         )
         before = (self.repo.root / ".codex/workflow/phases.yaml").read_bytes()
-        authorize_extension(self.repo.root, self.repo.workflow, self.repo.state(), approve=False)
+        authorize_extension(
+            self.repo.root, self.repo.workflow, self.repo.state(), approve=False,
+            authorization=self.authorization("extension.reject"),
+        )
         self.assertEqual(before, (self.repo.root / ".codex/workflow/phases.yaml").read_bytes())
         self.assertEqual("PLANNED_COMPLETE", self.repo.state()["status"])
 
@@ -191,7 +206,10 @@ class CompletionContractTests(unittest.TestCase):
             self.repo.root, self.repo.workflow, self.repo.state(),
             CompletionBackend(self.completion_result("EXTENSION_REQUIRED", missing), [self.extension_phase(missing)]),
         )
-        authorize_extension(self.repo.root, self.repo.workflow, self.repo.state(), approve=True)
+        authorize_extension(
+            self.repo.root, self.repo.workflow, self.repo.state(), approve=True,
+            authorization=self.authorization(),
+        )
         self.repo.workflow = load_workflow(self.repo.root)
         self.repo.artifact(3)
         self.repo.ready(3)
@@ -297,7 +315,10 @@ class CompletionContractTests(unittest.TestCase):
         )
         with patch("cw.core.completion.write_workflow", side_effect=OSError("interrupted")):
             with self.assertRaises(OSError):
-                authorize_extension(self.repo.root, self.repo.workflow, self.repo.state(), approve=True)
+                authorize_extension(
+                    self.repo.root, self.repo.workflow, self.repo.state(), approve=True,
+                    authorization=self.authorization(),
+                )
         self.assertEqual(2, len(load_workflow(self.repo.root).phases))
         repair(self.repo.root)
         self.assertEqual(3, len(load_workflow(self.repo.root).phases))

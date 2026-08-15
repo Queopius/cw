@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
 from cw.adapters.codex import CodexAdapter
+from cw.application.facade import CWApplication
+from cw.core.authorization import Actor, ActorOrigin, OperationContext, issue_user_authorization
 from cw.core.completion import (
     authorize_extension,
     completion_gate_path,
@@ -133,8 +136,24 @@ def command_completion(
         with operation_lock(root, "completion-review"):
             payload = run_completion_review(root, workflow, state, backend_factory())
     elif action in {"approve", "reject"}:
-        with operation_lock(root, "completion-authorization"):
-            payload = authorize_extension(root, workflow, state, approve=action == "approve")
+        proposal_reference = state.get("extension_proposal")
+        if not isinstance(proposal_reference, str):
+            raise CwError("No extension proposal is awaiting authorization", ErrorCode.INVALID_STATE)
+        operation_id = uuid.uuid4().hex
+        actor = Actor("local-operator", ActorOrigin.HUMAN_CLI, explicit_user_intent=True)
+        grant = issue_user_authorization(
+            action="extension.approve" if action == "approve" else "extension.reject",
+            resource_id=proposal_reference,
+            operation_id=operation_id,
+            actor=actor,
+        )
+        application = CWApplication(allowed_roots=[root])
+        project = application.open_project(root)
+        payload = application.authorize_extension(
+            project,
+            OperationContext(operation_id, actor, "extension.authorize", grant),
+            approve=action == "approve",
+        ).data
     else:
         raise CwError("Unknown completion action", ErrorCode.USAGE_ERROR, exit_code=2)
     if args.json:

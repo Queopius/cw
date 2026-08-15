@@ -5,11 +5,14 @@ import json
 import os
 import shutil
 import sys
-import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
 from cw import __version__
+from cw.application.status import git_branch as application_git_branch
+from cw.application.status import explain_status as application_explain_status
+from cw.application.status import project_status as application_project_status
+from cw.application.facade import CWApplication
 from cw.adapters.codex import CodexAdapter
 from cw.adapters.invocation import latest_invocation
 from cw.adapters.structured_output import codex_schema
@@ -18,13 +21,8 @@ from cw.core.audit import audit_history
 from cw.core.diagnostics import legacy_diagnostic, load_diagnostic, load_global_diagnostic, raw_diagnostic
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_gate
-from cw.core.history import history_timeline
 from cw.core.integrity import snapshot_protected_paths
 from cw.core.progress import derive_effective_workflow_state
-from cw.core.completion import (
-    completion_gate_path, contract_payload, latest_completion_review,
-    load_extension_proposal, validate_completion_gate,
-)
 from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import load_session, process_is_alive, readiness_path
 from cw.core.utils import load_json
@@ -55,112 +53,11 @@ DoctorProvider = Callable[[Path | None, bool, bool, bool], list[dict[str, Any]]]
 
 
 def git_branch(root: Path) -> str:
-    result = subprocess.run(
-        ["git", "branch", "--show-current"], cwd=root,
-        text=True, encoding="utf-8", errors="replace", capture_output=True, check=False,
-    )
-    return result.stdout.strip() or "detached HEAD"
+    return application_git_branch(root)
 
 
 def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
-    project, state, workflow = context(root)
-    consistency = derive_effective_workflow_state(root, workflow, state) if workflow.phases else None
-    current = state.get("current_phase")
-    try:
-        index = workflow.index(current) if current and workflow.phases else None
-    except StopIteration:
-        index = None
-    gates: dict[str, bool] = {}
-    gate_states: dict[str, str] = {}
-    invalid_gates: list[str] = []
-    gate_error = None
-    gate_error_code = None
-    gate_error_details = None
-    if consistency is not None:
-        gate_states.update(consistency.chain.states)
-        for phase in workflow.phases:
-            gates[phase.id] = gate_states.get(phase.id) == "approved"
-        invalid_gates = [phase.id for phase in workflow.phases if gate_states.get(phase.id) == "invalid"]
-        if consistency.chain.issues:
-            gate_error = "Approval gate chain is invalid"
-            gate_error_code = ErrorCode.INVALID_GATE.value
-            gate_error_details = "\n".join(consistency.chain.issues)
-    batch = load_batch(root)
-    managed_run = load_active_run(root)
-    if managed_run is not None:
-        process = ProcessInspector().inspect(managed_run.get("process_pid"))
-        supervisor = ProcessInspector().inspect(managed_run.get("supervisor_pid"))
-        managed_run = {
-            **managed_run,
-            "alive": process.alive or supervisor.alive,
-            "stale": not (process.alive or supervisor.alive),
-        }
-    if (
-        batch and batch.get("status") == "RUNNING"
-        and (not isinstance(batch.get("pid"), int) or not process_is_alive(batch["pid"]))
-    ):
-        batch = {**batch, "status": "INTERRUPTED"}
-    contract = workflow.completion_target
-    completion_review = latest_completion_review(root) if contract is not None else None
-    contract_results = (
-        completion_review.get("contract_results", [])
-        if isinstance(completion_review, dict) else []
-    )
-    verified_requirements = sum(
-        isinstance(item, dict) and item.get("status") == "VERIFIED"
-        for item in contract_results
-    )
-    proposal = None
-    if contract is not None and state.get("extension_proposal"):
-        try:
-            proposal = load_extension_proposal(root, state, workflow)
-        except CwError:
-            proposal = None
-    return {
-        "schema_version": SCHEMA_VERSION, "project": project.project_id,
-        "repository_root": str(root), "branch": git_branch(root),
-        "workflow": "INITIALIZED" if not workflow.phases else "ACTIVE",
-        "plan": workflow.status, "state": state["status"], "phase": current,
-        "phase_index": index, "position": index + 1 if index is not None else None,
-        "phase_count": len(workflow.phases),
-        "approved_count": consistency.approved_count if consistency is not None else 0,
-        "remaining_count": consistency.remaining_count if consistency is not None else 0,
-        "active_count": consistency.active_count if consistency is not None else 0,
-        "effective_state": consistency.status.value if consistency is not None else state["status"],
-        "is_complete": consistency.is_complete if consistency is not None else False,
-        "planned_scope_complete": consistency.planned_scope_complete if consistency is not None else False,
-        "completion_mode": "CONTRACT_AWARE" if contract is not None else "LEGACY",
-        "completion_target": contract_payload(contract) if contract is not None else None,
-        "completion_satisfied": consistency.completion_satisfied if consistency is not None else False,
-        "completion_review": completion_review,
-        "completion_verified_count": verified_requirements,
-        "completion_requirement_count": len(contract.requirements) if contract is not None else 0,
-        "extension_proposal": proposal,
-        "attempt": state.get("attempt", 0), "max_attempts": workflow.max_review_attempts,
-        "ready": (root / ".cw" / "runtime" / "READY_FOR_REVIEW.json").is_file(),
-        "gate": gates.get(current, False) if current else False, "gates": gates,
-        "gate_states": gate_states, "invalid_gates": invalid_gates,
-        "gate_error": gate_error, "gate_error_code": gate_error_code,
-        "gate_error_details": gate_error_details,
-        "phases": [
-            {
-                "id": phase.id,
-                "number": phase.id.split("-", 1)[0],
-                "name": phase.name,
-                "objective": phase.objective,
-                "depends_on": list(phase.depends_on),
-            }
-            for phase in workflow.phases
-        ],
-        "last_error": state.get("last_error"),
-        "infrastructure_error": state.get("infrastructure_error"),
-        "batch": batch,
-        "run": managed_run,
-        "consistent": consistency.consistent if consistency is not None else True,
-        "consistency_issues": list(consistency.issues) if consistency is not None else [],
-        "expected_phase": consistency.expected_current if consistency is not None else None,
-        "approved_through": consistency.chain.approved[-1][0] if consistency and consistency.chain.approved else None,
-    }
+    return application_project_status(root, context)
 
 
 def render_status(console: Console, data: dict[str, Any], verbose: bool = False) -> None:
@@ -205,20 +102,7 @@ def command_explain(
 ) -> int:
     root = root_resolver()
     data = status_payload(root, context)
-    payload = {
-        "consistent": data.get("consistent", True),
-        "current_phase": data.get("phase"),
-        "expected_phase": data.get("expected_phase"),
-        "approved_through": data.get("approved_through"),
-        "issues": data.get("consistency_issues", []),
-        "recovery": "cw repair" if not data.get("consistent", True) else None,
-        "planned_scope_complete": data.get("planned_scope_complete", False),
-        "completion_mode": data.get("completion_mode"),
-        "completion_target": data.get("completion_target"),
-        "completion_satisfied": data.get("completion_satisfied", False),
-        "completion_review": data.get("completion_review"),
-        "extension_proposal": data.get("extension_proposal"),
-    }
+    payload = application_explain_status(data)
     if args.json:
         emit_json(payload)
         return 1 if not payload["consistent"] else 0
@@ -256,21 +140,21 @@ def command_history(
     args: argparse.Namespace, console: Console, *, root_resolver: RootResolver, context: ContextLoader,
 ) -> int:
     root = root_resolver()
-    _, state, workflow = context(root)
-    audit_history(root, workflow, state)
-    phases = history_timeline(root, workflow, state)
+    application = CWApplication(allowed_roots=[root])
+    base = application.history(application.open_project(root)).data
+    phases = base["phases"]
     if args.phase:
         phases = [
             phase for phase in phases
             if phase["phase"] == args.phase or phase["number"] == args.phase
         ]
-    events = [event for event in state.get("history", []) if not args.phase or event.get("phase") == args.phase]
+    events = [event for event in base["events"] if not args.phase or event.get("phase") == args.phase]
     completion_events = [
-        event for event in state.get("history", [])
+        event for event in base["events"]
         if isinstance(event, dict) and str(event.get("action", "")).startswith(("completion_", "extension_"))
     ]
     payload = {
-        "workflow": workflow.id, "phases": phases, "events": events,
+        "workflow": base["workflow"], "phases": phases, "events": events,
         "completion_cycles": completion_events,
     }
     if args.json:
@@ -496,28 +380,10 @@ def command_inspect(
 ) -> int:
     root = root_resolver()
     if args.action == "completion":
-        from cw.core.state import load_state
-        from cw.core.workflow import load_workflow
-
-        state = load_state(root)
-        workflow = load_workflow(root)
-        effective = derive_effective_workflow_state(root, workflow, state) if workflow.phases else None
-        latest = latest_completion_review(root) if workflow.completion_target is not None else None
-        proposal = None
-        if workflow.completion_target is not None and state.get("extension_proposal"):
-            try:
-                proposal = load_extension_proposal(root, state, workflow)
-            except CwError:
-                proposal = {"invalid_reference": state.get("extension_proposal")}
-        payload = {
-            "schema_version": SCHEMA_VERSION, "workflow": workflow.id,
-            "mode": "CONTRACT_AWARE" if workflow.completion_target is not None else "LEGACY",
-            "contract": contract_payload(workflow.completion_target) if workflow.completion_target else None,
-            "planned_scope_complete": bool(effective and effective.planned_scope_complete),
-            "completion_satisfied": bool(effective and effective.completion_satisfied),
-            "review": latest, "proposal": proposal,
-            "state": state.get("status"), "cycle": state.get("completion_cycle", 0),
-        }
+        application = CWApplication(allowed_roots=[root])
+        payload = application.completion(application.open_project(root)).data
+        latest = payload["review"]
+        proposal = payload["proposal"]
         if args.json:
             emit_json(payload)
         else:

@@ -34,6 +34,7 @@ include = ["cw*"]
 
 [tool.setuptools.package-data]
 cw = [
+  "application/*.json",
   "schemas/*.json",
   "schemas/codex/*.json",
   "release_history.json",

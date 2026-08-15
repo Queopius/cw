@@ -42,6 +42,11 @@ records SHA-256 approval gates before allowing another phase to begin.
 CW is designed for local Git repositories and offers bounded—not unlimited—
 autonomy. Use `cw version --verbose` for the installed build identity.
 
+CW 0.7 also exposes a small UI-independent Python application boundary so the
+CLI and future adapters can share identical workflow semantics. This is
+architectural readiness only: CW does not yet ship a public ChatGPT plugin or
+MCP server. See [Plugin readiness architecture](docs/plugin-readiness.md).
+
 ## Quick start
 
 ```bash

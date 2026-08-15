@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from cw.adapters.codex import CodexAdapter
+from cw.application.context import load_project_context
 from cw.agents.reviewer import human_approve, run_review
 from cw.cli.commands import config as config_commands
 from cw.cli.commands import completion as completion_commands
@@ -43,14 +44,7 @@ def _context(root: Path) -> tuple[Any, dict[str, Any], Any]:
 
 
 def _raw_context(root: Path) -> tuple[Any, dict[str, Any], Any]:
-    validate_project_layout(root)
-    project = load_project(root)
-    workflow = load_workflow(root)
-    if workflow.id != project.project_id or workflow.repository != project.project_id:
-        raise CwError("Project workflow mismatch", ErrorCode.WORKFLOW_PROJECT_MISMATCH, "Run: cw repair", details=f"Workflow: {workflow.repository or workflow.id}\nRepository: {project.project_id}")
-    workflow = apply_policy(workflow, load_policy(root, workflow=workflow))
-    state = load_state(root)
-    return project, state, workflow
+    return load_project_context(root, validate=False)
 
 
 def _git_branch(root: Path) -> str:
