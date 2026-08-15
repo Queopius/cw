@@ -18,10 +18,14 @@ ContextLoader = Callable[[Path], tuple[Any, dict[str, Any], Any]]
 
 
 def git_branch(root: Path) -> str:
-    result = subprocess.run(
-        ["git", "branch", "--show-current"], cwd=root,
-        text=True, encoding="utf-8", errors="replace", capture_output=True, check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "--no-pager", "branch", "--show-current"], cwd=root,
+            stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
+            capture_output=True, check=False, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "unavailable"
     return result.stdout.strip() or "detached HEAD"
 
 

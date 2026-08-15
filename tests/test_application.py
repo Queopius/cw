@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -13,7 +14,7 @@ from cw.adapters.result import CodexRunResult
 from cw.agents.reviewer import run_review
 from cw.application import ApplicationError, ApplicationErrorCode, CWApplication
 from cw.application.capabilities import capability_manifest
-from cw.application.status import project_status
+from cw.application.status import git_branch, project_status
 from cw.cli.main import _status_payload, main
 from cw.core.authorization import (
     Actor,
@@ -118,6 +119,21 @@ class ApplicationReadTests(unittest.TestCase):
         self.assertEqual("SUCCEEDED", result_model.to_dict()["status"])
         self.assertEqual("", stdout.getvalue())
         self.assertEqual("", stderr.getvalue())
+
+    def test_git_status_probe_cannot_consume_adapter_stdin(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, stdout="dev\n", stderr="")
+        with patch("cw.application.status.subprocess.run", return_value=completed) as run:
+            self.assertEqual("dev", git_branch(self.repo.root))
+        self.assertEqual(subprocess.DEVNULL, run.call_args.kwargs["stdin"])
+        self.assertEqual(5, run.call_args.kwargs["timeout"])
+        self.assertIn("--no-pager", run.call_args.args[0])
+
+    def test_git_status_probe_timeout_is_non_blocking(self) -> None:
+        with patch(
+            "cw.application.status.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["git"], 5),
+        ):
+            self.assertEqual("unavailable", git_branch(self.repo.root))
 
     def test_project_can_be_opened_explicitly_and_exposes_opaque_handle(self) -> None:
         opened = self.application.open_project(self.repo.root / ".cw")
