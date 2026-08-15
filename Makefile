@@ -1,4 +1,4 @@
-.PHONY: test install check docs-check plugin-check acceptance-local demo demo-hero demo-check
+.PHONY: test install check docs-check plugin-check production-readiness-check acceptance-local demo demo-hero demo-check
 
 test:
 	python3 -m unittest discover -s tests -v
@@ -12,12 +12,16 @@ check:
 	python3 scripts/check_docs_policy.py
 	python3 scripts/validate_hero_demo.py
 	python3 scripts/validate_plugin_candidate.py
+	python3 scripts/validate_plugin_production_readiness.py
 	python3 scripts/build_plugin_candidate.py --check
 
 plugin-check:
 	python3 scripts/validate_plugin_candidate.py
+	python3 scripts/validate_plugin_production_readiness.py
 	python3 scripts/build_plugin_candidate.py --check
-	python3 -m unittest tests.test_plugin_candidate tests.test_chatgpt_development
+	python3 -m unittest tests.test_plugin_candidate tests.test_chatgpt_development tests.test_plugin_production_readiness
+
+production-readiness-check: plugin-check
 
 docs-check:
 	python3 scripts/check_cli_docs.py

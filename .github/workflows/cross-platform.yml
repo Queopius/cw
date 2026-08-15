@@ -45,9 +45,10 @@ jobs:
       - name: Run platform-neutral MCP stdio and controlled-action contract tests
         run: |
           python -m pip install ".[mcp]"
-          python -m unittest tests.test_mcp_runtime tests.test_mcp_actions tests.test_plugin_candidate tests.test_chatgpt_development
+          python -m unittest tests.test_mcp_runtime tests.test_mcp_actions tests.test_plugin_candidate tests.test_chatgpt_development tests.test_plugin_production_readiness
           python scripts/run_mcp_acceptance.py
           python scripts/validate_plugin_candidate.py
+          python scripts/validate_plugin_production_readiness.py
           python scripts/build_plugin_candidate.py --check
       - name: Test managed POSIX installer in isolation
         if: matrix.installer == 'posix'

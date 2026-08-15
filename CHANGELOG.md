@@ -4,6 +4,24 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.12.0 — 2026-08-15
+
+- Validate the CW plugin package against the current OpenAI Plugins model and
+  preserve the exact accepted MCP surface, official assets, deterministic
+  archive, and OpenAI-independent engine.
+- Select a production architecture with a public HTTPS MCP gateway/relay and a
+  paired outbound-only local CW agent so source and `.cw` remain local by
+  default.
+- Define OAuth 2.1 MCP authentication, least-privilege scopes, explicit project
+  grants, revocation, replay protection, and a separate high-consequence human
+  authorization ceremony.
+- Add production threat, privacy/data-flow, observability, deployment,
+  submission, and acceptance contracts without deploying a public service,
+  adding OAuth code, or submitting the plugin.
+- Keep ChatGPT Pro read-only by default and make controlled actions dependent
+  on actual platform discovery; Business/Enterprise additionally requires
+  workspace-admin opt-in and the same server-side CW policy.
+
 ## 0.11.0 — 2026-08-15
 
 - Add a Secure MCP Tunnel-compatible ChatGPT development bootstrap over the

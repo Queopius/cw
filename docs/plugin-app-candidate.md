@@ -1,7 +1,8 @@
 # Plugin / App candidate
 
-CW `0.11.0` retains the proven CW 0.10 plugin package and adds a bounded
-ChatGPT Developer Mode connection profile. It remains a local, reviewable
+CW `0.12.0` retains the proven CW 0.11 plugin package and bounded ChatGPT
+Developer Mode connection profile, then adds explicit production-readiness
+contracts. It remains a local, reviewable
 OpenAI plugin candidate. It is text/tool-first: one production skill,
 one bundled stdio MCP server, official CW assets, and a repo-local development
 marketplace entry. It is not published to the universal Plugins Directory and
@@ -173,3 +174,7 @@ override, arbitrary workflow editing, contract replacement, deployment,
 release, update, generic execute, shell, Git, or filesystem mutation. Optional
 UI is deferred because normalized text and tool results cover the first
 candidate without adding another security or maintenance surface.
+
+The selected public topology, OAuth contract, and remaining submission blockers
+are documented in [plugin production readiness](plugin-production-readiness.md).
+No public gateway or OAuth implementation is included in 0.12.

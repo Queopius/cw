@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted for CW 0.11 development architecture. Public implementation deferred.
+Accepted for CW 0.11 development architecture. Its tentative public direction
+is superseded by the production decision in
+[ADR 0005](0005-production-mcp-relay.md); implementation remains deferred.
 
 ## Context
 

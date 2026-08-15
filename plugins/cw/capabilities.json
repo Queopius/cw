@@ -56,5 +56,56 @@
     },
     "project_grants": "startup-only explicit project paths; tool calls use opaque handles"
   },
-  "enforcement": "Server-side CWApplication policy is authoritative; plugin metadata and tool annotations are advisory."
+  "enforcement": "Server-side CWApplication policy is authoritative; plugin metadata and tool annotations are advisory.",
+  "production_candidate": {
+    "status": "ARCHITECTURE_DEFINED_RUNTIME_NOT_DEPLOYED",
+    "transport": "public-streamable-https-to-authenticated-relay",
+    "local_runtime": "paired outbound-only agent with explicit opaque project grants",
+    "oauth": "OAuth 2.1 MCP authorization with PKCE and per-request scope enforcement",
+    "token_policy": {
+      "pkce_method": "S256",
+      "access_token_max_seconds": 600,
+      "authorization_code_max_seconds": 300,
+      "refresh_token_rotation": "required",
+      "refresh_token_absolute_max_seconds": 2592000,
+      "revocation_check": "every_request"
+    },
+    "scopes": {
+      "READ": [
+        "project.read",
+        "gate.read",
+        "history.read",
+        "completion.read",
+        "operation.read"
+      ],
+      "EXECUTION": [
+        "validation.run",
+        "review.run"
+      ],
+      "CONTROLLED_STATE_MUTATION": [
+        "phase.start",
+        "retry.run",
+        "operation.cancel"
+      ]
+    },
+    "high_consequence_authorization": {
+      "exposed": false,
+      "oauth_scope_is_sufficient": false,
+      "max_ttl_seconds": 300,
+      "requires": [
+        "concrete_action_binding",
+        "project_binding",
+        "proposal_or_evidence_digest",
+        "typed_human_principal",
+        "short_expiry",
+        "single_use_nonce",
+        "auditable_consumption"
+      ]
+    },
+    "surface_policy": {
+      "chatgpt_pro": "read-only by default; controlled actions only after runtime discovery and explicit platform availability",
+      "business_enterprise": "workspace-admin opt-in plus least-privilege scopes; same CW server policy",
+      "unknown_surface": "read-only"
+    }
+  }
 }

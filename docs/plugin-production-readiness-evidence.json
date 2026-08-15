@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "milestone": "CW 0.12 · ChatGPT Plugin Acceptance & Production Readiness",
+  "recorded_at": "2026-08-15",
+  "version": "0.12.0",
+  "official_docs_reviewed": [
+    "https://developers.openai.com/plugins/concepts/plugins",
+    "https://developers.openai.com/plugins/build/plugins",
+    "https://developers.openai.com/plugins/build/auth",
+    "https://developers.openai.com/plugins/deploy/connect-chatgpt",
+    "https://developers.openai.com/plugins/deploy/submission",
+    "https://developers.openai.com/plugins/guides/security-privacy",
+    "https://developers.openai.com/api/docs/guides/secure-mcp-tunnels"
+  ],
+  "decisions": {
+    "production_mcp": "managed public HTTPS MCP gateway and relay paired with an outbound-only user-run local CW agent",
+    "authentication": "OAuth 2.1 MCP authorization with PKCE and CIMD preferred, DCR supported when required",
+    "project_authorization": "explicit principal/workspace/device/project grants using opaque project handles",
+    "high_consequence": "separate typed single-use ceremony; ordinary OAuth scope or conversation is insufficient",
+    "chatgpt_pro": "read-only default; controlled actions require actual surface discovery",
+    "business_enterprise": "workspace-admin opt-in and least-privilege scopes; no policy bypass",
+    "plugin_package": "current plugin.json plus skill and local MCP; remote .app.json deferred until a real registered endpoint exists",
+    "privacy": "source and .cw remain local; only normalized minimum-disclosure CW envelopes cross the relay",
+    "operations": "Queopius owns gateway policy and service operations; operator owns local agent and grants",
+    "submission": "BLOCKED pending implementation, public HTTPS, OAuth, domain verification, legal/business approval, and external acceptance"
+  },
+  "implemented_in_0_12": {
+    "public_https_gateway": false,
+    "oauth_server": false,
+    "local_pairing_agent": false,
+    "public_submission": false,
+    "new_mcp_tools": false,
+    "high_consequence_tools": false
+  },
+  "production_readiness": "NOT_READY",
+  "plugin_submission_readiness": "BLOCKED",
+  "secrets_recorded": false
+}

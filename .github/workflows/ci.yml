@@ -90,8 +90,9 @@ jobs:
       - name: Validate package, skill, permissions, security, and parity
         run: |
           python scripts/validate_plugin_candidate.py
+          python scripts/validate_plugin_production_readiness.py
           python scripts/build_plugin_candidate.py --check
-          python -m unittest tests.test_plugin_candidate tests.test_chatgpt_development -v
+          python -m unittest tests.test_plugin_candidate tests.test_chatgpt_development tests.test_plugin_production_readiness -v
 
   docs:
     name: Documentation

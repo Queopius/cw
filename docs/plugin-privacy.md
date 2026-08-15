@@ -45,3 +45,26 @@ repair, release, deployment, or update actions.
 Before public submission, Queopius must approve final legal language, a public
 privacy contact, retention/deletion commitments for any remote runtime, and the
 relationship between the Apache-2.0 software license and service terms.
+
+## CW 0.12 production data-flow decision
+
+The selected gateway/relay model keeps repository access in the paired local
+agent. The following is the technical minimum-disclosure contract, not legal
+marketing language:
+
+| Data category | Local stdio | Secure MCP Tunnel development | Production gateway/relay |
+| --- | --- | --- | --- |
+| Repository source and file contents | Local only | Does not cross by default | Local only; no generic source tool |
+| Git diff and credentials | Local only | Does not cross by default | Local only |
+| Raw `.cw` files | Local only | Not uploaded | Local only |
+| Normalized phase/gate/completion summaries | Local client | Crosses tunnel when requested | Crosses relay when requested |
+| Sanitized validation/review result | Local client | Crosses tunnel when requested | Crosses relay when requested |
+| Raw validation/reviewer logs | Local only | Not returned | Local only; evidence reference only |
+| User identity | Local OS context | OpenAI development connection | CW principal/workspace token claims |
+| Project identity | Canonical local path internally | Opaque handle externally | Opaque project/device handles |
+| Audit/correlation metadata | Local evidence | Tunnel/platform policy applies | Minimum request/operation/capability outcome |
+
+Production storage may include account, device, project-grant, revocation,
+routing, and minimum audit metadata. It must not include source or complete
+`.cw` evidence by default. Final retention, deletion, subprocessors, regions,
+and data-subject commitments require legal/business approval before submission.

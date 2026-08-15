@@ -31,8 +31,9 @@ autonomy. Advance with evidence. No valid gate. No next phase.
 - ChatGPT desktop local host: supported candidate where policy permits.
 - ChatGPT web Developer Mode: read-only profile accepted through Secure MCP
   Tunnel on ChatGPT Pro; controlled actions were not enabled in that test.
-- ChatGPT public directory: unavailable until a stable HTTPS MCP and
-  production authentication milestone is completed.
+- ChatGPT public directory: unavailable until the selected HTTPS relay, OAuth
+  2.1, domain verification, production acceptance, and human submission inputs
+  are completed.
 - Hosted service, deployment, and high-consequence authorization: unavailable.
 
 ## Starter prompts
@@ -65,5 +66,5 @@ Negative cases:
 - Approve public support contact and final legal privacy language.
 - Provide and approve a terms-of-service URL if required for submission.
 - Choose countries/regions and complete policy attestations.
-- Approve remote runtime/authentication architecture before any ChatGPT web
-  submission.
+- Approve the implementation and operation of the selected remote
+  runtime/authentication architecture before any ChatGPT web submission.

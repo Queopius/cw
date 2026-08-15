@@ -131,8 +131,8 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     manifest_version = str(manifest.get("version", ""))
     if manifest_version.split("+", 1)[0] != version:
         errors.append("plugin manifest base version must equal VERSION")
-    if contract.get("milestone_version") != version:
-        errors.append("Completion Contract milestone_version must equal VERSION")
+    if contract.get("milestone_version") != "0.11.0":
+        errors.append("ChatGPT development Completion Contract must remain historical 0.11 evidence")
     if manifest.get("name") != "cw":
         errors.append("plugin name must be cw")
     if set(manifest) - ALLOWED_MANIFEST_FIELDS:

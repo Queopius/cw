@@ -44,3 +44,26 @@ state and refused a conversational request to approve the gate. This proves
 the intended boundary at the real client/transport layer: controlled mutation
 is not high-consequence human authorization, and natural-language intent is
 not an authorization artifact.
+
+## Production relay threat model
+
+| Threat | Required production control |
+| --- | --- |
+| Prompt/tool-description/repository injection | Closed registry and schemas; repository text below engine policy; skill only guidance |
+| Forged MCP request or actor | OAuth token validation plus adapter-fixed typed origin; reject caller actor/auth fields |
+| Handle guessing, traversal, symlink escape | Opaque grant lookup followed by canonical local CW project resolution |
+| Cross-project or cross-tenant confusion | Bind principal, tenant, device, project, tool, operation ID, and payload digest |
+| OAuth/refresh token theft | Short access expiry, refresh rotation, revocation, audience/resource binding, secure storage |
+| Replay or operation-ID substitution | Single canonical digest; identical replay only; conflicts and cross-project use rejected |
+| Confused deputy/privilege escalation | Intersection of OAuth scope, workspace policy, project grant, capability manifest, and engine state |
+| Human-approval impersonation | High-consequence ceremony outside normal tools and scopes; typed human, action/evidence binding, nonce, expiry |
+| Malicious reviewer output | Independent read-only reviewer, strict schema/semantics, supervisor-only gate path |
+| Secret/source/log leakage | Minimum-disclosure projections, deny raw paths/environment/source/logs, evidence references |
+| Long operation disconnect/concurrency | Shared operation record, lock, replay, reconciliation, conservative cancellation |
+| Revoked/stale access | Online revocation check before routing; local grant recheck before dispatch |
+| Denial of service | Tenant/project rate limits, quotas, bounded payloads, timeouts, backpressure |
+| Supply-chain/package tampering | Pinned CI actions/dependencies, deterministic plugin archive, hashes, signed-release plan |
+
+Secure MCP Tunnel remains a development transport. A production public gateway
+must separately pass TLS, OAuth, tenant isolation, revocation, rate-limit,
+incident, and external acceptance gates before submission.

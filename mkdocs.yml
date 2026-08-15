@@ -58,6 +58,11 @@ nav:
       - Plugin / App Candidate: plugin-app-candidate.md
       - ChatGPT Development: chatgpt-development.md
       - ChatGPT 0.11 Acceptance: acceptance/chatgpt-development-0.11.md
+      - Plugin Production Readiness: plugin-production-readiness.md
+      - Plugin Authentication: plugin-auth.md
+      - Plugin Deployment: plugin-deployment.md
+      - Plugin Submission: plugin-submission.md
+      - ChatGPT Plugin 0.12 Acceptance: acceptance/chatgpt-plugin-0.12.md
       - Plugin Listing Draft: plugin-listing-draft.md
       - Plugin Privacy Draft: plugin-privacy.md
       - Plugin Support: plugin-support.md
@@ -66,6 +71,7 @@ nav:
       - ADR — MCP Transport: adr/0002-mcp-transport.md
       - ADR — Plugin Candidate: adr/0003-plugin-candidate.md
       - ADR — ChatGPT Development: adr/0004-chatgpt-development-and-public-runtime.md
+      - ADR — Production MCP Relay: adr/0005-production-mcp-relay.md
       - Project Layout: project-layout.md
       - Platform Support: testing/platform-support.md
       - Windows VM Acceptance: testing/windows-vm-acceptance.md
