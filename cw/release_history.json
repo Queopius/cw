@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.8.0",
+      "changes": [
+        "Added an optional local stdio MCP runtime with six narrow read-only CW tools.",
+        "Added opaque project scoping, path/secret redaction, read-only resources, and typed MCP origin.",
+        "Added protocol, security, parity, no-mutation, packaging, and cross-platform MCP tests."
+      ]
+    },
+    {
       "version": "0.7.0",
       "changes": [
         "Added a UI-independent CW application facade and structured operation contracts.",

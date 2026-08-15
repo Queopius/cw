@@ -49,12 +49,31 @@ jobs:
         run: |
           python -m pip install --force-reinstall dist/*.whl
           cw version --json
+          python -c "import sys; import cw.core, cw.application; assert 'mcp' not in sys.modules"
+          wheel=$(ls dist/*.whl)
+          python -m pip install --force-reinstall "${wheel}[mcp]"
+          python -c "from cw.adapters.mcp.server import create_server"
       - name: Upload distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cw-distributions
           path: dist/*
           if-no-files-found: error
+
+  mcp:
+    name: MCP read-only protocol
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Install MCP extra and run protocol/security tests
+        run: |
+          python -m pip install ".[mcp]"
+          python -m unittest tests.test_mcp_runtime -v
 
   docs:
     name: Documentation

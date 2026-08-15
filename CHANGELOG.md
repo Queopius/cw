@@ -4,6 +4,24 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.8.0 — 2026-08-15
+
+- Add an optional local stdio MCP runtime whose six narrow read-only tools call
+  `CWApplication` directly and share the CLI's workflow, gate, completion,
+  history, and repair-derived semantics.
+- Expose normalized project, phase, gate, Completion Contract, completion
+  review, and extension-proposal resources using opaque project handles and a
+  minimum-disclosure projection that removes private roots and secrets.
+- Enforce a closed READ capability allowlist with typed `mcp_client` origin;
+  arbitrary commands, shell, filesystem, Git, state mutation, review execution,
+  repair, and extension authorization are absent and rejected.
+- Add optional `codex-workflow[mcp]` packaging, `cw mcp serve`, clean stdio
+  lifecycle/diagnostics, protocol/security tests, semantic-parity tests, and
+  mutation-absence evidence across Linux, Windows, and macOS CI.
+- Document local Codex configuration, privacy/scoping, the draft read-only CW
+  skill, and the controlled-actions next milestone without claiming hosted or
+  public ChatGPT support.
+
 ## 0.7.0 — 2026-08-15
 
 - Add an OpenAI-independent application facade with structured operation

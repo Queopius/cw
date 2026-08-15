@@ -1,8 +1,8 @@
 # Plugin readiness architecture
 
-CW 0.7 prepares the local workflow engine for more than one adapter. It does
-not ship a public plugin, an MCP server, an Apps SDK interface, or a hosted CW
-service.
+CW 0.8 proves the multi-adapter architecture with an optional local read-only
+MCP runtime. It still does not ship a public plugin, an Apps SDK interface, a
+hosted MCP endpoint, or a remote CW service.
 
 ```text
                          CW engine
@@ -11,7 +11,7 @@ service.
                              │
              ┌───────────────┼───────────────┐
              │               │               │
-          CLI adapter   future MCP adapter   future skill
+          CLI adapter   read-only MCP adapter   future skill
              │               │               │
         terminal / CI   ChatGPT / Codex   workflow guidance
 ```
@@ -81,12 +81,12 @@ application layer. The CLI may include local-only presentation fields such as
 the repository path; a remote adapter must apply its own minimum-disclosure
 projection.
 
-### Future MCP adapter
+### MCP adapter
 
-The future adapter calls Python application operations directly. It must not
-run `subprocess("cw ...")`, accept an arbitrary CW command string, expose a
-shell tool, or maintain parallel state. Transport decoding, authentication,
-host confirmation, and result projection belong in the adapter.
+The CW 0.8 adapter calls Python application operations directly. It never runs
+`subprocess("cw ...")`, accepts an arbitrary command, exposes a shell, or
+maintains parallel state. Its stdio binding and optional SDK remain outside the
+engine. See [MCP runtime](mcp-runtime.md).
 
 ### Future plugin skill
 
@@ -108,7 +108,7 @@ The packaged `cw/application/capability-manifest.json` is transport-neutral.
 
 | Capability | Class | Mutation | Human confirmation |
 | --- | --- | --- | --- |
-| `project.read`, `history.read`, `completion.read` | READ | No | No |
+| `project.read`, `gate.read`, `history.read`, `completion.read` | READ | No | No |
 | `validation.run`, `review.run` | EXECUTION | Controlled commands/evidence | No |
 | `phase.start`, `project.repair` | STATE_MUTATION | Yes | Policy dependent |
 | `extension.authorize` | HIGH_CONSEQUENCE_AUTHORIZATION | Yes | Always |
@@ -198,28 +198,24 @@ state, and completion evidence remain authoritative.
 
 ## Packaging recommendation
 
-Keep the engine and adapter contracts in this repository. In the next milestone,
-add a dependency-light optional `cw.adapters.mcp` package in the same repository
-so engine/adapter contract tests remain atomic. Keep plugin packaging, skills,
-OpenAI-specific metadata, and UI in a separately distributable top-level
-package or directory. That preserves independent release cadence and dependency
-footprint without splitting repositories before the boundary is proven.
+The dependency-light optional `cw.adapters.mcp` package now lives beside the
+engine so facade/adapter contract tests remain atomic. Keep future public plugin
+packaging, OpenAI-specific metadata, and UI separately distributable. That
+preserves independent release cadence and dependency footprint without splitting
+repositories before a remote boundary is proven.
 
 Open-source CW core and CLI remain fully local and functional without that
-package, an account, internet access, or a hosted Queopius service.
+MCP extra, an account, internet access, or a hosted Queopius service.
 
-## Next milestone: CW MCP Runtime
+## Next milestone: CW MCP Runtime · Controlled Actions
 
 Exit criteria:
 
-1. implement a transport-neutral adapter over `CWApplication`;
-2. expose status, inspect, history, explain, and completion status first;
-3. return the same semantic models as CLI/application contract tests;
-4. support a local stdio MCP transport for Codex without arbitrary shell tools;
-5. implement start/poll/cancel receipts for long-running operations;
-6. project every result through a minimum-disclosure policy;
-7. add write tools only after host-authenticated actor and confirmation mapping;
-8. keep all mutations behind the shared lock and operation-ID policy;
-9. leave public ChatGPT HTTPS hosting, OAuth, Apps UI, packaging, and submission
+1. extract candidate phase actions fully behind `CWApplication`;
+2. define trusted host intent for allowed state changes;
+3. implement start/poll/cancel receipts for long-running operations;
+4. prove idempotency and shared locking across CLI and MCP;
+5. expose only low-consequence controlled actions first;
+6. keep extension authorization, rebaseline, and destructive repair separate;
+7. leave public ChatGPT HTTPS hosting, OAuth, Apps UI, packaging, and submission
    for later explicitly authorized milestones.
-

@@ -13,6 +13,7 @@ class ActorOrigin(str, Enum):
     HUMAN_CLI = "human_cli"
     CHATGPT_APP = "chatgpt_app"
     CODEX_PLUGIN = "codex_plugin"
+    MCP_CLIENT = "mcp_client"
     AUTOMATED_CI = "automated_ci"
     INTERNAL_SUPERVISOR = "internal_supervisor"
     PLANNER = "planner"

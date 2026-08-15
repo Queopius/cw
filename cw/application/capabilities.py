@@ -31,6 +31,7 @@ class Capability:
 CAPABILITIES = {
     item.name: item for item in (
         Capability("project.read", CapabilityClass.READ, False),
+        Capability("gate.read", CapabilityClass.READ, False),
         Capability("history.read", CapabilityClass.READ, False),
         Capability("completion.read", CapabilityClass.READ, False),
         Capability("validation.run", CapabilityClass.EXECUTION, False, long_running=True),

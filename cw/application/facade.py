@@ -12,7 +12,7 @@ from cw.core.completion import (
     load_extension_proposal,
     run_completion_review,
 )
-from cw.core.errors import CwError
+from cw.core.errors import CwError, ErrorCode
 from cw.core.history import history_timeline
 from cw.core.initialize import repair
 from cw.core.locking import operation_lock
@@ -42,10 +42,17 @@ class CWApplication:
         except CwError as exc:
             raise application_error(exc) from exc
 
+    def open_project_handle(self, repository_id: str) -> ResolvedProject:
+        try:
+            return self.projects.open_handle(repository_id)
+        except CwError as exc:
+            raise application_error(exc) from exc
+
     @staticmethod
     def _result(
         project: ResolvedProject, operation: str, capability: str, data: dict,
         operation_id: str | None = None, *, replay: bool = False,
+        actor_origin: str | None = None,
     ) -> OperationResult:
         return OperationResult(
             operation_id=operation_id or uuid.uuid4().hex,
@@ -55,23 +62,91 @@ class CWApplication:
             status=OperationStatus.SUCCEEDED,
             data=data,
             idempotent_replay=replay,
+            actor_origin=actor_origin,
         )
 
-    def status(self, project: ResolvedProject, *, operation_id: str | None = None) -> OperationResult:
+    @staticmethod
+    def _read_request(
+        capability: str, operation_id: str | None, request: OperationContext | None,
+    ) -> tuple[str | None, str | None]:
+        policy = CAPABILITIES.get(capability)
+        if policy is None or policy.mutation or policy.classification.value != "READ":
+            raise application_error(CwError(
+                "Capability is unavailable to a read-only adapter",
+                ErrorCode.AUTHORIZATION_REQUIRED,
+            ))
+        if request is None:
+            return operation_id, None
+        if request.requested_capability != capability:
+            raise application_error(CwError(
+                "Operation capability does not match",
+                ErrorCode.AUTHORIZATION_REQUIRED,
+            ))
+        if operation_id is not None and operation_id != request.operation_id:
+            raise application_error(CwError(
+                "Operation identity does not match",
+                ErrorCode.AUTHORIZATION_REQUIRED,
+            ))
+        return request.operation_id, request.actor.origin.value
+
+    def status(
+        self, project: ResolvedProject, *, operation_id: str | None = None,
+        request: OperationContext | None = None,
+    ) -> OperationResult:
+        operation_id, actor_origin = self._read_request("project.read", operation_id, request)
         try:
             data = project_status(project.root, _raw_context)
         except CwError as exc:
             raise application_error(exc) from exc
-        return self._result(project, "workflow.status", "project.read", data, operation_id)
+        return self._result(
+            project, "workflow.status", "project.read", data, operation_id,
+            actor_origin=actor_origin,
+        )
 
-    def explain(self, project: ResolvedProject, *, operation_id: str | None = None) -> OperationResult:
+    def inspect(
+        self, project: ResolvedProject, *, operation_id: str | None = None,
+        request: OperationContext | None = None,
+    ) -> OperationResult:
+        operation_id, actor_origin = self._read_request("project.read", operation_id, request)
+        try:
+            status = project_status(project.root, _raw_context)
+        except CwError as exc:
+            raise application_error(exc) from exc
+        data = {
+            "schema_version": 1,
+            "project": project.handle.to_dict(),
+            "workflow": status,
+            "evidence_summary": {
+                "approved_gates": status["approved_count"],
+                "invalid_gates": status["invalid_gates"],
+                "completion_review": status["completion_review"],
+                "extension_proposal": status["extension_proposal"],
+            },
+        }
+        return self._result(
+            project, "project.inspect", "project.read", data, operation_id,
+            actor_origin=actor_origin,
+        )
+
+    def explain(
+        self, project: ResolvedProject, *, operation_id: str | None = None,
+        request: OperationContext | None = None,
+    ) -> OperationResult:
+        operation_id, actor_origin = self._read_request("project.read", operation_id, request)
         try:
             data = explain_status(project_status(project.root, _raw_context))
         except CwError as exc:
             raise application_error(exc) from exc
-        return self._result(project, "workflow.explain", "project.read", data, operation_id)
+        return self._result(
+            project, "workflow.explain", "project.read", data, operation_id,
+            actor_origin=actor_origin,
+        )
 
-    def history(self, project: ResolvedProject, *, operation_id: str | None = None) -> OperationResult:
+    def history(
+        self, project: ResolvedProject, *, operation_id: str | None = None,
+        request: OperationContext | None = None,
+    ) -> OperationResult:
+        operation_id, actor_origin = self._read_request("history.read", operation_id, request)
         try:
             _, state, workflow = load_project_context(project.root)
             audit_history(project.root, workflow, state)
@@ -82,9 +157,16 @@ class CWApplication:
             "phases": history_timeline(project.root, workflow, state),
             "events": list(state.get("history", [])),
         }
-        return self._result(project, "history.inspect", "history.read", data, operation_id)
+        return self._result(
+            project, "history.inspect", "history.read", data, operation_id,
+            actor_origin=actor_origin,
+        )
 
-    def completion(self, project: ResolvedProject, *, operation_id: str | None = None) -> OperationResult:
+    def completion(
+        self, project: ResolvedProject, *, operation_id: str | None = None,
+        request: OperationContext | None = None,
+    ) -> OperationResult:
+        operation_id, actor_origin = self._read_request("completion.read", operation_id, request)
         try:
             _, state, workflow = load_project_context(project.root, validate=False)
             effective = derive_effective_workflow_state(project.root, workflow, state) if workflow.phases else None
@@ -109,7 +191,37 @@ class CWApplication:
             "state": state.get("status"),
             "cycle": state.get("completion_cycle", 0),
         }
-        return self._result(project, "completion.inspect", "completion.read", data, operation_id)
+        return self._result(
+            project, "completion.inspect", "completion.read", data, operation_id,
+            actor_origin=actor_origin,
+        )
+
+    def gates(
+        self, project: ResolvedProject, *, operation_id: str | None = None,
+        request: OperationContext | None = None,
+    ) -> OperationResult:
+        operation_id, actor_origin = self._read_request("gate.read", operation_id, request)
+        try:
+            status = project_status(project.root, _raw_context)
+        except CwError as exc:
+            raise application_error(exc) from exc
+        data = {
+            "schema_version": 1,
+            "workflow": status["project"],
+            "approved_count": status["approved_count"],
+            "phase_count": status["phase_count"],
+            "approved_through": status["approved_through"],
+            "current_phase": status["phase"],
+            "gates": status["gates"],
+            "gate_states": status["gate_states"],
+            "invalid_gates": status["invalid_gates"],
+            "consistent": status["consistent"],
+            "issues": status["consistency_issues"],
+        }
+        return self._result(
+            project, "gate.inspect", "gate.read", data, operation_id,
+            actor_origin=actor_origin,
+        )
 
     def repair(self, project: ResolvedProject, request: OperationContext) -> OperationResult:
         if request.requested_capability != "project.repair":

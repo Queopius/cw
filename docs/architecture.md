@@ -14,7 +14,8 @@ width handling, `NO_COLOR`, non-TTY fallbacks, and stable test fixtures rather
 than animation or a full-screen terminal UI. The canvas caps at 88 columns and
 adapts to narrower terminals.
 
-CW is a standard-library Python package with a console entry point.
+CW's engine and normal CLI use the Python standard library. The optional local
+MCP adapter adds its SDK only through the `mcp` packaging extra.
 
 ```text
 cw.cli      argument parsing and thin command orchestration
@@ -26,7 +27,7 @@ cw.core     project identity, workflow, state, locks, gates, completion, persist
 cw.planning repository inspection and plan proposal
 cw.checks   deterministic validation
 cw.agents   independent review policy and consistency checks
-cw.adapters isolated Codex subprocess integration
+cw.adapters isolated Codex subprocess integration and optional read-only MCP
 cw.execution normalized events, live state, run identity, profiles, clocks
 cw.integrations optional/required capability health and diagnostic normalization
 cw.update    release providers, cache, verification, transactions, and rollback
@@ -48,9 +49,15 @@ Mutable configuration has its own command module; read-oriented status and
 diagnostic commands never acquire responsibility for configuration writes.
 
 `CWApplication` is the stable internal multi-adapter boundary. The CLI delegates
-context loading and canonical status construction to it; future adapters call
+context loading and canonical status construction to it; the MCP adapter calls
 the same Python operations rather than spawning `cw`. See
 [Plugin readiness architecture](plugin-readiness.md).
+
+`cw.adapters.mcp.runtime` is transport-independent and owns the closed tool
+allowlist, typed MCP origin, opaque-handle resolution, privacy projection, and
+structured error mapping. `cw.adapters.mcp.server` is the only MCP SDK binding
+and runs stdio. Neither core nor application imports the optional SDK. See
+[MCP runtime](mcp-runtime.md).
 
 `cw.ui.theme`, `cw.ui.symbols`, and `cw.ui.renderers` form the presentation
 boundary. Commands pass structured status, history, and diagnostic data to that

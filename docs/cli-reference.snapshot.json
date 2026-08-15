@@ -306,6 +306,26 @@
       "positionals": []
     },
     {
+      "name": "mcp",
+      "options": [
+        "--allowed-root",
+        "--json",
+        "--no-color",
+        "--project",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "serve"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
       "name": "run",
       "options": [
         "--dry-run",

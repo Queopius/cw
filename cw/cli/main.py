@@ -204,6 +204,16 @@ def command_logs(args: argparse.Namespace, console: Console) -> int:
     return read_commands.command_logs(args, console, root_resolver=_root)
 
 
+def command_mcp(args: argparse.Namespace, console: Console) -> int:
+    # Lazy import preserves ordinary CLI operation without the optional MCP SDK.
+    from cw.adapters.mcp import RuntimeConfig
+    from cw.adapters.mcp.server import serve
+
+    projects = [Path(item) for item in (args.projects or [Path.cwd()])]
+    allowed_roots = [Path(item) for item in args.allowed_roots] if args.allowed_roots else projects
+    return serve(RuntimeConfig.create(projects, allowed_roots))
+
+
 def command_run(args: argparse.Namespace, console: Console) -> int:
     def execute_phase(phase_id: str, remaining_seconds: float) -> int:
         root = _root()
@@ -242,6 +252,7 @@ COMMANDS = {
     "run": command_run,
     "inspect": command_inspect,
     "logs": command_logs,
+    "mcp": command_mcp,
 }
 
 

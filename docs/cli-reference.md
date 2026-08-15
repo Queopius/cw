@@ -37,6 +37,7 @@ returns `3`; and an interrupted foreground operation returns `130`.
 | `cw retry` | Retry the classified retryable operation. |
 | `cw history` / `cw explain` | Inspect audit history or a current blocker. |
 | `cw inspect` / `cw logs` | Inspect managed executions and structured events. |
+| `cw mcp` | Serve the optional local read-only MCP adapter over stdio. |
 | `cw doctor` / `cw error` | Diagnose the environment or the latest failure. |
 | `cw repair` | Reconcile CW metadata from validated evidence. |
 | `cw config` / `cw integrations` | Inspect policy and integration state. |
@@ -217,6 +218,25 @@ Explains why the workflow is blocked and names a safe recovery without writing.
 ```bash
 cw explain
 ```
+
+## cw mcp
+
+**Syntax:** `cw mcp [serve] [--project PATH] [--allowed-root PATH]`
+
+Starts the optional local read-only MCP runtime over stdio. `--project`
+authorizes an initialized CW project and may be repeated. `--allowed-root`
+constrains configured projects to a canonical local boundary and may also be
+repeated. With neither option, the current project is the only allowed root.
+
+```bash
+cw mcp serve --project /absolute/path/to/project
+```
+
+Project paths are startup configuration supplied by the local operator; MCP
+tool calls use opaque handles. Stdout is reserved for protocol messages and
+diagnostics go to stderr. This command exposes no write, shell, filesystem, Git,
+review, repair, or authorization operation. Install the optional
+`codex-workflow[mcp]` dependency before serving.
 
 ## cw inspect
 

@@ -1,6 +1,6 @@
 # ADR 0001: one engine, multiple adapters
 
-Status: accepted for CW 0.7.
+Status: accepted in CW 0.7; validated by the CW 0.8 read-only MCP adapter.
 
 ## Context
 
@@ -11,7 +11,7 @@ prose or reimplement workflow policy.
 ## Decision
 
 CW has one OpenAI-independent engine and one small `CWApplication` facade. CLI,
-future MCP, and future plugin skills consume the same `.cw` state and evidence.
+MCP, and future plugin skills consume the same `.cw` state and evidence.
 The CLI owns parsing and rendering only at the interface boundary.
 
 No adapter may expose arbitrary shell or filesystem access. High-consequence
@@ -20,7 +20,7 @@ All adapters share core locking and evidence.
 
 ## Consequences
 
-Read-only MCP implementation is now an adapter task. Execution-heavy phase
-orchestration still needs further extraction before write tools are exposed.
-OpenAI dependencies can evolve without changing core workflow semantics.
-
+The read-only MCP implementation calls `CWApplication` directly and keeps its
+optional SDK outside core/application. Execution-heavy phase orchestration still
+needs further extraction before write tools are exposed. OpenAI dependencies can
+evolve without changing core workflow semantics.

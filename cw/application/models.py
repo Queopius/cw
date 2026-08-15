@@ -52,6 +52,7 @@ class OperationResult:
     data: dict[str, Any]
     schema_version: int = 1
     idempotent_replay: bool = False
+    actor_origin: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -62,6 +63,7 @@ class OperationResult:
             "project_id": self.project_id,
             "status": self.status.value,
             "idempotent_replay": self.idempotent_replay,
+            "actor_origin": self.actor_origin,
             "data": self.data,
         }
 

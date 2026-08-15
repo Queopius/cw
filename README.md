@@ -42,10 +42,11 @@ records SHA-256 approval gates before allowing another phase to begin.
 CW is designed for local Git repositories and offers bounded—not unlimited—
 autonomy. Use `cw version --verbose` for the installed build identity.
 
-CW 0.7 also exposes a small UI-independent Python application boundary so the
-CLI and future adapters can share identical workflow semantics. This is
-architectural readiness only: CW does not yet ship a public ChatGPT plugin or
-MCP server. See [Plugin readiness architecture](docs/plugin-readiness.md).
+CW 0.8 includes an optional local, read-only stdio MCP adapter over the same
+UI-independent application boundary used by the CLI. It exposes normalized CW
+status and evidence to local Codex clients without shell, filesystem, Git, or
+workflow mutation tools. It is not a hosted MCP service or public ChatGPT
+plugin. See [MCP runtime](docs/mcp-runtime.md).
 
 ## Quick start
 

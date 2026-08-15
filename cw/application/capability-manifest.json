@@ -2,6 +2,7 @@
   "schema_version": 1,
   "capabilities": {
     "project.read": {"classification": "READ", "mutation": false, "human_authorization_required": false, "long_running": false},
+    "gate.read": {"classification": "READ", "mutation": false, "human_authorization_required": false, "long_running": false},
     "history.read": {"classification": "READ", "mutation": false, "human_authorization_required": false, "long_running": false},
     "completion.read": {"classification": "READ", "mutation": false, "human_authorization_required": false, "long_running": false},
     "validation.run": {"classification": "EXECUTION", "mutation": false, "human_authorization_required": false, "long_running": true},

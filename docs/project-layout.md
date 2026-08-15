@@ -1,6 +1,7 @@
 # Project layout
 
 CW separates mutable workflow state from static Codex/project integration.
+The MCP adapter reads these same locations and creates no plugin-specific state.
 
 Typical structure:
 

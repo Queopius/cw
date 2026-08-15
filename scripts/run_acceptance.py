@@ -415,6 +415,20 @@ def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
                     f"source/install version mismatch: {source_version} != {version.get('version')}"
                 )
             tests["cli_smoke"] = _result("PASS", f"installed CW {source_version}")
+            installed_python = _python_bin(runtime)
+            _run(
+                [
+                    str(installed_python), "-c",
+                    "import importlib.util, sys; "
+                    "import cw.core, cw.application, cw.adapters.mcp.runtime; "
+                    "assert importlib.util.find_spec('mcp') is None; "
+                    "assert 'mcp' not in sys.modules",
+                ],
+                cwd=base, environment=environment,
+            )
+            tests["mcp_package"] = _result(
+                "PASS", "wheel includes MCP adapter; core and CLI need no MCP extra",
+            )
             root, _ = _single_phase(cw, base, environment)
             tests["deterministic_e2e"] = _result("PASS", "external installed CLI; one verified gate")
             _multi_phase(cw, base, environment)

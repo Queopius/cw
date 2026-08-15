@@ -1,7 +1,7 @@
-# Future MCP contract
+# MCP tool contract
 
-This is a design contract for the next milestone. CW 0.7 does not ship an MCP
-server.
+CW 0.8 implements the read-only subset of this contract as a local stdio MCP
+runtime. The controlled-action rows remain future design only.
 
 ## Tool rules
 
@@ -17,11 +17,16 @@ command.
 | `cw_history` | `history.read` | No | Audit timeline |
 | `cw_explain` | `project.read` | No | Reasons and safe recovery |
 | `cw_completion_status` | `completion.read` | No | Contract, review, proposal |
+| `cw_gate_status` | `gate.read` | No | Validated gate chain and consistency |
 | `cw_validate` | `validation.run` | Controlled execution | Commands come only from the workflow |
 | `cw_request_review` | `review.run` | Evidence/state | Independent supervised reviewer |
 | `cw_start_phase` | `phase.start` | Yes | Current authorized phase only |
 | `cw_repair` | `project.repair` | Yes | Evidence-derived, backup first |
 | `cw_authorize_extension` | `extension.authorize` | Yes | Trusted host confirmation required |
+
+Only the first six read tools are registered in CW 0.8. A request for any
+controlled-action tool is rejected by the adapter allowlist before application
+dispatch.
 
 Common inputs use an opaque `project_id`. Mutations also use a caller-generated
 `operation_id`. `cw_authorize_extension` identifies the exact current proposal,
@@ -39,14 +44,16 @@ Common output is the serialized `OperationResult`:
   "project_id": "8edc4d0c9e6d3fd4c761",
   "status": "SUCCEEDED",
   "idempotent_replay": false,
+  "actor_origin": "mcp_client",
   "data": {}
 }
 ```
 
 ## Read-only resources
 
-Stable resource candidates are:
+Implemented resources are:
 
+- `cw://projects`;
 - `cw://projects/{project_id}/summary`;
 - `cw://projects/{project_id}/current-phase`;
 - `cw://projects/{project_id}/gates`;
@@ -64,4 +71,3 @@ Adapters map application errors such as `PROJECT_NOT_INITIALIZED`,
 `PROJECT_SCOPE_VIOLATION`, `STATE_INCONSISTENT`, `AUTHORIZATION_REQUIRED`,
 `EXTENSION_NOT_PROPOSED`, `OPERATION_CONFLICT`, and
 `INFRASTRUCTURE_FAILURE`. Diagnostic detail is separately permissioned.
-
