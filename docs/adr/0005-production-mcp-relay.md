@@ -82,3 +82,13 @@ CW Core and `CWApplication` remain OpenAI-independent and local-first. The
 selected model requires a future gateway, OAuth authorization server contract,
 pairing protocol, tenant isolation, availability ownership, incident response,
 and public external acceptance. None is implemented or deployed in 0.12.
+
+## CW 0.13 implementation note
+
+CW 0.13 implements this boundary as a hosting-neutral Streamable HTTP MCP
+resource, an OAuth verifier adapter, a transactional minimum-metadata store,
+and an outbound-only `cw.remote.v1` local agent. HTTPS long polling, external
+identity-provider integration, asymmetric device pairing, and opaque project
+grants are recorded in ADRs 0006–0009. No production endpoint or identity
+provider is deployed, and the decision that repositories/raw `.cw` remain
+local is unchanged.

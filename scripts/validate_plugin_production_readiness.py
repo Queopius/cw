@@ -68,8 +68,14 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     capabilities = _load(root / CAPABILITIES.relative_to(ROOT))
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
 
-    if version != "0.12.0" or contract.get("milestone_version") != version:
-        errors.append("production-readiness contract and VERSION must be 0.12.0")
+    if contract.get("milestone_version") != "0.12.0":
+        errors.append("the accepted production-readiness baseline must remain CW 0.12.0")
+    try:
+        current_parts = tuple(int(item) for item in version.split("."))
+    except ValueError:
+        current_parts = ()
+    if len(current_parts) != 3 or current_parts < (0, 12, 0):
+        errors.append("current VERSION must retain compatibility with the accepted CW 0.12 baseline")
     target = contract.get("completion_target", {})
     requirements = target.get("requirements", [])
     ids = {item.get("id") for item in requirements if isinstance(item, dict)}
@@ -176,7 +182,7 @@ def main() -> int:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    print("CW 0.12 plugin production-readiness contracts are valid.")
+    print("CW 0.12 plugin production-readiness baseline contracts are valid.")
     return 0
 
 

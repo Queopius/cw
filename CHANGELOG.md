@@ -4,6 +4,25 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.13.0 — 2026-08-15
+
+- Add a hosting-neutral Streamable HTTP MCP gateway that exposes the accepted
+  CW registry through `CWApplication`, with health/readiness endpoints,
+  structured remote errors, limits, and no remote workflow engine.
+- Add OAuth 2.1 protected-resource enforcement with issuer, signature,
+  audience/resource, expiry, revocation, and least-privilege scope checks;
+  validate PKCE S256 and CIMD/DCR authorization-server contracts without
+  implementing an identity provider.
+- Add an outbound-only, signed local CW agent using the versioned
+  `cw.remote.v1` protocol, explicit single-use device pairing, opaque
+  tenant-bound project grants, revocation, reconnect, and idempotent delivery.
+- Prove all six reads and the six accepted controlled operations through the
+  remote path while retaining local locks, independent review, gate policy,
+  Completion Contracts, redaction, and the complete high-consequence denial.
+- Add a transactional SQLite reference store for minimum routing/audit
+  metadata, remote security/privacy/operations documentation, deterministic
+  HTTP E2E tests, and native CI coverage via the optional `remote` extra.
+
 ## 0.12.0 — 2026-08-15
 
 - Validate the CW plugin package against the current OpenAI Plugins model and

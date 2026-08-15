@@ -55,6 +55,9 @@ jobs:
           python -m pip install --force-reinstall "${wheel}[mcp]"
           python -c "from cw.adapters.mcp.server import create_server"
           python scripts/run_mcp_acceptance.py
+          python -m pip install --force-reinstall "${wheel}[remote]"
+          python -c "from cw.remote.server import create_gateway_app; from cw.remote.agent import HTTPAgentClient"
+          python -m unittest tests.test_remote_gateway
       - name: Upload distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -77,6 +80,21 @@ jobs:
           python -m pip install ".[mcp]"
           python -m unittest tests.test_mcp_runtime tests.test_mcp_actions tests.test_chatgpt_development -v
 
+  remote:
+    name: Remote gateway, OAuth, and agent contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Install remote extra and run gateway security/E2E tests
+        run: |
+          python -m pip install ".[remote]"
+          python -m unittest tests.test_remote_gateway -v
+
   plugin:
     name: Plugin candidate contracts
     runs-on: ubuntu-latest
@@ -91,6 +109,7 @@ jobs:
         run: |
           python scripts/validate_plugin_candidate.py
           python scripts/validate_plugin_production_readiness.py
+          python scripts/validate_remote_candidate.py
           python scripts/build_plugin_candidate.py --check
           python -m unittest tests.test_plugin_candidate tests.test_chatgpt_development tests.test_plugin_production_readiness -v
 

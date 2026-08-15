@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
 import sys
 from pathlib import Path
 from typing import Any, Sequence
@@ -234,6 +236,144 @@ def command_mcp(args: argparse.Namespace, console: Console) -> int:
     return serve(config)
 
 
+def command_remote(args: argparse.Namespace, console: Console) -> int:
+    """Bootstrap the optional remote adapter without moving policy into CLI."""
+
+    from cw.core.platform import global_config_dir
+    from cw.remote.agent import (
+        HTTPAgentClient,
+        LocalAgentRuntime,
+        LocalAgentState,
+        register_project_grant,
+        request_pairing,
+    )
+    from cw.remote.auth import OAuthResourceConfig, OAuthTokenVerifier
+    from cw.remote.device import DeviceCredential
+    from cw.remote.errors import RemoteError
+    from cw.remote.gateway import GatewayService
+    from cw.remote.persistence import RemoteStore
+
+    directory = global_config_dir() / "remote"
+    credential_path = Path(args.credentials) if args.credentials else directory / "device.json"
+    state_path = Path(args.state) if args.state else directory / "projects.json"
+
+    def required(value: str | None, option: str) -> str:
+        if not value:
+            raise ValueError(f"cw remote {args.action} requires {option}")
+        return value
+
+    try:
+        if args.action == "gateway":
+            from cw.remote.server import create_gateway_app, serve_gateway
+
+            config = OAuthResourceConfig(
+                issuer=required(args.issuer_url, "--issuer-url"),
+                resource=required(args.resource_url, "--resource-url"),
+                jwks_uri=required(args.jwks_url, "--jwks-url"),
+                documentation_url="https://docs.cwcli.dev/remote-auth/",
+            )
+            database = Path(required(args.database, "--database"))
+            store = RemoteStore(database)
+            try:
+                verifier = OAuthTokenVerifier(config, store)
+                return serve_gateway(
+                    create_gateway_app(GatewayService(store, verifier), config),
+                    host=args.host,
+                    port=args.port,
+                )
+            finally:
+                store.close()
+
+        gateway = required(args.gateway_url, "--gateway-url")
+        if args.action == "pair":
+            if credential_path.exists():
+                credential = DeviceCredential.load(credential_path)
+            else:
+                credential = DeviceCredential.generate()
+                credential.save(credential_path)
+            payload = asyncio.run(request_pairing(
+                gateway_url=gateway,
+                credential=credential,
+                display_name=args.device_name,
+            ))
+            if args.json:
+                print(json.dumps(payload, sort_keys=True))
+            elif not args.quiet:
+                console.item("✓", "Pairing requested")
+                console.wrapped(f"Device: {payload['device_id']}")
+                console.wrapped(f"Confirmation code: {payload['user_code']}")
+                console.wrapped(f"Expires: {payload['expires_at']}")
+                console.wrapped("Confirm this exact device in the authenticated CW gateway pairing flow.")
+            return 0
+
+        credential = DeviceCredential.load(credential_path)
+        state = LocalAgentState.load(state_path)
+        if args.action == "grant":
+            if not args.projects or len(args.projects) != 1:
+                raise ValueError("cw remote grant requires exactly one --project")
+            project = Path(args.projects[0]).resolve(strict=True)
+            allowed = [Path(item).resolve(strict=True) for item in (args.allowed_roots or [project])]
+            # Opening the runtime proves initialized state and canonical root
+            # containment before any grant metadata crosses the network.
+            probe = LocalAgentRuntime(
+                project_paths=[project], allowed_roots=allowed,
+                grant_handles={project: "cwp_" + "A" * 24},
+            )
+            probe.shutdown()
+            payload = asyncio.run(register_project_grant(
+                gateway_url=gateway, credential=credential, project=project,
+            ))
+            grants = dict(state.grants)
+            grants[payload["project_handle"]] = {
+                "project_path": str(project),
+                "principal_id": payload["principal_id"],
+                "workspace_id": payload["workspace_id"],
+                "device_id": payload["device_id"],
+                "display_name": payload["display_name"],
+            }
+            LocalAgentState(grants).save(state_path)
+            if args.json:
+                print(json.dumps({
+                    "project_handle": payload["project_handle"],
+                    "display_name": payload["display_name"],
+                }, sort_keys=True))
+            elif not args.quiet:
+                console.item("✓", "Project grant created")
+                console.wrapped(f"Handle: {payload['project_handle']}")
+                console.wrapped(f"Project: {payload['display_name']}")
+            return 0
+
+        if not state.grants:
+            raise ValueError("cw remote agent requires at least one locally authorized project grant")
+        project_paths = [Path(record["project_path"]) for record in state.grants.values()]
+        allowed = [Path(item) for item in args.allowed_roots] if args.allowed_roots else project_paths
+        runtime = LocalAgentRuntime(
+            project_paths=project_paths,
+            allowed_roots=allowed,
+            grant_handles={Path(record["project_path"]): handle for handle, record in state.grants.items()},
+            grant_identities={
+                handle: (record["principal_id"], record["workspace_id"], record["device_id"])
+                for handle, record in state.grants.items()
+            },
+        )
+        async def run_agent() -> None:
+            stop = asyncio.Event()
+            await HTTPAgentClient(
+                gateway_url=gateway, credential=credential, runtime=runtime,
+            ).run(stop)
+        try:
+            asyncio.run(run_agent())
+            return 0
+        finally:
+            runtime.shutdown(wait=True)
+    except (RemoteError, ValueError, OSError, json.JSONDecodeError) as exc:
+        if args.json:
+            print(json.dumps({"error": {"code": getattr(getattr(exc, "code", None), "value", "INVALID_REQUEST"), "message": str(exc)}}))
+        else:
+            print(str(exc), file=sys.stderr, flush=True)
+        return 2
+
+
 def command_run(args: argparse.Namespace, console: Console) -> int:
     def execute_phase(phase_id: str, remaining_seconds: float) -> int:
         root = _root()
@@ -273,6 +413,7 @@ COMMANDS = {
     "inspect": command_inspect,
     "logs": command_logs,
     "mcp": command_mcp,
+    "remote": command_remote,
 }
 
 

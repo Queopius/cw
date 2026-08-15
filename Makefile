@@ -13,6 +13,7 @@ check:
 	python3 scripts/validate_hero_demo.py
 	python3 scripts/validate_plugin_candidate.py
 	python3 scripts/validate_plugin_production_readiness.py
+	python3 scripts/validate_remote_candidate.py
 	python3 scripts/build_plugin_candidate.py --check
 
 plugin-check:

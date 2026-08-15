@@ -328,6 +328,39 @@
       ]
     },
     {
+      "name": "remote",
+      "options": [
+        "--allowed-root",
+        "--credentials",
+        "--database",
+        "--device-name",
+        "--gateway-url",
+        "--host",
+        "--issuer-url",
+        "--json",
+        "--jwks-url",
+        "--no-color",
+        "--port",
+        "--project",
+        "--quiet",
+        "--resource-url",
+        "--state",
+        "--verbose"
+      ],
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "gateway",
+            "pair",
+            "grant",
+            "agent"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
       "name": "run",
       "options": [
         "--dry-run",

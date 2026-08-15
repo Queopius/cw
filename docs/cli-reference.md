@@ -247,6 +247,42 @@ requires at least one explicit `--project`, fixes the typed origin to
 write actions. A blocked known tool returns
 `PLATFORM_CAPABILITY_UNAVAILABLE`; high-consequence actions remain absent.
 
+## cw remote
+
+**Syntax:** `cw remote gateway|pair|grant|agent [OPTIONS]`
+
+Starts or configures the optional CW Remote implementation candidate:
+
+- `gateway` serves the OAuth-protected Streamable HTTP MCP resource and the
+  signed agent control endpoints. A public deployment must terminate TLS and
+  use canonical HTTPS issuer, resource, and JWKS URLs.
+- `pair` creates a local asymmetric device credential and requests a
+  short-lived, single-use pairing challenge.
+- `grant` explicitly maps one canonical local CW project to a remotely opaque
+  handle after the device has been paired.
+- `agent` starts the outbound-only long-poll client for the locally stored
+  project grants.
+
+```bash
+cw remote gateway --issuer-url https://identity.example.invalid \
+  --resource-url https://gateway.example.invalid/mcp \
+  --jwks-url https://identity.example.invalid/jwks.json
+cw remote pair --gateway-url https://gateway.example.invalid
+cw remote grant --gateway-url https://gateway.example.invalid --project .
+cw remote agent --gateway-url https://gateway.example.invalid
+```
+
+The examples are non-routable placeholders, not deployed CW services. Remote
+support requires `codex-workflow[remote]`. The command never grants a path
+received from a remote caller, and no high-consequence authorization is
+discoverable through the gateway.
+
+Gateway options are `--issuer-url`, `--resource-url`, `--jwks-url`,
+`--database`, `--host`, and `--port`. Agent/operator options are
+`--gateway-url`, `--credentials`, `--state`, `--device-name`, `--project`, and
+`--allowed-root`. Credentials and state default to the cross-platform CW global
+configuration directory; secrets are never printed by the gateway or agent.
+
 ## cw inspect
 
 **Syntax:** `cw inspect [session|run|completion] [RUN_ID]`

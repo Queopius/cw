@@ -42,7 +42,7 @@ records SHA-256 approval gates before allowing another phase to begin.
 CW is designed for local Git repositories and offers bounded—not unlimited—
 autonomy. Use `cw version --verbose` for the installed build identity.
 
-CW 0.12 includes an optional local stdio MCP adapter over the same UI-independent
+CW includes an optional local stdio MCP adapter over the same UI-independent
 application boundary used by the CLI. Alongside normalized inspection, it
 offers four governed actions: start the current authorized phase, run configured
 validation, request independent review, and retry an engine-approved failure.
@@ -52,7 +52,11 @@ surface and a workflow skill as a reviewable, repo-local
 [OpenAI plugin candidate](docs/plugin-app-candidate.md). It is not a hosted MCP
 service, public ChatGPT web app, or submitted directory plugin. The same
 explicitly scoped stdio server passed real ChatGPT Pro read-only acceptance
-through Secure MCP Tunnel without uploading the repository. CW 0.12 defines a
+through Secure MCP Tunnel without uploading the repository. CW 0.13 also adds
+a production-oriented, hosting-neutral remote implementation candidate: an
+OAuth-protected Streamable HTTP MCP gateway and an outbound-only paired local
+agent. Repository source and raw `.cw` remain local by default. It is not a
+deployed public service and is not submitted to OpenAI. CW 0.12 defined a
 future public HTTPS gateway/relay, OAuth, project grants, and production
 security boundary while intentionally shipping no hosted service. See
 [MCP runtime](docs/mcp-runtime.md), [ChatGPT development](docs/chatgpt-development.md),

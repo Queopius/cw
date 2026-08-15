@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "milestone_version": "0.13.0",
+  "completion_target": {
+    "id": "remote-gateway-oauth-implementation-candidate",
+    "name": "CW Remote Gateway + OAuth Implementation Candidate",
+    "requirements": [
+      {"id": "official-platform", "blocking": true, "evidence": "Current official OpenAI plugin, MCP, auth, connection, submission, review, and tunnel docs recorded."},
+      {"id": "gateway", "blocking": true, "evidence": "Streamable HTTP MCP, OAuth metadata, health, readiness, limits, and exact registry."},
+      {"id": "oauth", "blocking": true, "evidence": "Issuer/signature/audience/expiry/revocation/scope plus PKCE and CIMD/DCR contracts."},
+      {"id": "pairing-agent", "blocking": true, "evidence": "Single-use human pairing and signed outbound-only local agent."},
+      {"id": "project-isolation", "blocking": true, "evidence": "Opaque principal/workspace/device-bound grants and local path resolution."},
+      {"id": "remote-read", "blocking": true, "evidence": "All accepted read tools pass remote semantic parity and privacy checks."},
+      {"id": "controlled-actions", "blocking": true, "evidence": "Only existing actions pass through CWApplication with replay and conflict safety."},
+      {"id": "high-consequence-absence", "blocking": true, "evidence": "No remote gate, extension, release/deploy, rebaseline, repair, or generic execution authority."},
+      {"id": "compatibility", "blocking": true, "evidence": "CLI, local MCP, Secure MCP Tunnel, plugin, wheels, docs, and local CW remain compatible."},
+      {"id": "public-external-acceptance", "blocking": false, "evidence": "Deferred to CW 0.14 because no real staging endpoint/IdP is deployed."}
+    ]
+  },
+  "public_deployment_in_scope": false,
+  "plugin_submission_in_scope": false,
+  "real_chatgpt_public_acceptance_required": false
+}

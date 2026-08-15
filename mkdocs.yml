@@ -63,6 +63,15 @@ nav:
       - Plugin Deployment: plugin-deployment.md
       - Plugin Submission: plugin-submission.md
       - ChatGPT Plugin 0.12 Acceptance: acceptance/chatgpt-plugin-0.12.md
+      - Remote Gateway: remote-gateway.md
+      - Remote Agent: remote-agent.md
+      - Remote Authentication: remote-auth.md
+      - Remote Pairing: remote-pairing.md
+      - Remote Project Grants: remote-project-grants.md
+      - Remote Security: remote-security.md
+      - Remote Privacy: remote-privacy.md
+      - Remote Operations: remote-operations.md
+      - Remote Gateway 0.13 Acceptance: acceptance/remote-gateway-0.13.md
       - Plugin Listing Draft: plugin-listing-draft.md
       - Plugin Privacy Draft: plugin-privacy.md
       - Plugin Support: plugin-support.md
@@ -72,6 +81,10 @@ nav:
       - ADR — Plugin Candidate: adr/0003-plugin-candidate.md
       - ADR — ChatGPT Development: adr/0004-chatgpt-development-and-public-runtime.md
       - ADR — Production MCP Relay: adr/0005-production-mcp-relay.md
+      - ADR — Gateway Agent Transport: adr/0006-gateway-agent-long-poll.md
+      - ADR — Remote Identity Provider: adr/0007-remote-identity-provider.md
+      - ADR — Device Identity and Pairing: adr/0008-device-identity-pairing.md
+      - ADR — Remote Persistence: adr/0009-remote-persistence.md
       - Project Layout: project-layout.md
       - Platform Support: testing/platform-support.md
       - Windows VM Acceptance: testing/windows-vm-acceptance.md

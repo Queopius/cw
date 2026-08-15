@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.13.0",
+      "changes": [
+        "Implemented a hosting-neutral OAuth-protected Streamable HTTP MCP gateway and outbound-only local CW agent.",
+        "Added asymmetric device pairing, opaque tenant-bound project grants, typed cw.remote.v1 routing, revocation, replay protection, and minimal remote persistence.",
+        "Proved the accepted read and controlled-action registries through deterministic remote E2E while keeping repositories, raw .cw state, and high-consequence authority local."
+      ]
+    },
+    {
       "version": "0.12.0",
       "changes": [
         "Defined the production ChatGPT plugin gateway, local-agent, authentication, authorization, and privacy architecture.",

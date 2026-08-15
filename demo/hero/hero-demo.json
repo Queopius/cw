@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "product": "CW",
-  "cw_version": "0.12.0",
+  "cw_version": "0.13.0",
   "recording_kind": "real-workflow-recording",
   "goal": "Add a deterministic greeting function with automated tests in one development phase using Python 3",
   "brand": {
@@ -11,7 +11,7 @@
   },
   "provenance": {
     "recorded_from_real_workflow": true,
-    "source_commit": "98bfbc6f16bfdadbd021cef3fae18bedd1e762f6"
+    "source_commit": "57dfa15431bd6b43ae89e03efeac9747dfcc3e35"
   },
   "events": [
     {
@@ -39,7 +39,7 @@
     },
     {
       "type": "phase",
-      "text": "01-implement-and-test-greeting · Implement deterministic greeting and automated tests"
+      "text": "01-implement-greeting · Implement and test deterministic greeting"
     },
     {
       "type": "command",
@@ -72,17 +72,6 @@
       "text": "Project files updated · 2 changes"
     },
     {
-      "type": "active",
-      "text": "Running python3 -m unittest discover -v",
-      "command": "python3 -m unittest discover -v"
-    },
-    {
-      "type": "success",
-      "text": "python3 -m unittest discover -v completed",
-      "command": "python3 -m unittest discover -v",
-      "actual_duration_ms": 11
-    },
-    {
       "type": "info",
       "text": "Project files updated · 1 change"
     },
@@ -90,6 +79,16 @@
       "type": "command",
       "text": "cw review",
       "command": "cw review"
+    },
+    {
+      "type": "active",
+      "text": "Running python3 -m unittest discover -v",
+      "command": "python3 -m unittest discover -v"
+    },
+    {
+      "type": "success",
+      "text": "python3 -m unittest discover -v completed",
+      "command": "python3 -m unittest discover -v"
     },
     {
       "type": "validation",

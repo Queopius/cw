@@ -1,6 +1,6 @@
 {
   "name": "cw",
-  "version": "0.12.0+codex.20260815151222",
+  "version": "0.13.0+codex.20260815-remote-candidate",
   "description": "AI software-delivery governance with evidence-backed gates and controlled actions.",
   "author": {
     "name": "Queopius",
