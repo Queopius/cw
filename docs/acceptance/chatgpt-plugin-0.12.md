@@ -3,6 +3,26 @@
 Recorded 2026-08-15. This is a deterministic candidate matrix plus a truthful
 external-status record. It does not claim a deployed public endpoint.
 
+## Final technical baseline evidence
+
+The accepted implementation candidate is
+`45f89472a0d61effc6e1860960c3d3facf6f03cb` on `dev`. It passed the complete
+local gate and exact-SHA GitHub acceptance:
+
+| Evidence | Result |
+| --- | --- |
+| Local unit suite | 551 passed; 4 expected optional skips |
+| MCP/plugin/ChatGPT/security suite | 80 passed |
+| Normal and `[mcp]` installed wheels | PASS |
+| Strict docs and drift validation | PASS |
+| Deterministic plugin archive | `c2551fa172fdebd4b7e7bb18997c60cbfa1b55f22995d7d3afe453a90d8754b6` |
+| [CI run 31896686105](https://github.com/Queopius/cw/actions/runs/31896686105) | PASS on the accepted candidate SHA |
+| [Platform Acceptance 31896686084](https://github.com/Queopius/cw/actions/runs/31896686084) | Linux x86_64, Windows x86_64, macOS arm64, and macOS Intel PASS |
+
+This closes the **CW 0.12 technical baseline as ACCEPTED**. It does not change
+the separate conclusions that production readiness is **NOT READY** and plugin
+submission readiness is **BLOCKED**.
+
 ## Package and architecture
 
 | Case | Expected | Status |
@@ -68,6 +88,7 @@ coverage. **LOCAL PASS; PUBLIC NOT RUN.**
 
 ## Decision
 
-The package and architecture candidate are reviewable, but public production
-and submission remain **BLOCKED**. The structured companion is
+The 0.12 package, architecture, policy, and evidence baseline is **ACCEPTED**,
+but public production remains **NOT READY** and submission remains **BLOCKED**.
+The structured companion is
 [`plugin-production-readiness-evidence.json`](../plugin-production-readiness-evidence.json).

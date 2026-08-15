@@ -129,6 +129,27 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         or evidence.get("implemented_in_0_12", {}).get("public_submission") is not False
     ):
         errors.append("production evidence must truthfully preserve undeployed/blocked status")
+    acceptance = evidence.get("technical_acceptance", {})
+    github = acceptance.get("github", {})
+    matrix = acceptance.get("native_matrix", {})
+    accepted_sha = acceptance.get("accepted_candidate_sha")
+    if (
+        acceptance.get("status") != "ACCEPTED"
+        or not re.fullmatch(r"[0-9a-f]{40}", str(accepted_sha))
+        or set(matrix) != {
+            "linux_x86_64", "windows_x86_64", "macos_arm64", "macos_intel",
+        }
+        or set(matrix.values()) != {"PASS"}
+        or any(
+            github.get(run, {}).get("status") != "PASS"
+            or github.get(run, {}).get("sha") != accepted_sha
+            or not str(github.get(run, {}).get("url", "")).startswith(
+                "https://github.com/Queopius/cw/actions/runs/"
+            )
+            for run in ("ci", "platform_acceptance")
+        )
+    ):
+        errors.append("technical acceptance evidence is incomplete or not exact-SHA")
 
     docs_text = "\n".join(path.read_text(encoding="utf-8") for path in required)
     for phrase in (

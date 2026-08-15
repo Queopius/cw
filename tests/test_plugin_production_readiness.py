@@ -36,6 +36,22 @@ class PluginProductionReadinessTests(unittest.TestCase):
         self.assertEqual("NOT_READY", evidence["production_readiness"])
         self.assertEqual("BLOCKED", evidence["plugin_submission_readiness"])
         self.assertFalse(evidence["secrets_recorded"])
+        acceptance = evidence["technical_acceptance"]
+        self.assertEqual("ACCEPTED", acceptance["status"])
+        self.assertEqual(
+            "45f89472a0d61effc6e1860960c3d3facf6f03cb",
+            acceptance["accepted_candidate_sha"],
+        )
+        self.assertEqual(
+            {"PASS"}, set(acceptance["native_matrix"].values())
+        )
+        self.assertEqual(
+            {"PASS"},
+            {
+                acceptance["github"]["ci"]["status"],
+                acceptance["github"]["platform_acceptance"]["status"],
+            },
+        )
 
     def test_oauth_scopes_are_narrow_and_match_runtime_capabilities(self) -> None:
         scopes = {
