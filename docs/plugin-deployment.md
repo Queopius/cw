@@ -1,7 +1,10 @@
 # Plugin production deployment contract
 
 CW 0.12 defines, but does not deploy, the production runtime selected in
-[ADR 0005](adr/0005-production-mcp-relay.md).
+[ADR 0005](adr/0005-production-mcp-relay.md). CW 0.14 prepares a deliberately
+non-production Render/Auth0 staging adapter in
+[ADR 0010](adr/0010-render-staging-hosting.md); those vendors are not permanent
+CW architecture dependencies.
 
 ## Components and ownership
 
@@ -49,3 +52,7 @@ auth tests, tenant/project isolation, redaction, replay, reconnect,
 concurrency, rate-limit, audit, key rotation, revocation, package provenance,
 incident rollback, and installed local-agent tests. A public endpoint must not
 be deployed merely to satisfy documentation.
+
+The staging procedure is in [the staging deployment runbook](operations/staging-deploy.md).
+Until its external evidence passes, staging is prepared rather than deployed,
+production remains not ready, and plugin submission remains blocked.

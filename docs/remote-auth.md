@@ -37,7 +37,7 @@ and local CW policy are independently checked. There is no OAuth scope for
 human gate approval, extension authorization, release/deploy authorization,
 destructive repair, or rebaseline.
 
-Official platform requirements were rechecked on 2026-08-15 against the
+Official platform requirements were rechecked on 2026-08-16 against the
 [plugin model](https://developers.openai.com/plugins/concepts/plugins),
 [MCP server concepts](https://developers.openai.com/plugins/concepts/mcp-server),
 [MCP server build guide](https://developers.openai.com/plugins/build/mcp-server),
@@ -47,3 +47,8 @@ Official platform requirements were rechecked on 2026-08-15 against the
 [app review guide](https://developers.openai.com/plugins/deploy/app-review), and
 [Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels).
 No material change invalidated the CW 0.12 decisions.
+
+The approved 0.14 staging authorization server is Auth0 behind this existing
+resource-server boundary. See [Auth0 staging configuration](auth0-staging.md).
+Auth0 logic does not enter CW Core or `CWApplication`, and the gateway stores
+no Auth0 management credential or OAuth client secret.

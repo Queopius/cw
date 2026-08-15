@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.14.0",
+      "changes": [
+        "Prepared a portable Render staging web-service deployment for the existing OAuth-protected gateway with exact build identity and bounded environment validation.",
+        "Selected single-instance SQLite on a persistent staging disk while retaining the provider-neutral persistence boundary and documenting the availability limitation.",
+        "Added the Auth0, agent, operations, security, and acceptance contracts needed for a human-authorized real staging deployment without adding credentials or changing the CW tool surface."
+      ]
+    },
+    {
       "version": "0.13.0",
       "changes": [
         "Implemented a hosting-neutral OAuth-protected Streamable HTTP MCP gateway and outbound-only local CW agent.",

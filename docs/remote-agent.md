@@ -23,3 +23,8 @@ behind an endless reconnect loop.
 
 The agent does not expose shell, filesystem, Git, reviewer decisions, gates,
 repair, rebaseline, extension authorization, release, or deployment.
+
+The 0.14 staging profile points the same client at
+`https://staging-mcp.cwcli.dev` through operator-supplied configuration. It
+does not embed that URL in workflow logic, grant a home directory, or discover
+projects. See the [agent staging runbook](operations/agent-runbook.md).

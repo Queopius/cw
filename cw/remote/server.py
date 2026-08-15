@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import uuid
+from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import urlparse
 
+from cw import __version__
 from cw.adapters.mcp.runtime import TOOLS
 from cw.core.utils import utc_now
 
@@ -41,12 +44,51 @@ def _remote_failure(error: RemoteError, operation_id: str | None = None) -> dict
     }
 
 
-def create_gateway_app(service: GatewayService, oauth: OAuthResourceConfig) -> Any:
+@dataclass(frozen=True, slots=True)
+class GatewayRuntimeIdentity:
+    """Sanitized deploy identity exposed by health/readiness diagnostics."""
+
+    environment: str = "development"
+    build_sha: str = "development"
+    version: str = __version__
+    protocol_version: str = PROTOCOL_VERSION
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(r"[a-z][a-z0-9-]{0,31}", self.environment) is None:
+            raise ValueError("Gateway deployment environment is invalid")
+        if self.build_sha != "development" and re.fullmatch(r"[0-9a-f]{40}", self.build_sha) is None:
+            raise ValueError("Gateway build SHA must be a full lowercase Git SHA")
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "environment": self.environment,
+            "version": self.version,
+            "build_sha": self.build_sha,
+            "protocol_version": self.protocol_version,
+        }
+
+
+def create_gateway_app(
+    service: GatewayService,
+    oauth: OAuthResourceConfig,
+    *,
+    runtime_identity: GatewayRuntimeIdentity | None = None,
+    allowed_hosts: tuple[str, ...] = (),
+) -> Any:
     """Create a hosting-neutral ASGI application with Streamable HTTP at /mcp."""
 
     FastMCP, ToolAnnotations, _, JSONResponse = _dependencies()
     from mcp.server.transport_security import TransportSecuritySettings
     resource_host = urlparse(oauth.resource).netloc
+    identity = runtime_identity or GatewayRuntimeIdentity()
+    trusted_hosts = list(dict.fromkeys([
+        resource_host,
+        *allowed_hosts,
+        "127.0.0.1",
+        "127.0.0.1:*",
+        "localhost",
+        "localhost:*",
+    ]))
     server = FastMCP(
         "CW — Codex Workflow Remote Gateway",
         instructions=(
@@ -61,7 +103,7 @@ def create_gateway_app(service: GatewayService, oauth: OAuthResourceConfig) -> A
         max_request_body_size=service.router.limits.maximum_request_bytes,
         transport_security=TransportSecuritySettings(
             enable_dns_rebinding_protection=True,
-            allowed_hosts=[resource_host, "127.0.0.1", "127.0.0.1:*", "localhost", "localhost:*"],
+            allowed_hosts=trusted_hosts,
             allowed_origins=[],
         ),
     )
@@ -179,12 +221,21 @@ def create_gateway_app(service: GatewayService, oauth: OAuthResourceConfig) -> A
 
     @server.custom_route("/healthz", methods=["GET"], include_in_schema=False)
     async def health(_: Any) -> Any:
-        return JSONResponse({"status": "ok", "service": "cw-remote-gateway"})
+        return JSONResponse({
+            "status": "ok",
+            "service": "cw-remote-gateway",
+            "build": identity.to_dict(),
+        })
 
     @server.custom_route("/readyz", methods=["GET"], include_in_schema=False)
     async def readiness(_: Any) -> Any:
         ready = service.store.schema_version() == 1
-        return JSONResponse({"status": "ready" if ready else "not_ready"}, status_code=200 if ready else 503)
+        return JSONResponse({
+            "status": "ready" if ready else "not_ready",
+            "service": "cw-remote-gateway",
+            "schema_version": service.store.schema_version(),
+            "build": identity.to_dict(),
+        }, status_code=200 if ready else 503)
 
     @server.custom_route("/.well-known/oauth-protected-resource", methods=["GET"], include_in_schema=False)
     async def resource_metadata(_: Any) -> Any:

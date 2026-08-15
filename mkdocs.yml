@@ -72,6 +72,16 @@ nav:
       - Remote Privacy: remote-privacy.md
       - Remote Operations: remote-operations.md
       - Remote Gateway 0.13 Acceptance: acceptance/remote-gateway-0.13.md
+      - Staging Environment: staging-environment.md
+      - Auth0 Staging: auth0-staging.md
+      - Staging Bootstrap 0.14: acceptance/staging-bootstrap-0.14.md
+      - Staging Deployment Runbook: operations/staging-deploy.md
+      - Gateway Runbook: operations/gateway-runbook.md
+      - Local Agent Runbook: operations/agent-runbook.md
+      - OAuth Runbook: operations/oauth-runbook.md
+      - Incident Response: operations/incident-response.md
+      - Backup and Restore: operations/backup-restore.md
+      - Key Rotation: operations/key-rotation.md
       - Plugin Listing Draft: plugin-listing-draft.md
       - Plugin Privacy Draft: plugin-privacy.md
       - Plugin Support: plugin-support.md
@@ -85,6 +95,7 @@ nav:
       - ADR — Remote Identity Provider: adr/0007-remote-identity-provider.md
       - ADR — Device Identity and Pairing: adr/0008-device-identity-pairing.md
       - ADR — Remote Persistence: adr/0009-remote-persistence.md
+      - ADR — Render Staging Hosting: adr/0010-render-staging-hosting.md
       - Project Layout: project-layout.md
       - Platform Support: testing/platform-support.md
       - Windows VM Acceptance: testing/windows-vm-acceptance.md

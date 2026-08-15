@@ -33,14 +33,18 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
     contract_path = root / "docs/remote-gateway-completion-contract.json"
-    if version != "0.13.0":
-        errors.append("remote candidate VERSION must be 0.13.0")
+    try:
+        version_parts = tuple(int(item) for item in version.split("."))
+    except ValueError:
+        version_parts = ()
+    if version_parts < (0, 13, 0):
+        errors.append("current VERSION must retain the 0.13 remote candidate or a later compatible milestone")
     if not contract_path.is_file():
         errors.append("missing remote Completion Contract")
         return errors
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
-    if contract.get("milestone_version") != version:
-        errors.append("remote Completion Contract version does not match VERSION")
+    if contract.get("milestone_version") != "0.13.0":
+        errors.append("remote Completion Contract must remain historical 0.13 evidence")
     if contract.get("public_deployment_in_scope") is not False or contract.get("plugin_submission_in_scope") is not False:
         errors.append("0.13 must not authorize deployment or plugin submission")
     for relative in REQUIRED_DOCS:

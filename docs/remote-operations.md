@@ -40,3 +40,8 @@ actor, and origin. Events exclude source and secrets.
 
 Secure MCP Tunnel and local stdio MCP remain supported development/local paths.
 They are not replaced by this public-gateway candidate.
+
+Render staging deployment, rollback, incident, backup/restore, and rotation
+procedures live under [operations](operations/staging-deploy.md). Their mere
+presence is not acceptance evidence; each procedure remains NOT EXERCISED
+until its external result is recorded.

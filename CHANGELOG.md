@@ -4,6 +4,26 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.14.0 — 2026-08-16
+
+- Prepare a portable, non-root Render staging image and Blueprint for the
+  existing remote gateway, with exact deploy identity, readiness checks,
+  bounded runtime configuration, managed TLS/custom-domain intent, and no
+  provider SDK in CW.
+- Retain the transactional SQLite backend on a single-instance encrypted
+  staging disk, explicitly documenting deploy downtime and postponing a shared
+  PostgreSQL backend until scale or availability evidence requires it.
+- Add a real Auth0 staging contract for issuer/JWKS/resource validation, PKCE
+  S256, preferred CIMD, guarded DCR fallback, narrow scopes, namespaced
+  workspace identity, and independent device/project revocation.
+- Add a local-agent staging profile, coherent environment contract, deployment
+  and security runbooks, staging acceptance evidence, container/config
+  validators, and sanitized build diagnostics without deploying or storing a
+  credential.
+- Preserve the exact remote tool surface, outbound-only agent, local source and
+  `.cw`, provider-neutral Core/Application, and complete high-consequence
+  authorization exclusion.
+
 ## 0.13.0 — 2026-08-15
 
 - Add a hosting-neutral Streamable HTTP MCP gateway that exposes the accepted

@@ -47,9 +47,11 @@ jobs:
           python -m pip install ".[remote]"
           python -m unittest tests.test_mcp_runtime tests.test_mcp_actions tests.test_plugin_candidate tests.test_chatgpt_development tests.test_plugin_production_readiness
           python -m unittest tests.test_remote_gateway
+          python -m unittest tests.test_staging_bootstrap
           python scripts/run_mcp_acceptance.py
           python scripts/validate_plugin_candidate.py
           python scripts/validate_plugin_production_readiness.py
+          python scripts/validate_staging_bootstrap.py
           python scripts/build_plugin_candidate.py --check
       - name: Test managed POSIX installer in isolation
         if: matrix.installer == 'posix'

@@ -93,7 +93,11 @@ jobs:
       - name: Install remote extra and run gateway security/E2E tests
         run: |
           python -m pip install ".[remote]"
-          python -m unittest tests.test_remote_gateway -v
+          python -m unittest tests.test_remote_gateway tests.test_staging_bootstrap -v
+          python scripts/validate_staging_bootstrap.py
+
+      - name: Build portable staging container
+        run: docker build --tag cw-staging:${{ github.sha }} .
 
   plugin:
     name: Plugin candidate contracts
@@ -110,6 +114,7 @@ jobs:
           python scripts/validate_plugin_candidate.py
           python scripts/validate_plugin_production_readiness.py
           python scripts/validate_remote_candidate.py
+          python scripts/validate_staging_bootstrap.py
           python scripts/build_plugin_candidate.py --check
           python -m unittest tests.test_plugin_candidate tests.test_chatgpt_development tests.test_plugin_production_readiness -v
 

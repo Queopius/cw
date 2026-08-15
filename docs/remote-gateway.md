@@ -1,7 +1,9 @@
 # CW Remote gateway
 
 CW 0.13 implements a hosting-neutral, production-oriented gateway candidate.
-It is not a hosted CW service and has not been submitted to OpenAI.
+CW 0.14 adds a Render/Auth0 staging deployment contract, but the service is
+not considered deployed until external evidence exists and has not been
+submitted to OpenAI.
 
 ```text
 ChatGPT / Codex
@@ -48,4 +50,5 @@ Availability is never reported as a workflow failure, and stack traces are not
 normal MCP results.
 
 See [remote authentication](remote-auth.md), [operations](remote-operations.md),
-and the [0.13 acceptance record](acceptance/remote-gateway-0.13.md).
+the [staging environment contract](staging-environment.md), and the
+[0.13 acceptance record](acceptance/remote-gateway-0.13.md).
