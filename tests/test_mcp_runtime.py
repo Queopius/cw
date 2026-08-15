@@ -448,6 +448,7 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
             assert process.stdin is not None and process.stdout is not None and process.stderr is not None
             frame_queue: queue.Queue[dict | BaseException | None] = queue.Queue()
             frames = []
+            stderr_lines: list[str] = []
 
             def collect_frames() -> None:
                 try:
@@ -458,7 +459,12 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
                 finally:
                     frame_queue.put(None)
 
-            threading.Thread(target=collect_frames, daemon=True).start()
+            stdout_thread = threading.Thread(target=collect_frames, daemon=True)
+            stderr_thread = threading.Thread(
+                target=lambda: stderr_lines.extend(process.stderr), daemon=True,
+            )
+            stdout_thread.start()
+            stderr_thread.start()
 
             def write(message: str | dict) -> None:
                 process.stdin.write(message if isinstance(message, str) else json.dumps(message))
@@ -471,7 +477,10 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
                     try:
                         frame = frame_queue.get(timeout=max(0.01, deadline - time.monotonic()))
                     except queue.Empty:
-                        self.fail(f"CW MCP stdio server did not respond to request {identifier} within 20 seconds")
+                        self.fail(
+                            f"CW MCP stdio server did not respond to request {identifier} within 20 seconds; "
+                            f"stderr={''.join(stderr_lines)!r}"
+                        )
                     if frame is None:
                         self.fail(f"CW MCP stdio server closed before responding to request {identifier}")
                     if isinstance(frame, BaseException):
@@ -491,7 +500,9 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
                 called = read_until(3)
                 process.stdin.close()
                 return_code = process.wait(timeout=20)
-                stderr = process.stderr.read()
+                stdout_thread.join(timeout=5)
+                stderr_thread.join(timeout=5)
+                stderr = "".join(stderr_lines)
             finally:
                 if process.poll() is None:
                     process.kill()
