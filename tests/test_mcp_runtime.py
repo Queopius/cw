@@ -427,6 +427,7 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
     def test_stdio_protocol_survives_malformed_input_without_contamination(self) -> None:
         repo = TempRepo()
         try:
+            before = tree_digest(repo.root / ".cw")
             messages = [
                 {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
                     "protocolVersion": "2025-06-18", "capabilities": {},
@@ -490,7 +491,6 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
                         return frame
 
             try:
-                write("not-json")
                 write(messages[0])
                 read_until(1)
                 write(messages[1])
@@ -498,6 +498,7 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
                 listed = read_until(2)
                 write(messages[3])
                 called = read_until(3)
+                write("not-json")
                 process.stdin.close()
                 return_code = process.wait(timeout=20)
                 stdout_thread.join(timeout=5)
@@ -513,6 +514,8 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
             self.assertEqual(0, return_code, stderr)
             self.assertTrue(frames)
             self.assertTrue(all(item.get("jsonrpc") == "2.0" for item in frames))
+            self.assertIn("Received exception from stream", stderr)
+            self.assertEqual(before, tree_digest(repo.root / ".cw"))
             self.assertEqual(6, len(listed["result"]["tools"]))
             encoded = json.dumps(called)
             self.assertIn("mcp_client", encoded)
