@@ -5,8 +5,11 @@ import importlib.util
 import io
 import json
 import os
+import queue
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
@@ -443,7 +446,19 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1,
             )
             assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+            frame_queue: queue.Queue[dict | BaseException | None] = queue.Queue()
             frames = []
+
+            def collect_frames() -> None:
+                try:
+                    for line in process.stdout:
+                        frame_queue.put(json.loads(line))
+                except BaseException as exc:
+                    frame_queue.put(exc)
+                finally:
+                    frame_queue.put(None)
+
+            threading.Thread(target=collect_frames, daemon=True).start()
 
             def write(message: str | dict) -> None:
                 process.stdin.write(message if isinstance(message, str) else json.dumps(message))
@@ -451,25 +466,39 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
                 process.stdin.flush()
 
             def read_until(identifier: int) -> dict:
+                deadline = time.monotonic() + 20
                 while True:
-                    frame = json.loads(process.stdout.readline())
+                    try:
+                        frame = frame_queue.get(timeout=max(0.01, deadline - time.monotonic()))
+                    except queue.Empty:
+                        self.fail(f"CW MCP stdio server did not respond to request {identifier} within 20 seconds")
+                    if frame is None:
+                        self.fail(f"CW MCP stdio server closed before responding to request {identifier}")
+                    if isinstance(frame, BaseException):
+                        raise frame
                     frames.append(frame)
                     if frame.get("id") == identifier:
                         return frame
 
-            write("not-json")
-            write(messages[0])
-            read_until(1)
-            write(messages[1])
-            write(messages[2])
-            listed = read_until(2)
-            write(messages[3])
-            called = read_until(3)
-            process.stdin.close()
-            return_code = process.wait(timeout=20)
-            stderr = process.stderr.read()
-            process.stdout.close()
-            process.stderr.close()
+            try:
+                write("not-json")
+                write(messages[0])
+                read_until(1)
+                write(messages[1])
+                write(messages[2])
+                listed = read_until(2)
+                write(messages[3])
+                called = read_until(3)
+                process.stdin.close()
+                return_code = process.wait(timeout=20)
+                stderr = process.stderr.read()
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+                process.stdin.close()
+                process.stdout.close()
+                process.stderr.close()
             self.assertEqual(0, return_code, stderr)
             self.assertTrue(frames)
             self.assertTrue(all(item.get("jsonrpc") == "2.0" for item in frames))
