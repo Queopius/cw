@@ -1,6 +1,6 @@
 # Plugin readiness architecture
 
-CW 0.8 proves the multi-adapter architecture with an optional local read-only
+CW 0.9 proves the multi-adapter architecture with an optional local governed
 MCP runtime. It still does not ship a public plugin, an Apps SDK interface, a
 hosted MCP endpoint, or a remote CW service.
 
@@ -11,7 +11,7 @@ hosted MCP endpoint, or a remote CW service.
                              │
              ┌───────────────┼───────────────┐
              │               │               │
-          CLI adapter   read-only MCP adapter   future skill
+          CLI adapter   governed MCP adapter   future skill
              │               │               │
         terminal / CI   ChatGPT / Codex   workflow guidance
 ```
@@ -83,7 +83,8 @@ projection.
 
 ### MCP adapter
 
-The CW 0.8 adapter calls Python application operations directly. It never runs
+The adapter established in CW 0.8 and extended in CW 0.9 calls Python
+application operations directly. It never runs
 `subprocess("cw ...")`, accepts an arbitrary command, exposes a shell, or
 maintains parallel state. Its stdio binding and optional SDK remain outside the
 engine. See [MCP runtime](mcp-runtime.md).
@@ -207,15 +208,16 @@ repositories before a remote boundary is proven.
 Open-source CW core and CLI remain fully local and functional without that
 MCP extra, an account, internet access, or a hosted Queopius service.
 
-## Next milestone: CW MCP Runtime · Controlled Actions
+## Implemented milestone: CW MCP Runtime · Controlled Actions
 
-Exit criteria:
+Validated outcomes:
 
-1. extract candidate phase actions fully behind `CWApplication`;
-2. define trusted host intent for allowed state changes;
-3. implement start/poll/cancel receipts for long-running operations;
-4. prove idempotency and shared locking across CLI and MCP;
-5. expose only low-consequence controlled actions first;
-6. keep extension authorization, rebaseline, and destructive repair separate;
-7. leave public ChatGPT HTTPS hosting, OAuth, Apps UI, packaging, and submission
+1. candidate phase actions execute fully behind `CWApplication`;
+2. typed MCP origin and application policy admit only the bounded action set;
+3. start/poll/safe queued-cancel receipts cover long-running operations;
+4. idempotency and shared locking apply across CLI and MCP;
+5. only phase start, configured validation, independent review request, and
+   narrow retry are exposed;
+6. extension authorization, rebaseline, and destructive repair remain separate;
+7. public ChatGPT HTTPS hosting, OAuth, Apps UI, packaging, and submission remain
    for later explicitly authorized milestones.

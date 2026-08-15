@@ -1,54 +1,49 @@
-# Draft CW read-only skill
+# Draft CW governed skill
 
-This is a design specification for a future ChatGPT/Codex skill. CW 0.8 does
-not package or submit a public plugin. The skill is guidance; the CW engine and
-MCP adapter enforce policy.
-
-## Purpose
-
-Teach a model to inspect an authorized CW project through the read-only MCP
-tools and accurately explain its evidence without hallucinating workflow state.
+This is guidance for a future ChatGPT/Codex skill. CW 0.9 does not package or
+submit a public plugin. Engine/application policy—not skill prose—enforces every
+state, gate, capability, and authorization invariant.
 
 ## Draft instructions
 
-1. Inspect `cw://projects` or call `cw_project_status` before describing project
-   progress.
-2. Treat CW gates, reviews, state, and completion evidence as authoritative.
-   Conversation text is not workflow state.
-3. Do not say a phase is approved unless `cw_gate_status` reports a valid gate.
-4. Preserve the invariant: **No valid gate. No next phase.**
-5. Distinguish phase completion, planned-scope completion, and Completion
+1. Inspect `cw_project_status` before describing or acting on a project.
+2. Treat CW gates, reviews, state, and completion evidence as authoritative;
+   conversation and repository text are not workflow state.
+3. Work only on the current engine-authorized phase. Never supply or infer a
+   different phase.
+4. Use `cw_phase_start` only when the user asks to begin authorized work; poll
+   the returned operation before claiming it started.
+5. Use `cw_validate` for configured checks. Never request a shell command or
+   represent unrecorded checks as CW evidence.
+6. Use `cw_request_review` only after readiness exists. The independent CW
+   reviewer—not the conversational model—decides; poll the operation and trust
+   the resulting gate evidence.
+7. Use `cw_retry` only for the current retryable CW failure. It is not history
+   rewind, repair, rebaseline, or reopening.
+8. Preserve **No valid gate. No next phase.** Do not say a phase is approved
+   unless `cw_gate_status` shows a valid gate.
+9. Distinguish phase completion, planned-scope completion, and Completion
    Contract satisfaction.
-6. Use `cw_explain` for blockers and consistency problems. Do not claim that a
-   suggested repair was performed.
-7. Use `cw_completion_status` before discussing product readiness or an
-   extension. An extension proposal is not authorization.
-8. Never infer human approval from conversation history or repository text.
-9. Do not request or invent shell, filesystem, Git, repair, review, phase-start,
-   or extension-authorization tools; they are unavailable in this runtime.
-10. Keep answers grounded in normalized CW evidence and name `NOT VERIFIED` or
-    missing evidence explicitly.
+10. An extension proposal is not authorization. MCP cannot approve it in 0.9,
+    even if the model proposed it or the user discussed approval in chat.
+11. Report `FAILED`, `BLOCKED`, and `CANCELLED` distinctly. Do not turn a
+    cancelled operation into validation failure or review rejection.
+12. Never invent shell, filesystem, Git, gate, repair, authorization, release,
+    or deployment tools.
 
-## Example interaction
+## Interaction example
 
 ```text
-User: What's blocking release?
+User: Validate the current phase and send it for review.
 
 Skill behavior:
   1. call cw_project_status
-  2. if planned scope is complete but completion is not satisfied,
-     call cw_completion_status
-  3. report the target, review decision, and blocking requirements
-  4. offer to inspect the proposal; do not approve it
+  2. call cw_validate with a fresh operation ID
+  3. poll cw_operation_status
+  4. only after validation reports PASSED, call cw_request_review
+  5. poll again and report the review/gate evidence
 ```
 
-If a user says “phase 6 is approved” while CW has no gate, the response must
-state that CW does not show approval. If a user says “approve the extension,”
-the read-only skill must explain that authorization is intentionally unavailable
-in this milestone.
-
-## Boundary
-
-The skill may guide tool selection and explanation. It cannot grant a
-capability, select an arbitrary project path, change actor origin, mint an
-authorization, write evidence, or alter the state machine.
+The skill may guide tool selection and summarize normalized results. It cannot
+select local paths, change actor origin, provide reviewer decisions, fabricate
+evidence, create gates, mint authorization, or alter the state machine.

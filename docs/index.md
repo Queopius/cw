@@ -70,8 +70,8 @@ when you intentionally want more than one gated phase.
     <span>Diagnose symptoms, understand error codes, and reconcile state without discarding evidence.</span>
   </a>
   <a class="cw-card" href="mcp-runtime/">
-    <strong>Inspect through MCP</strong>
-    <span>Connect local Codex to the optional read-only stdio runtime without exposing shell or filesystem access.</span>
+    <strong>Use governed MCP</strong>
+    <span>Inspect CW or request one of four controlled actions without exposing shell or filesystem access.</span>
   </a>
 </div>
 

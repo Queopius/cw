@@ -42,10 +42,11 @@ jobs:
           python-version: "3.13"
       - name: Run native platform and fake-Codex contract tests
         run: python -m unittest tests.test_platform tests.test_fake_codex
-      - name: Run platform-neutral MCP stdio contract tests
+      - name: Run platform-neutral MCP stdio and controlled-action contract tests
         run: |
           python -m pip install ".[mcp]"
-          python -m unittest tests.test_mcp_runtime
+          python -m unittest tests.test_mcp_runtime tests.test_mcp_actions
+          python scripts/run_mcp_acceptance.py
       - name: Test managed POSIX installer in isolation
         if: matrix.installer == 'posix'
         shell: bash

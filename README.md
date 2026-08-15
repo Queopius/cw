@@ -42,11 +42,13 @@ records SHA-256 approval gates before allowing another phase to begin.
 CW is designed for local Git repositories and offers bounded—not unlimited—
 autonomy. Use `cw version --verbose` for the installed build identity.
 
-CW 0.8 includes an optional local, read-only stdio MCP adapter over the same
-UI-independent application boundary used by the CLI. It exposes normalized CW
-status and evidence to local Codex clients without shell, filesystem, Git, or
-workflow mutation tools. It is not a hosted MCP service or public ChatGPT
-plugin. See [MCP runtime](docs/mcp-runtime.md).
+CW 0.9 includes an optional local stdio MCP adapter over the same UI-independent
+application boundary used by the CLI. Alongside normalized inspection, it
+offers four governed actions: start the current authorized phase, run configured
+validation, request independent review, and retry an engine-approved failure.
+It exposes no arbitrary shell/filesystem/Git command, gate operation, repair,
+rebaseline, or extension authorization. It is not a hosted MCP service or
+public ChatGPT plugin. See [MCP runtime](docs/mcp-runtime.md).
 
 ## Quick start
 

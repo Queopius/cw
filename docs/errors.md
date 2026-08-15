@@ -110,6 +110,13 @@ with the expected structured result.
 | `AUTHORIZATION_REQUIRED` | A high-consequence mutation lacks matching, current, explicit human authorization | New confirmation | Ask the operator to confirm the exact current proposal and action |
 | `OPERATION_CONFLICT` | An operation identifier was reused for a different request or another adapter holds the project lock | Context | Reuse the original request exactly, or wait and issue a new operation ID |
 | `PROJECT_SCOPE_VIOLATION` | A requested path or project handle is outside the adapter's authorized roots | No | Select an explicitly authorized CW repository |
+| `PROJECT_COMPLETED` | A controlled action targeted a semantically completed project | No | Inspect completion evidence; do not reopen implicitly |
+| `PHASE_NOT_STARTABLE` | Current state/readiness/session does not permit phase start | Context | Inspect status and finish or reconcile the current operation |
+| `OPERATION_IN_PROGRESS` | A conflicting/running operation cannot be replaced or cancelled safely | Later | Poll the active operation; do not assume rollback |
+| `OPERATION_NOT_FOUND` | The project has no lifecycle record for that operation ID | No | Use the project and operation ID returned by submission |
+| `OPERATION_CANCELLED` | A queued operation was cancelled before execution | New action if desired | Submit a fresh explicitly intended action |
+| `RETRY_NOT_ALLOWED` | Current evidence does not prove a controlled retry is safe | No | Inspect the recorded error; do not rewind history |
+| `COMPLETION_EXTENSION_PENDING` | Planned scope ended and contract review/extension authorization controls continuation | Human boundary | Inspect completion/proposal evidence; authorize only outside MCP |
 
 ## Safe diagnostic sequence
 

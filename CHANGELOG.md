@@ -4,6 +4,23 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.9.0 — 2026-08-15
+
+- Add four narrow MCP controlled actions—authorized phase start, configured
+  validation, independent review request, and engine-classified retry—through
+  `CWApplication`, with no CLI subprocess or direct `.cw` editing.
+- Add persistent project-scoped operation lifecycle, polling, idempotent replay,
+  safe queued cancellation, stale-supervisor detection, structured progress,
+  and cross-platform hashed operation records.
+- Preserve review/gate/Completion Contract governance: clients cannot select a
+  phase or validation command, supply review decisions, create gates, approve
+  extensions, repair/rebaseline state, or invoke generic shell/filesystem/Git.
+- Extend typed capability/origin enforcement, privacy redaction, expected
+  mutation-set checks, cross-project isolation, concurrent CLI/MCP locking,
+  fake-Codex controlled-flow acceptance, and MCP protocol/platform tests.
+- Update local MCP, security, skill, contract, and transport documentation while
+  retaining optional packaging and making no hosted/public plugin claim.
+
 ## 0.8.0 — 2026-08-15
 
 - Add an optional local stdio MCP runtime whose six narrow read-only tools call

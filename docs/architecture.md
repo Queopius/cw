@@ -27,7 +27,7 @@ cw.core     project identity, workflow, state, locks, gates, completion, persist
 cw.planning repository inspection and plan proposal
 cw.checks   deterministic validation
 cw.agents   independent review policy and consistency checks
-cw.adapters isolated Codex subprocess integration and optional read-only MCP
+cw.adapters isolated Codex subprocess integration and optional governed MCP
 cw.execution normalized events, live state, run identity, profiles, clocks
 cw.integrations optional/required capability health and diagnostic normalization
 cw.update    release providers, cache, verification, transactions, and rollback

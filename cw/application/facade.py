@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 from cw.core.authorization import OperationContext
+from cw.core.authorization import ActorOrigin
 from cw.core.audit import audit_history
 from cw.core.completion import (
     authorize_extension,
@@ -20,8 +21,21 @@ from cw.core.progress import derive_effective_workflow_state
 from cw.core.state import load_state
 
 from .capabilities import CAPABILITIES
+from .actions import (
+    request_current_review,
+    retry_current_operation,
+    start_current_phase,
+    validate_current_phase,
+)
 from .context import load_project_context
-from .models import OperationResult, OperationStatus, application_error
+from .models import (
+    ApplicationError,
+    ApplicationErrorCode,
+    OperationResult,
+    OperationStatus,
+    application_error,
+)
+from .operations import OperationSupervisor
 from .projects import ProjectResolver, ResolvedProject
 from .status import explain_status, project_status
 
@@ -33,8 +47,20 @@ def _raw_context(root: Path):
 class CWApplication:
     """Intentional public facade shared by CLI and future local adapters."""
 
-    def __init__(self, *, allowed_roots: tuple[Path, ...] | list[Path]) -> None:
+    def __init__(
+        self,
+        *,
+        allowed_roots: tuple[Path, ...] | list[Path],
+        review_backend_factory: object | None = None,
+        operation_workers: int = 2,
+    ) -> None:
         self.projects = ProjectResolver(allowed_roots)
+        if review_backend_factory is None:
+            from cw.adapters.codex import CodexAdapter
+
+            review_backend_factory = CodexAdapter
+        self._review_backend_factory = review_backend_factory
+        self._operations = OperationSupervisor(max_workers=operation_workers)
 
     def open_project(self, requested: Path | str) -> ResolvedProject:
         try:
@@ -222,6 +248,118 @@ class CWApplication:
             project, "gate.inspect", "gate.read", data, operation_id,
             actor_origin=actor_origin,
         )
+
+    @staticmethod
+    def _controlled_request(request: OperationContext, capability: str) -> None:
+        policy = CAPABILITIES.get(capability)
+        if (
+            policy is None
+            or request.requested_capability != capability
+            or policy.classification.value not in {"EXECUTION", "CONTROLLED_STATE_MUTATION"}
+        ):
+            raise ApplicationError(
+                ApplicationErrorCode.AUTHORIZATION_REQUIRED,
+                "Operation capability does not match the controlled action",
+            )
+        if request.authorization is not None:
+            raise ApplicationError(
+                ApplicationErrorCode.AUTHORIZATION_REQUIRED,
+                "Controlled actions do not accept caller-forged authorization grants",
+            )
+        if request.actor.origin in {
+            ActorOrigin.PLANNER, ActorOrigin.REVIEWER, ActorOrigin.INTERNAL_SUPERVISOR,
+        }:
+            raise ApplicationError(
+                ApplicationErrorCode.AUTHORIZATION_REQUIRED,
+                "Internal planning and review actors cannot request controlled actions",
+            )
+
+    @staticmethod
+    def _phase_hint(project: ResolvedProject) -> str | None:
+        try:
+            _, state, _ = load_project_context(project.root, validate=False)
+        except CwError as exc:
+            raise application_error(exc) from exc
+        value = state.get("current_phase")
+        return value if isinstance(value, str) else None
+
+    def phase_start(
+        self, project: ResolvedProject, request: OperationContext,
+    ) -> OperationResult:
+        self._controlled_request(request, "phase.start")
+        phase = self._phase_hint(project)
+        return self._operations.submit(
+            project, request,
+            operation="phase.start", capability="phase.start", phase=phase,
+            payload={}, executor=lambda: start_current_phase(project),
+        )
+
+    def validate(
+        self, project: ResolvedProject, request: OperationContext,
+    ) -> OperationResult:
+        self._controlled_request(request, "validation.run")
+        phase = self._phase_hint(project)
+        return self._operations.submit(
+            project, request,
+            operation="validation.run", capability="validation.run", phase=phase,
+            payload={},
+            executor=lambda: validate_current_phase(project, request.operation_id),
+        )
+
+    def request_review(
+        self, project: ResolvedProject, request: OperationContext,
+    ) -> OperationResult:
+        self._controlled_request(request, "review.run")
+        backend_factory = self._review_backend_factory
+        if not callable(backend_factory):
+            raise ApplicationError(
+                ApplicationErrorCode.INFRASTRUCTURE_FAILURE,
+                "The independent reviewer backend is unavailable",
+                retryable=True,
+            )
+        phase = self._phase_hint(project)
+        return self._operations.submit(
+            project, request,
+            operation="review.request", capability="review.run", phase=phase,
+            payload={},
+            executor=lambda: request_current_review(project, backend_factory),
+        )
+
+    def retry(
+        self, project: ResolvedProject, request: OperationContext,
+    ) -> OperationResult:
+        self._controlled_request(request, "retry.run")
+        backend_factory = self._review_backend_factory
+        if not callable(backend_factory):
+            raise ApplicationError(
+                ApplicationErrorCode.INFRASTRUCTURE_FAILURE,
+                "The independent reviewer backend is unavailable",
+                retryable=True,
+            )
+        phase = self._phase_hint(project)
+        return self._operations.submit(
+            project, request,
+            operation="operation.retry", capability="retry.run", phase=phase,
+            payload={},
+            executor=lambda: retry_current_operation(project, backend_factory),
+        )
+
+    def operation_status(
+        self, project: ResolvedProject, *, target_operation_id: str,
+        request: OperationContext,
+    ) -> OperationResult:
+        self._read_request("operation.read", request.operation_id, request)
+        return self._operations.status(project, target_operation_id)
+
+    def cancel_operation(
+        self, project: ResolvedProject, *, target_operation_id: str,
+        request: OperationContext,
+    ) -> OperationResult:
+        self._controlled_request(request, "operation.cancel")
+        return self._operations.cancel(project, target_operation_id)
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        self._operations.shutdown(wait=wait)
 
     def repair(self, project: ResolvedProject, request: OperationContext) -> OperationResult:
         if request.requested_capability != "project.repair":

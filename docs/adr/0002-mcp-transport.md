@@ -1,6 +1,6 @@
 # ADR 0002: next MCP transport
 
-Status: accepted and validated by CW 0.8.
+Status: accepted in CW 0.8; revalidated for controlled actions in CW 0.9.
 
 ## Options
 
@@ -12,11 +12,12 @@ Status: accepted and validated by CW 0.8.
 
 ## Decision
 
-CW 0.8 implements a transport-neutral read-only handler and one local stdio
-server. Implementation evidence validated command-started lifecycle, malformed
+CW implements a transport-neutral governed handler and one local stdio server.
+CW 0.9 retained the transport while adding asynchronous controlled operations;
+implementation evidence validates command-started lifecycle, malformed
 input isolation, EOF shutdown, machine-only stdout, stderr diagnostics, and
-Linux/Windows/macOS-feasible subprocess behavior. Project roots remain local and
-no listening port or network authentication surface is introduced.
+subprocess stdin isolation. Project roots remain local and no listening port or
+network authentication surface is introduced.
 
 Do not treat stdio as the final ChatGPT web transport. Official OpenAI
 documentation distinguishes local Codex stdio configuration from hosted

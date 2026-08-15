@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.9.0",
+      "changes": [
+        "Added four governed MCP actions through CWApplication with a persistent operation lifecycle.",
+        "Added project-scoped idempotency, polling, safe queued cancellation, and expected mutation-set enforcement.",
+        "Kept gates, review decisions, repair, rebaseline, and extension authorization outside the MCP action surface."
+      ]
+    },
+    {
       "version": "0.8.0",
       "changes": [
         "Added an optional local stdio MCP runtime with six narrow read-only CW tools.",

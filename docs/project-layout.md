@@ -1,7 +1,7 @@
 # Project layout
 
 CW separates mutable workflow state from static Codex/project integration.
-The MCP adapter reads these same locations and creates no plugin-specific state.
+The MCP adapter uses these same locations and creates no parallel plugin state.
 
 Typical structure:
 
@@ -12,12 +12,14 @@ project/
 │   ├── state.json
 │   ├── gates/
 │   ├── reviews/
+│   ├── validation/
 │   ├── completion/
 │   │   ├── reviews/
 │   │   ├── proposals/
 │   │   ├── authorizations/
 │   │   └── completion.satisfied.json
 │   ├── runtime/
+│   │   └── operations/
 │   ├── logs/
 │   └── backups/
 ├── .codex/
@@ -32,6 +34,13 @@ Operational metadata such as current state, writer/schema version, history, and
 migration records is mutable only through trusted CW transactions. Gates and
 reviews are retained audit evidence. Runtime session/readiness files are scoped
 to one managed execution and cannot be copied between projects.
+
+Controlled adapter actions retain normalized validation evidence under
+`.cw/validation/` and schema-versioned lifecycle/recovery receipts under
+`.cw/runtime/operations/`. Operation identifiers remain inside records;
+cross-platform hashed filenames prevent protocol IDs becoming local paths.
+These receipts never replace workflow state, gates, reviews, or completion
+evidence as sources of truth.
 
 Contract-aware completion evidence is also mutable only through the CW
 supervisor. Reviews, extension proposals, and human authorizations are

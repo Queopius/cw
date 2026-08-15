@@ -1,6 +1,6 @@
 # Integration-aware workflows
 
-CW's own optional read-only MCP server is documented separately in
+CW's own optional governed MCP server is documented separately in
 [MCP runtime](mcp-runtime.md). It is an adapter for inspecting CW state, not a
 project dependency checked by `cw integrations` and not an arbitrary gateway to
 other configured MCP servers.

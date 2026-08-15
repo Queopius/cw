@@ -37,7 +37,7 @@ returns `3`; and an interrupted foreground operation returns `130`.
 | `cw retry` | Retry the classified retryable operation. |
 | `cw history` / `cw explain` | Inspect audit history or a current blocker. |
 | `cw inspect` / `cw logs` | Inspect managed executions and structured events. |
-| `cw mcp` | Serve the optional local read-only MCP adapter over stdio. |
+| `cw mcp` | Serve the optional governed local MCP adapter over stdio. |
 | `cw doctor` / `cw error` | Diagnose the environment or the latest failure. |
 | `cw repair` | Reconcile CW metadata from validated evidence. |
 | `cw config` / `cw integrations` | Inspect policy and integration state. |
@@ -223,7 +223,7 @@ cw explain
 
 **Syntax:** `cw mcp [serve] [--project PATH] [--allowed-root PATH]`
 
-Starts the optional local read-only MCP runtime over stdio. `--project`
+Starts the optional governed local MCP runtime over stdio. `--project`
 authorizes an initialized CW project and may be repeated. `--allowed-root`
 constrains configured projects to a canonical local boundary and may also be
 repeated. With neither option, the current project is the only allowed root.
@@ -234,8 +234,10 @@ cw mcp serve --project /absolute/path/to/project
 
 Project paths are startup configuration supplied by the local operator; MCP
 tool calls use opaque handles. Stdout is reserved for protocol messages and
-diagnostics go to stderr. This command exposes no write, shell, filesystem, Git,
-review, repair, or authorization operation. Install the optional
+diagnostics go to stderr. The closed surface adds only authorized phase start,
+configured validation, independent review request, narrow retry, and operation
+poll/cancel to the read tools. It exposes no arbitrary shell/filesystem/Git,
+gate, repair, rebaseline, or extension-authorization operation. Install the optional
 `codex-workflow[mcp]` dependency before serving.
 
 ## cw inspect

@@ -52,6 +52,9 @@ class ToolContract:
     description: str
     capability: str
     application_method: str
+    mutation: bool = False
+    long_running: bool = False
+    allowed_arguments: tuple[str, ...] = ("project_id", "operation_id")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -60,10 +63,13 @@ class ToolContract:
             "description": self.description,
             "capability": self.capability,
             "annotations": {
-                "readOnlyHint": True,
+                "readOnlyHint": not self.mutation,
                 "destructiveHint": False,
+                "idempotentHint": True,
                 "openWorldHint": False,
             },
+            "mutation": self.mutation,
+            "long_running": self.long_running,
         }
 
 
@@ -104,6 +110,46 @@ TOOLS = (
         "approve, invalidate, or repair gates.",
         "gate.read", "gates",
     ),
+    ToolContract(
+        "cw_phase_start", "Start the authorized CW phase",
+        "Start only the current engine-authorized phase and create its implementation session. "
+        "Mutates phase/session metadata, never selects an arbitrary phase, creates a gate, or invokes Codex. "
+        "Returns an operation ID; duplicate invocation with that ID is safe.",
+        "phase.start", "phase_start", mutation=True, long_running=True,
+    ),
+    ToolContract(
+        "cw_validate", "Validate the current CW phase",
+        "Run only the current phase's configured deterministic validation contract. Mutates only "
+        "validation/operation evidence, never accepts a command, and may take time. Returns an operation ID.",
+        "validation.run", "validate", mutation=True, long_running=True,
+    ),
+    ToolContract(
+        "cw_request_review", "Request independent CW review",
+        "Request the existing independent read-only reviewer for the current authorized phase. May invoke "
+        "Codex and take time; only supervisor checks may create a gate. The caller cannot supply a decision.",
+        "review.run", "request_review", mutation=True, long_running=True,
+    ),
+    ToolContract(
+        "cw_retry", "Retry a controlled CW operation",
+        "Retry only the current engine-classified retryable implementation or review operation. Does not "
+        "rewind history, remove gates, reopen completion, or authorize an extension. A review retry may invoke "
+        "the independent Codex reviewer and take time. Returns an operation ID.",
+        "retry.run", "retry", mutation=True, long_running=True,
+    ),
+    ToolContract(
+        "cw_operation_status", "Inspect a CW operation",
+        "Poll normalized lifecycle and sanitized result data for one operation in the authorized project. "
+        "Does not alter workflow evidence or permit cross-project operation access.",
+        "operation.read", "operation_status",
+        allowed_arguments=("project_id", "operation_id", "target_operation_id"),
+    ),
+    ToolContract(
+        "cw_operation_cancel", "Cancel a queued CW operation",
+        "Cancel a controlled operation only before execution begins. Never fabricates phase, validation, "
+        "review, or gate outcomes; an already running mutation is refused as unsafe to cancel.",
+        "operation.cancel", "cancel_operation", mutation=True,
+        allowed_arguments=("project_id", "operation_id", "target_operation_id"),
+    ),
 )
 
 
@@ -111,15 +157,25 @@ def _stderr_diagnostic(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True), file=sys.stderr, flush=True)
 
 
-class MCPReadOnlyRuntime:
-    """Transport-independent MCP handler with a closed read-only allowlist."""
+class MCPRuntime:
+    """Transport-independent MCP handler with a closed governed allowlist.
+
+    The historical class name remains an import-compatible alias for 0.8
+    consumers; its registered 0.9 surface is defined only by ``TOOLS``.
+    """
 
     def __init__(
         self, config: RuntimeConfig, *, diagnostic_sink: DiagnosticSink | None = None,
+        review_backend_factory: object | None = None,
+        operation_workers: int = 2,
     ) -> None:
         self.config = config
         self._diagnostic = diagnostic_sink or _stderr_diagnostic
-        self.application = CWApplication(allowed_roots=config.allowed_roots)
+        self.application = CWApplication(
+            allowed_roots=config.allowed_roots,
+            review_backend_factory=review_backend_factory,
+            operation_workers=operation_workers,
+        )
         opened = [self.application.open_project(path) for path in config.project_paths]
         self._projects = {item.handle.repository_id: item for item in opened}
         if len(self._projects) != len(opened):
@@ -150,7 +206,13 @@ class MCPReadOnlyRuntime:
                     "project_id is required when more than one project is configured",
                 )
             return next(iter(self._projects.values()))
-        return self.application.open_project_handle(project_id)
+        project = self._projects.get(project_id)
+        if project is None:
+            raise ApplicationError(
+                ApplicationErrorCode.PROJECT_SCOPE_VIOLATION,
+                "Project handle is not authorized for this MCP runtime",
+            )
+        return project
 
     @staticmethod
     def _operation_id(value: Any) -> str:
@@ -184,7 +246,13 @@ class MCPReadOnlyRuntime:
         try:
             if not isinstance(supplied, dict):
                 raise ApplicationError(ApplicationErrorCode.INVALID_REQUEST, "Tool arguments must be an object")
-            unexpected = set(supplied) - {"project_id", "operation_id"}
+            contract = self._tools.get(name)
+            if contract is None:
+                raise ApplicationError(
+                    ApplicationErrorCode.AUTHORIZATION_REQUIRED,
+                    "This MCP runtime does not expose that operation",
+                )
+            unexpected = set(supplied) - set(contract.allowed_arguments)
             if unexpected:
                 raise ApplicationError(
                     ApplicationErrorCode.INVALID_REQUEST,
@@ -196,21 +264,26 @@ class MCPReadOnlyRuntime:
                     "project_id must be an opaque string handle",
                 )
             operation_id = self._operation_id(supplied.get("operation_id"))
-            contract = self._tools.get(name)
-            if contract is None:
-                raise ApplicationError(
-                    ApplicationErrorCode.AUTHORIZATION_REQUIRED,
-                    "This read-only MCP runtime does not expose that operation",
-                )
             capability = CAPABILITIES.get(contract.capability)
-            if (
-                capability is None
-                or capability.classification is not CapabilityClass.READ
-                or capability.mutation
-            ):
+            allowed_classes = {
+                CapabilityClass.READ,
+                CapabilityClass.EXECUTION,
+                CapabilityClass.CONTROLLED_STATE_MUTATION,
+            }
+            if capability is None or capability.classification not in allowed_classes:
                 raise ApplicationError(
                     ApplicationErrorCode.AUTHORIZATION_REQUIRED,
-                    "This MCP runtime exposes read-only capabilities only",
+                    "This MCP runtime does not expose that capability class",
+                )
+            if capability.human_authorization_required:
+                raise ApplicationError(
+                    ApplicationErrorCode.AUTHORIZATION_REQUIRED,
+                    "High-consequence authorization is unavailable over MCP",
+                )
+            if capability.mutation != contract.mutation:
+                raise ApplicationError(
+                    ApplicationErrorCode.STATE_INCONSISTENT,
+                    "MCP tool mutation annotation does not match application policy",
                 )
             project = self._project(project_id if isinstance(project_id, str) else None)
             request = OperationContext(
@@ -219,7 +292,32 @@ class MCPReadOnlyRuntime:
                 contract.capability,
             )
             method = getattr(self.application, contract.application_method)
-            result = method(project, request=request).to_dict()
+            if "target_operation_id" in contract.allowed_arguments:
+                target = supplied.get("target_operation_id")
+                if not isinstance(target, str) or _OPERATION_ID.fullmatch(target) is None:
+                    raise ApplicationError(
+                        ApplicationErrorCode.INVALID_REQUEST,
+                        "target_operation_id must identify an existing operation",
+                    )
+                try:
+                    result = method(
+                        project, target_operation_id=target, request=request,
+                    ).to_dict()
+                except ApplicationError as exc:
+                    if exc.code is ApplicationErrorCode.OPERATION_NOT_FOUND:
+                        token = __import__("hashlib").sha256(target.encode("utf-8")).hexdigest()
+                        if any(
+                            other.handle.repository_id != project.handle.repository_id
+                            and (other.root / ".cw" / "runtime" / "operations" / f"{token}.json").is_file()
+                            for other in self._projects.values()
+                        ):
+                            raise ApplicationError(
+                                ApplicationErrorCode.PROJECT_SCOPE_VIOLATION,
+                                "The operation belongs to another authorized project",
+                            ) from exc
+                    raise
+            else:
+                result = method(project, request=request).to_dict()
             payload = sanitize(result, private_roots=self.private_roots)
             self._diagnostic({
                 "event": "tool_invocation", "tool": name,
@@ -237,7 +335,7 @@ class MCPReadOnlyRuntime:
         except Exception:
             error = ApplicationError(
                 ApplicationErrorCode.INFRASTRUCTURE_FAILURE,
-                "CW could not complete the read-only MCP operation",
+                "CW could not complete the MCP operation",
                 retryable=True,
             )
             self._diagnostic({
@@ -306,3 +404,10 @@ class MCPReadOnlyRuntime:
             "resource": kind,
             "data": resource_data,
         }, private_roots=self.private_roots)
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        self.application.shutdown(wait=wait)
+
+
+# Keep the 0.8 name as a source-compatible alias for existing integrations.
+MCPReadOnlyRuntime = MCPRuntime

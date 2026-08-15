@@ -135,22 +135,31 @@ class MCPRuntimeTests(unittest.TestCase):
     def invoke(self, name: str, **extra):
         return self.runtime.call_tool(name, {"project_id": self.handle, **extra})
 
-    def test_tool_surface_is_narrow_described_and_read_only(self) -> None:
+    def test_tool_surface_is_narrow_described_and_governed(self) -> None:
         contracts = self.runtime.tool_contracts()
         self.assertEqual({
             "cw_project_status", "cw_project_inspect", "cw_history", "cw_explain",
             "cw_completion_status", "cw_gate_status",
+            "cw_phase_start", "cw_validate", "cw_request_review", "cw_retry",
+            "cw_operation_status", "cw_operation_cancel",
         }, {item["name"] for item in contracts})
-        self.assertTrue(all(item["annotations"]["readOnlyHint"] for item in contracts))
-        self.assertTrue(all("Does not" in item["description"] for item in contracts))
+        reads = [item for item in contracts if not item["mutation"]]
+        actions = [item for item in contracts if item["mutation"]]
+        self.assertEqual(7, len(reads))
+        self.assertEqual(5, len(actions))
+        self.assertTrue(all(item["annotations"]["readOnlyHint"] for item in reads))
+        self.assertTrue(all(not item["annotations"]["readOnlyHint"] for item in actions))
         names = json.dumps(contracts).lower()
         self.assertNotIn("cw_execute", names)
         self.assertNotIn("shell(command", names)
         self.assertNotIn("filesystem_read", names)
 
-    def test_every_tool_and_resource_is_non_mutating(self) -> None:
+    def test_every_read_tool_and_resource_is_non_mutating(self) -> None:
         before = tree_digest(self.repo.root / ".cw")
-        for contract in self.runtime.tool_contracts():
+        for contract in (item for item in self.runtime.tool_contracts() if not item["mutation"]):
+            arguments = {}
+            if contract["name"] == "cw_operation_status":
+                continue
             self.assertEqual("SUCCEEDED", self.invoke(contract["name"])["status"])
         for uri in self.runtime.resource_uris():
             self.runtime.read_resource(uri)
@@ -193,7 +202,9 @@ class MCPRuntimeTests(unittest.TestCase):
     def test_private_paths_secrets_and_environment_are_not_exposed(self) -> None:
         secret = "sk-mcp-test-secret-1234567890"
         with patch.dict(os.environ, {"CW_MCP_TEST_SECRET": secret}):
-            for contract in self.runtime.tool_contracts():
+            for contract in (item for item in self.runtime.tool_contracts() if not item["mutation"]):
+                if contract["name"] == "cw_operation_status":
+                    continue
                 encoded = json.dumps(self.invoke(contract["name"]))
                 self.assertNotIn(str(self.repo.root), encoded)
                 self.assertNotIn(secret, encoded)
@@ -380,7 +391,7 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
 
     def test_mcp_adapter_policy_imports_without_optional_sdk(self) -> None:
         import cw.adapters.mcp.runtime as runtime
-        self.assertEqual(6, len(runtime.TOOLS))
+        self.assertEqual(12, len(runtime.TOOLS))
 
     def test_optional_dependency_is_declared_and_adapter_is_packaged(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -406,7 +417,7 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
         self.assertIn("PROJECT_SCOPE_VIOLATION", stderr.getvalue())
 
     @unittest.skipUnless(importlib.util.find_spec("mcp"), "optional MCP SDK not installed")
-    def test_sdk_server_registers_only_read_tools_and_resources(self) -> None:
+    def test_sdk_server_registers_governed_tools_and_read_resources(self) -> None:
         from cw.adapters.mcp.server import create_server
 
         repo = TempRepo()
@@ -416,8 +427,8 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
             )
             server = create_server(runtime)
             tools = server._tool_manager.list_tools()
-            self.assertEqual(6, len(tools))
-            self.assertTrue(all(tool.annotations.readOnlyHint for tool in tools))
+            self.assertEqual(12, len(tools))
+            self.assertEqual(7, sum(bool(tool.annotations.readOnlyHint) for tool in tools))
             self.assertEqual(1, len(server._resource_manager.list_resources()))
             self.assertEqual(6, len(server._resource_manager.list_templates()))
         finally:
@@ -516,7 +527,7 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
             self.assertTrue(all(item.get("jsonrpc") == "2.0" for item in frames))
             self.assertIn("Received exception from stream", stderr)
             self.assertEqual(before, tree_digest(repo.root / ".cw"))
-            self.assertEqual(6, len(listed["result"]["tools"]))
+            self.assertEqual(12, len(listed["result"]["tools"]))
             encoded = json.dumps(called)
             self.assertIn("mcp_client", encoded)
             self.assertNotIn(str(repo.root), encoded)
@@ -524,6 +535,89 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
             self.assertIn('"event": "startup"', stderr)
             self.assertIn('"event": "shutdown"', stderr)
         finally:
+            repo.close()
+
+    @unittest.skipUnless(importlib.util.find_spec("mcp"), "optional MCP SDK not installed")
+    def test_stdio_controlled_action_submission_and_polling(self) -> None:
+        repo = TempRepo(phases=1)
+        process = None
+        try:
+            root = Path(__file__).resolve().parents[1]
+            environment = {**os.environ, "PYTHONPATH": str(root)}
+            process = subprocess.Popen(
+                [os.environ.get("PYTHON", os.sys.executable), "-m", "cw", "mcp", "serve", "--project", str(repo.root)],
+                cwd=root, env=environment, text=True, stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1,
+            )
+            assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+            frames: queue.Queue[dict | BaseException | None] = queue.Queue()
+
+            def collect() -> None:
+                try:
+                    for line in process.stdout:
+                        frames.put(json.loads(line))
+                except BaseException as exc:
+                    frames.put(exc)
+                finally:
+                    frames.put(None)
+
+            threading.Thread(target=collect, daemon=True).start()
+            threading.Thread(target=lambda: list(process.stderr), daemon=True).start()
+
+            def send(payload: dict) -> None:
+                process.stdin.write(json.dumps(payload) + "\n")
+                process.stdin.flush()
+
+            def receive(identifier: int) -> dict:
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    item = frames.get(timeout=max(0.01, deadline - time.monotonic()))
+                    if item is None:
+                        self.fail("stdio server stopped before controlled action response")
+                    if isinstance(item, BaseException):
+                        raise item
+                    if item.get("id") == identifier:
+                        return item
+                self.fail(f"stdio server did not answer request {identifier}")
+
+            send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": "cw-action-test", "version": "1"},
+            }})
+            receive(1)
+            send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            send({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+                "name": "cw_phase_start", "arguments": {"operation_id": "phase-start-stdio"},
+            }})
+            submitted = receive(2)
+            self.assertIn("phase-start-stdio", json.dumps(submitted))
+
+            terminal = None
+            for identifier in range(3, 30):
+                send({"jsonrpc": "2.0", "id": identifier, "method": "tools/call", "params": {
+                    "name": "cw_operation_status",
+                    "arguments": {
+                        "operation_id": f"stdio-poll-{identifier}",
+                        "target_operation_id": "phase-start-stdio",
+                    },
+                }})
+                terminal = receive(identifier)
+                if "SUCCEEDED" in json.dumps(terminal):
+                    break
+                time.sleep(0.01)
+            self.assertIsNotNone(terminal)
+            self.assertIn("SUCCEEDED", json.dumps(terminal))
+            self.assertTrue((repo.root / ".cw/runtime/implementer-session.json").is_file())
+            process.stdin.close()
+            self.assertEqual(0, process.wait(timeout=20))
+        finally:
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+            if process is not None:
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None and not stream.closed:
+                        stream.close()
             repo.close()
 
 

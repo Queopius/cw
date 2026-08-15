@@ -55,7 +55,7 @@ nav:
       - Plugin Readiness: plugin-readiness.md
       - MCP Runtime: mcp-runtime.md
       - MCP Tool Contract: mcp-tool-contract.md
-      - Draft Read-only Skill: cw-read-only-skill-draft.md
+      - Draft Governed Skill: cw-read-only-skill-draft.md
       - ADR — Multi-adapter Engine: adr/0001-multi-adapter-engine.md
       - ADR — MCP Transport: adr/0002-mcp-transport.md
       - Project Layout: project-layout.md

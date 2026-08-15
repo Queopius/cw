@@ -1,48 +1,36 @@
-# MCP runtime: local read-only access
+# MCP runtime: local governed access
 
-CW 0.8 provides an optional local MCP server for inspecting CW-controlled
-projects from Codex and other local MCP clients. It uses stdio, invokes
-`CWApplication` directly, and reads the same `.cw` evidence as the CLI.
+CW 0.9 extends the optional local stdio MCP runtime with four narrow controlled
+actions. The six 0.8 inspection tools and all read-only resources remain. Every
+request invokes `CWApplication` directly and uses the same engine, project lock,
+state, gates, review pipeline, and Completion Contract semantics as the CLI.
 
 ```text
 local MCP client
        │ stdio
        ▼
-CW MCP adapter
-       │ structured application calls
+closed MCP tool registry
+       │ typed OperationContext
        ▼
 CWApplication → CW engine → .cw evidence
 ```
 
-This release is deliberately read-only. It is not a public ChatGPT plugin, a
-hosted MCP endpoint, an Apps SDK UI, or a remote source-code service.
+This is not a generally writable MCP server, public ChatGPT plugin, hosted MCP
+endpoint, Apps SDK UI, or remote source-code service.
 
-## Install the optional runtime
+## Install and start
 
-Normal CLI installation has no MCP dependency. From a source checkout, install
-the extra in a virtual environment:
+MCP remains optional:
 
 ```bash
 python -m pip install ".[mcp]"
-```
-
-The regular `cw` CLI and `cw.application` continue to import and run when that
-extra is absent. Trying to serve MCP without the extra exits safely on stderr.
-
-## Start a scoped stdio server
-
-Authorize one initialized project at process startup:
-
-```bash
 cw mcp serve --project /absolute/path/to/project
 ```
 
-The path is local bootstrap configuration supplied by the operator. MCP tool
-calls do not accept project paths. They use the opaque repository handle
-returned by the `cw://projects` resource. When exactly one project is
-configured, tools may omit `project_id`.
-
-Multiple projects and an explicit parent boundary are supported:
+Ordinary CLI and application imports do not require the MCP SDK. The startup
+path is local operator configuration only. Tools use opaque project handles,
+never caller-provided filesystem paths. Multiple projects may be scoped beneath
+explicit canonical roots:
 
 ```bash
 cw mcp serve \
@@ -51,111 +39,113 @@ cw mcp serve \
   --project /absolute/path/to/workspaces/cli
 ```
 
-CW resolves every path canonically, verifies Git and CW identity, and rejects
-projects outside the allowed root, including symlink escapes. A client cannot
-substitute `../../other-project` or a local path for an opaque handle.
+CW validates canonical containment, Git/CW identity, and symlink boundaries.
+Operation IDs are scoped to the selected project and cannot be polled or
+cancelled through another project handle.
 
 ## Connect local Codex
-
-Current official OpenAI documentation supports command-started stdio servers
-for local Codex clients. With the optional extra installed in the environment
-that provides `cw`, configure the server:
 
 ```bash
 codex mcp add cw -- cw mcp serve --project /absolute/path/to/project
 codex mcp list
 ```
 
-The same configuration can be expressed in Codex `config.toml` with a command
-and arguments. See the official [Codex MCP documentation](https://developers.openai.com/codex/mcp/)
-for the current configuration syntax and client support.
+See the official [Codex MCP documentation](https://developers.openai.com/codex/mcp/)
+for current client configuration. ChatGPT web does not consume local Codex
+stdio configuration; CW claims no hosted or public ChatGPT integration.
 
-ChatGPT web does not read local Codex configuration. CW does not claim that
-this local stdio process is a public or hosted ChatGPT integration.
+## Read tools and resources
 
-## Tools
-
-All tools accept an opaque `project_id` and optional safe `operation_id`. Every
-tool is annotated read-only and is also enforced against CW's packaged
-capability manifest.
-
-| Tool | Result | Explicit limit |
+| Tool | Capability | Mutation |
 | --- | --- | --- |
-| `cw_project_status` | Canonical workflow, phase, gate, completion, and consistency facts | No mutation or arbitrary file read |
-| `cw_project_inspect` | Project handle plus normalized evidence summary | No unrestricted source/log inspection |
-| `cw_history` | Gate/review timeline and CW-owned history | No history mutation |
-| `cw_explain` | Evidence-based reason the project can or cannot advance/complete | Does not repair |
-| `cw_completion_status` | Contract, latest completion review, and extension proposal | Cannot review, authorize, or append |
-| `cw_gate_status` | Normalized phase-gate states and consistency | Cannot create or approve gates |
+| `cw_project_status` | `project.read` | None |
+| `cw_project_inspect` | `project.read` | None |
+| `cw_history` | `history.read` | None |
+| `cw_explain` | `project.read` | None |
+| `cw_completion_status` | `completion.read` | None |
+| `cw_gate_status` | `gate.read` | None |
+| `cw_operation_status` | `operation.read` | None |
 
-There is no generic execute tool, shell, arbitrary filesystem read, arbitrary
-Git operation, validator command, phase action, review action, repair action, or
-extension-authorization action.
+The resources remain `cw://projects` and normalized per-project summary,
+current-phase, gates, Completion Contract, latest completion review, and current
+extension-proposal resources. Read tools/resources do not mutate workflow
+evidence and never expose arbitrary repository files, `.env`, credentials,
+process environments, or unrestricted logs.
 
-## Resources
+## Controlled actions
 
-The adapter exposes JSON resources containing normalized CW evidence:
+All actions require an opaque `project_id` and caller-generated `operation_id`.
+They return quickly with a durable lifecycle record; use
+`cw_operation_status(target_operation_id=...)` to poll.
 
-- `cw://projects`;
-- `cw://projects/{project_id}/summary`;
-- `cw://projects/{project_id}/current-phase`;
-- `cw://projects/{project_id}/gates`;
-- `cw://projects/{project_id}/completion-contract`;
-- `cw://projects/{project_id}/completion-review/latest`;
-- `cw://projects/{project_id}/extension-proposal/current`.
+| Tool | Class | Required state | Intentional mutations | Explicit limit |
+| --- | --- | --- | --- | --- |
+| `cw_phase_start` | controlled state mutation | Current phase authorized/startable | Operation and implementation-session metadata | No phase argument; does not invoke Codex or create a gate |
+| `cw_validate` | execution | Current phase active | Operation plus normalized validation evidence | No command argument; runs configured workflow checks only |
+| `cw_request_review` | execution | Valid readiness for current phase | Operation, independent review, state, and possibly supervisor-created gate | Caller cannot provide decision, prompt, evidence, or sandbox |
+| `cw_retry` | controlled state mutation | Current implementation/review infrastructure error retryable | Operation and narrow recovery/session/review evidence | No rewind, completed reopen, gate removal, planning/completion retry, or extension approval |
+| `cw_operation_cancel` | controlled state mutation | Target still queued | Target operation lifecycle record | Running mutations are refused rather than rolled back |
 
-Resources never provide arbitrary repository files, `.env`, process
-environments, credentials, raw logs, or unrestricted reviewer transcripts.
+Normal tool invocation is sufficient for these bounded actions because the
+adapter assigns typed `mcp_client` origin and the application policy explicitly
+admits only this set. Planner, reviewer, and internal-supervisor origins cannot
+request them. Caller-supplied actor or authorization metadata is rejected.
 
-## Read-only enforcement
+## Operation lifecycle and idempotency
 
-The tool registry is a closed six-name allowlist. Before dispatch, the adapter
-verifies that the tool's capability exists, is classified `READ`, and is not a
-mutation. MCP calls always create a typed `mcp_client` operation context; input
-cannot claim `human_cli`, reviewer, planner, or supervisor origin.
+Operations use `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `BLOCKED`, and
+`CANCELLED`. Results include a sanitized stage, phase/result references, timing,
+and structured error. Validation failure and review rejection are semantic
+results, not transport crashes; cancellation is not phase failure.
 
-The adapter has no dynamic method name, command string, or hidden generic
-capability dispatcher. Unsupported names return `AUTHORIZATION_REQUIRED` and
-cannot reach application mutation methods. Tool annotations help clients, but
-server-side capability enforcement is authoritative.
+The first use of an operation ID binds it to project, action, capability,
+origin, and canonical request digest. An identical replay returns the existing
+record. Reuse for a different action/payload returns `OPERATION_CONFLICT` and
+does not duplicate sessions, reviews, or gates. Records live under shared
+`.cw/runtime/operations/`; their filenames are cross-platform hashes rather
+than protocol IDs.
 
-## Privacy and diagnostics
+Safe queued cancellation is implemented. CW 0.9 intentionally refuses to kill
+an already-running mutation because it cannot promise rollback of validation or
+review evidence. Operations continue when a client disconnects while the local
+server remains alive. After a server/process loss, operation polling marks a
+stale supervisor record blocked and normal CW session/repair reconciliation
+uses `.cw` as authority; there is no MCP-only database.
 
-MCP results retain the opaque handle, display name, and repository identity but
-remove `repository_root` and redact configured roots, home-directory prefixes,
-credentials, token-like values, environments, and raw logs. Status does not
-upload source content.
+## Review and gate safety
 
-Runtime diagnostics include startup, tool name, opaque project handle,
-structured error code, and shutdown only. They go to stderr; stdout is reserved
-for MCP protocol frames. Python tracebacks and exception details are not normal
-tool responses.
+An MCP client may request review but never acts as reviewer. CW invokes the same
+independent sibling Codex process in read-only mode, validates its structured
+result, and lets only supervisor logic create a gate after deterministic
+validation and an approved semantic review. There are no `create_gate`,
+`approve_gate`, or `force_gate` tools.
 
-Repository files remain untrusted evidence. A README or `AGENTS.md` instruction
-cannot change the allowlist, actor origin, capability class, gates, or
-authorization policy.
+When the final authorized phase passes, the normal Completion Contract review
+runs. `EXTENSION_REQUIRED` remains a human authorization boundary. MCP may read
+the proposal but cannot approve it in CW 0.9.
 
-## Lifecycle and failures
+## Security, privacy, and stdio
 
-The runtime opens and validates configured projects before serving, handles
-requests through the SDK's stdio lifecycle, and exits on EOF/client disconnect.
-Malformed protocol input produces protocol diagnostics without mixing human
-text into stdout. Application failures map to stable structured codes such as
-`PROJECT_NOT_INITIALIZED`, `PROJECT_SCOPE_VIOLATION`, `STATE_INCONSISTENT`,
-`OPERATION_CONFLICT`, and `INFRASTRUCTURE_FAILURE`.
+The closed registry has no arbitrary shell, Git, filesystem, validator command,
+generic execute, repair, rebaseline, contract replacement, extension
+authorization, release, deployment, or update tool. Capability annotations aid
+clients; application policy is authoritative.
 
-Read requests create no CW evidence or transport-specific state. Retries are
-harmless, and concurrent reads observe the same underlying state as the CLI.
+Repository text is untrusted evidence. README/AGENTS/source prompt injection
+cannot select a phase, command, actor, review decision, gate, or authorization.
+Responses pass through minimum-disclosure path/secret redaction. Detailed logs
+stay local behind evidence references.
 
-## Why read-only first
+Stdout is reserved for JSON-RPC protocol frames. Safe diagnostics use stderr.
+All validation, Git, and Codex subprocess paths explicitly isolate protocol
+stdin so child processes cannot consume MCP frames.
 
-CW is governance infrastructure. Read access proves project scoping, semantic
-parity, protocol discipline, privacy, packaging isolation, and capability
-enforcement before any conversational client can cause state changes.
+## Intentionally unavailable
 
-The next milestone is **CW MCP Runtime · Controlled Actions**. It may consider
-`validate`, `request review`, `start phase`, and `retry` only after trusted host
-intent, operation idempotency, shared locking, and long-running lifecycle
-contracts are proven. Extension authorization, rebaseline, and destructive
-repair remain separate high-consequence operations requiring explicit human
-authorization.
+CW 0.9 does not expose extension authorization, rebaseline, destructive repair,
+manual state/gate/review editing, arbitrary phase selection, release,
+deployment, update installation, or any generic command interface.
+
+The next milestone should evaluate **CW Plugin/App Candidate** before adding
+high-consequence MCP administration. Such actions require a separate trusted
+human-confirmation design and are not implied by controlled-action success.

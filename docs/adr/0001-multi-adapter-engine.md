@@ -1,6 +1,6 @@
 # ADR 0001: one engine, multiple adapters
 
-Status: accepted in CW 0.7; validated by the CW 0.8 read-only MCP adapter.
+Status: accepted in CW 0.7; validated by the CW 0.8 read adapter and CW 0.9 controlled actions.
 
 ## Context
 
@@ -20,7 +20,7 @@ All adapters share core locking and evidence.
 
 ## Consequences
 
-The read-only MCP implementation calls `CWApplication` directly and keeps its
+The MCP implementation calls `CWApplication` directly and keeps its
 optional SDK outside core/application. Execution-heavy phase orchestration still
 needs further extraction before write tools are exposed. OpenAI dependencies can
 evolve without changing core workflow semantics.
