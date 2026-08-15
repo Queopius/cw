@@ -124,6 +124,12 @@ ChatGPT confirmation is an additional UI layer. CW still validates phase
 startability, configured validation, independent review, retry policy,
 operation replay, and project scope after confirmation.
 
+Controlled mutation is not human authorization. Even on a surface that can
+invoke controlled actions, a conversational statement such as “approve it” is
+not evidence for a gate, completion extension, release, or deployment.
+High-consequence authorization remains a separate typed, scoped, auditable
+boundary and is not exposed by this profile.
+
 ## Acceptance prompts
 
 Run reads first and record the selected tool, arguments, normalized result,
@@ -187,5 +193,9 @@ steps edits CW gates or workflow evidence.
 
 The structured local acceptance record is
 [`chatgpt-development-acceptance.json`](chatgpt-development-acceptance.json).
-Real ChatGPT UI evidence remains `NOT_RUN` until an authorized workspace,
-tunnel, runtime key, and `tunnel-client` are available.
+Real ChatGPT Pro acceptance through Secure MCP Tunnel was completed on
+2026-08-15 using the `read-only` surface. Structured inspection, semantic
+interpretation of `HUMAN_REVIEW_REQUIRED`, project scoping, and refusal of
+human gate approval all passed. Controlled actions were not enabled in that
+session. See the sanitized
+[CW 0.11 acceptance evidence](acceptance/chatgpt-development-0.11.md).

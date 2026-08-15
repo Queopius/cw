@@ -106,7 +106,7 @@ runtime contracts are compared against it in CI.
 | --- | --- |
 | Codex CLI / IDE local host | `READY` |
 | ChatGPT desktop on the local Codex host | `READY` |
-| ChatGPT web developer-mode app | `DEVELOPMENT_PROFILE_READY`; real UI evidence pending credentials/workspace |
+| ChatGPT web developer-mode app | `READ_ONLY_ACCEPTED`; real ChatGPT Pro + Secure MCP Tunnel evidence |
 | Public Plugins Directory | `REQUIRES_REMOTE_APP_MILESTONE` |
 
 ### Codex local: candidate ready
@@ -127,14 +127,17 @@ listing.
 ChatGPT web does not read local Codex configuration. CW 0.11 therefore adds
 `cw mcp chatgpt-dev`, a startup-granted stdio profile intended for Secure MCP
 Tunnel. The official tunnel can reach stdio directly, so CW adds no HTTP
-listener. Real UI acceptance still needs an authorized tunnel/runtime key and
-ChatGPT workspace; public submission separately requires public HTTPS. See
+listener. Real read-only UI acceptance passed with an authorized ChatGPT Pro
+workspace and Secure MCP Tunnel on 2026-08-15. Controlled actions were not
+enabled in that session. Public submission separately requires a production
+remote architecture and public HTTPS. See
 [ChatGPT development setup](chatgpt-development.md).
 
 ## Directory readiness classification
 
 - Local installable/reviewable package: `READY`.
-- ChatGPT web connection: `NEEDS_REMOTE_RUNTIME`.
+- ChatGPT web Developer Mode read-only connection: `ACCEPTED`.
+- Public ChatGPT connection: `NEEDS_REMOTE_RUNTIME`.
 - User-to-project connection lifecycle: `NEEDS_AUTH`.
 - Final privacy/terms/support publication: `NEEDS_PUBLIC_DOCS`.
 - Publisher identity, regions, attestations, contacts, and submission approval:

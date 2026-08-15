@@ -93,6 +93,8 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     skill_ui_path = plugin / "skills" / "cw-workflow" / "agents" / "openai.yaml"
     marketplace_path = root / ".agents" / "plugins" / "marketplace.json"
     contract_path = root / "docs" / "chatgpt-development-completion-contract.json"
+    acceptance_path = root / "docs" / "chatgpt-development-acceptance.json"
+    acceptance_evidence_path = root / "docs" / "acceptance" / "chatgpt-development-0.11.md"
     candidate_docs = (
         root / "docs" / "plugin-app-candidate.md",
         root / "docs" / "plugin-listing-draft.md",
@@ -100,7 +102,8 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         root / "docs" / "plugin-support.md",
         root / "docs" / "plugin-security.md",
         root / "docs" / "chatgpt-development.md",
-        root / "docs" / "chatgpt-development-acceptance.json",
+        acceptance_path,
+        acceptance_evidence_path,
         root / "docs" / "adr" / "0003-plugin-candidate.md",
         root / "docs" / "adr" / "0004-chatgpt-development-and-public-runtime.md",
     )
@@ -120,6 +123,7 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         capabilities = _load(capability_path)
         marketplace = _load(marketplace_path)
         contract = _load(contract_path)
+        acceptance = _load(acceptance_path)
     except (OSError, json.JSONDecodeError) as exc:
         return [f"invalid plugin JSON: {exc}"]
 
@@ -297,6 +301,17 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     if contract.get("submission_in_scope") is not False:
         errors.append("plugin candidate must not require or imply public submission")
 
+    manual = acceptance.get("manual_chatgpt", {})
+    if (
+        acceptance.get("completion_decision") != "SATISFIED"
+        or manual.get("status") != "PASS"
+        or manual.get("surface") != "read-only"
+        or manual.get("forbidden_mutation") != "PASS"
+        or manual.get("human_gate_integrity") != "PASS"
+        or acceptance.get("secrets_recorded") is not False
+    ):
+        errors.append("ChatGPT 0.11 real read-only acceptance evidence is incomplete")
+
     candidate_text = re.sub(
         r"\s+", " ", "\n".join(
             path.read_text(encoding="utf-8") for path in candidate_docs
@@ -307,7 +322,7 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         "developers.openai.com/api/docs/guides/secure-mcp-tunnels",
         "PLATFORM_CAPABILITY_UNAVAILABLE",
         "Tunnels Read + Use",
-        "NOT_RUN",
+        "NOT_TESTED_BY_DESIGN",
         "NEEDS_HUMAN_BUSINESS_INPUT",
         "authenticated relay",
     ):

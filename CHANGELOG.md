@@ -16,6 +16,10 @@ All notable changes to CW are documented here.
 - Document current Developer Mode/tunnel permissions, setup, revocation,
   transmitted data, manual acceptance state, and the future authenticated
   relay contract without deploying or submitting anything.
+- Close the external read-only acceptance gate with real ChatGPT Pro and
+  Secure MCP Tunnel evidence, including structured project inspection,
+  `HUMAN_REVIEW_REQUIRED` interpretation, project scoping, and refusal to turn
+  conversational intent into human gate approval.
 
 ## 0.10.0 — 2026-08-15
 

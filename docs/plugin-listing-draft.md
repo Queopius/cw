@@ -29,8 +29,8 @@ autonomy. Advance with evidence. No valid gate. No next phase.
 
 - Codex local stdio: supported candidate.
 - ChatGPT desktop local host: supported candidate where policy permits.
-- ChatGPT web Developer Mode: development profile prepared for Secure MCP
-  Tunnel; real workspace acceptance is pending authorized tunnel credentials.
+- ChatGPT web Developer Mode: read-only profile accepted through Secure MCP
+  Tunnel on ChatGPT Pro; controlled actions were not enabled in that test.
 - ChatGPT public directory: unavailable until a stable HTTPS MCP and
   production authentication milestone is completed.
 - Hosted service, deployment, and high-consequence authorization: unavailable.

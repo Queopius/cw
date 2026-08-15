@@ -139,6 +139,11 @@ The local CLI is itself the explicit human action boundary. A future ChatGPT or
 Codex adapter must create the grant from trusted host confirmation metadata,
 not from a model-supplied boolean or conversational claim.
 
+CW 0.11 validated this separation in a real ChatGPT Pro read-only session: the
+client correctly explained `HUMAN_REVIEW_REQUIRED` and refused to manufacture
+the pending gate. A controlled state mutation remains categorically different
+from high-consequence human authorization.
+
 ## Project scoping and identity
 
 `ProjectResolver` accepts one or more trusted roots, resolves paths canonically,

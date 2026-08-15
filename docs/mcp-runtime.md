@@ -94,6 +94,12 @@ adapter assigns typed `mcp_client` origin and the application policy explicitly
 admits only this set. Planner, reviewer, and internal-supervisor origins cannot
 request them. Caller-supplied actor or authorization metadata is rejected.
 
+This permission does not constitute human approval. Controlled execution or
+state mutation and high-consequence human authorization are different
+capability classes. No conversational request, client confirmation, or
+controlled-action tool can manufacture a gate approval or completion-extension
+authorization.
+
 ## Operation lifecycle and idempotency
 
 Operations use `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `BLOCKED`, and
@@ -152,3 +158,8 @@ deployment, update installation, or any generic command interface.
 The next milestone should evaluate **CW Plugin/App Candidate** before adding
 high-consequence MCP administration. Such actions require a separate trusted
 human-confirmation design and are not implied by controlled-action success.
+
+The real ChatGPT Pro read-only profile passed Secure MCP Tunnel acceptance on
+2026-08-15, including refusal to turn a request to approve a pending human
+review into workflow state. See the
+[sanitized acceptance record](acceptance/chatgpt-development-0.11.md).

@@ -118,6 +118,13 @@ CW 0.9 does not expose extension authorization, rebaseline, destructive repair,
 release, or deployment. Tool annotations or skill prose are not security
 enforcement.
 
+The CW 0.11 real ChatGPT acceptance also proved that client access and natural
+language do not collapse this hierarchy. A read-only ChatGPT Pro connection
+could inspect `HUMAN_REVIEW_REQUIRED` but could not approve its gate. More
+generally, `CONTROLLED_STATE_MUTATION` is not
+`HIGH_CONSEQUENCE_AUTHORIZATION`; “approve it” alone is never sufficient
+authorization evidence.
+
 CW may check for releases but never silently installs them. A managed update
 requires explicit user action, downloads through the trusted release provider,
 enforces SHA-256, rejects unsafe archive members, stages outside the active

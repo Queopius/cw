@@ -25,18 +25,45 @@
     "replay_after_restart": "VERIFIED"
   },
   "manual_chatgpt": {
-    "status": "NOT_RUN",
-    "reason": "No tunnel_id, runtime API key, tunnel-client, or authorized ChatGPT development workspace was configured in the local release environment.",
-    "read_tools": "NOT_RUN",
-    "controlled_actions": "NOT_RUN",
-    "confirmation_behavior": "NOT_RUN"
+    "status": "PASS",
+    "client": "ChatGPT Pro",
+    "transport": "OpenAI Secure MCP Tunnel",
+    "tunnel_client": "0.0.11",
+    "surface": "read-only",
+    "project": {
+      "display_name": "moloni-marketplace-bridge",
+      "branch": "hardening/functional-package-audit",
+      "local_path_recorded": false,
+      "workflow": "ACTIVE",
+      "state": "HUMAN_REVIEW_REQUIRED",
+      "approved_gates": 12,
+      "planned_phases": 13,
+      "current_phase": "14 · Controlled Pilot Acceptance",
+      "position": "13 / 13",
+      "attempt": "1 / 3",
+      "readiness": "NOT READY",
+      "gate": "PENDING",
+      "effective_state": "IN_PROGRESS"
+    },
+    "read_tools": "PASS",
+    "structured_project_inspection": "PASS",
+    "semantic_governance": "PASS",
+    "forbidden_mutation": "PASS",
+    "human_gate_integrity": "PASS",
+    "project_scoping": "PASS",
+    "secure_tunnel_e2e": "PASS",
+    "controlled_actions": "NOT_TESTED_BY_DESIGN",
+    "controlled_actions_reason": "The accepted ChatGPT Pro connection intentionally used the read-only surface.",
+    "confirmation_behavior": "NOT_APPLICABLE_READ_ONLY"
   },
   "development_prerequisites": {
-    "tunnel_client": "NOT_AVAILABLE",
-    "tunnel_id": "NOT_CONFIGURED",
-    "runtime_api_key": "NOT_CONFIGURED",
-    "authorized_chatgpt_workspace": "NOT_VERIFIED"
+    "tunnel_client": "VERIFIED",
+    "tunnel_id": "VERIFIED_NOT_RECORDED",
+    "runtime_api_key": "VERIFIED_NOT_RECORDED",
+    "authorized_chatgpt_workspace": "VERIFIED"
   },
+  "completion_decision": "SATISFIED",
+  "evidence_document": "acceptance/chatgpt-development-0.11.md",
   "secrets_recorded": false,
   "submission_performed": false,
   "public_service_deployed": false

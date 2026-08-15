@@ -15,6 +15,7 @@ from cw.adapters.mcp import (
     chatgpt_development_config,
 )
 from cw.cli.main import main
+from cw.application.capabilities import CAPABILITIES, CapabilityClass
 from tests.helpers import TempRepo
 
 
@@ -77,6 +78,43 @@ class ChatGPTDevelopmentRuntimeTests(unittest.TestCase):
             self.assertFalse({
                 "cw_execute", "cw_authorize_extension", "cw_create_gate", "cw_repair",
             } & names)
+        finally:
+            runtime.shutdown()
+
+    def test_controlled_mutation_is_not_human_authorization(self) -> None:
+        self.assertEqual(
+            CapabilityClass.CONTROLLED_STATE_MUTATION,
+            CAPABILITIES["phase.start"].classification,
+        )
+        extension = CAPABILITIES["extension.authorize"]
+        self.assertEqual(
+            CapabilityClass.HIGH_CONSEQUENCE_AUTHORIZATION,
+            extension.classification,
+        )
+        self.assertTrue(extension.human_authorization_required)
+
+        for surface in (ChatGPTSurface.READ_ONLY, ChatGPTSurface.CONTROLLED_ACTIONS):
+            runtime = self.runtime(surface)
+            try:
+                names = {item["name"] for item in runtime.tool_contracts()}
+                self.assertNotIn("cw_authorize_extension", names)
+                self.assertNotIn("cw_create_gate", names)
+                self.assertNotIn("cw_approve_gate", names)
+            finally:
+                runtime.shutdown()
+
+    def test_chatgpt_origin_cannot_turn_approval_words_into_authorization(self) -> None:
+        runtime = self.runtime(ChatGPTSurface.CONTROLLED_ACTIONS)
+        before = (self.repo.root / ".cw/state.json").read_bytes()
+        try:
+            handle = runtime.project_handles()[0]["repository_id"]
+            result = runtime.call_tool("cw_authorize_extension", {
+                "project_id": handle,
+                "operation_id": "natural-language-is-not-authorization",
+                "user_intent": "approve it",
+            })
+            self.assertEqual("AUTHORIZATION_REQUIRED", result["error"]["code"])
+            self.assertEqual(before, (self.repo.root / ".cw/state.json").read_bytes())
         finally:
             runtime.shutdown()
 

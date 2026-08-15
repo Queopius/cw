@@ -37,3 +37,10 @@ authenticates the development transport but does not make ChatGPT identity the
 local OS identity or satisfy public submission. A future public HTTPS relay
 still requires OAuth, device pairing, per-user grants, revocation, audit
 boundaries, rate limiting, and local source ownership.
+
+Real ChatGPT Pro acceptance on 2026-08-15 exercised a project that was in
+`HUMAN_REVIEW_REQUIRED`. The read-only profile returned the authoritative
+state and refused a conversational request to approve the gate. This proves
+the intended boundary at the real client/transport layer: controlled mutation
+is not high-consequence human authorization, and natural-language intent is
+not an authorization artifact.
