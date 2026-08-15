@@ -9,7 +9,11 @@ import tempfile
 import time
 from pathlib import Path
 
-from cw.adapters.mcp import MCPRuntime, RuntimeConfig
+from cw.adapters.mcp import (
+    ChatGPTSurface,
+    MCPRuntime,
+    chatgpt_development_config,
+)
 from cw.adapters.result import CodexResult
 from cw.core.initialize import initialize
 from cw.core.models import WorkflowState
@@ -87,7 +91,10 @@ def main() -> int:
         transition(root, state, WorkflowState.IN_PROGRESS)
 
         runtime = MCPRuntime(
-            RuntimeConfig.create([root]), diagnostic_sink=lambda _: None,
+            chatgpt_development_config(
+                [root], [root], surface=ChatGPTSurface.CONTROLLED_ACTIONS,
+            ),
+            diagnostic_sink=lambda _: None,
             review_backend_factory=FakeReviewer,
         )
         try:
@@ -96,6 +103,20 @@ def main() -> int:
             forbidden = {"cw_execute", "shell", "git", "cw_create_gate", "cw_authorize_extension"}
             if names & forbidden or len(names) != 12:
                 raise RuntimeError("Installed MCP registry is not the governed 0.9 surface")
+            origin_probe = runtime.call_tool("cw_project_status", {
+                "project_id": handle, "operation_id": "acceptance-chatgpt-origin",
+            })
+            if origin_probe.get("actor_origin") != "chatgpt_app":
+                raise RuntimeError("Installed ChatGPT development profile did not preserve typed origin")
+            for index, name in enumerate((
+                "cw_project_status", "cw_project_inspect", "cw_explain",
+                "cw_history", "cw_gate_status", "cw_completion_status",
+            )):
+                read = runtime.call_tool(name, {
+                    "project_id": handle, "operation_id": f"acceptance-read-{index}",
+                })
+                if read["status"] != "SUCCEEDED":
+                    raise RuntimeError(f"Installed plugin read failed for {name}: {read}")
 
             runtime.call_tool("cw_phase_start", {
                 "project_id": handle, "operation_id": "acceptance-start",

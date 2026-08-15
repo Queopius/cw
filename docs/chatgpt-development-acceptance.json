@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "milestone": "CW 0.11 · ChatGPT Development Acceptance",
+  "recorded_at": "2026-08-15",
+  "official_model": {
+    "chatgpt_web": "remote MCP through a public HTTPS endpoint or Secure MCP Tunnel in Developer Mode",
+    "local_development": "Secure MCP Tunnel can forward directly to a configured stdio MCP command",
+    "write_actions": "supported by the developer evaluation model when account and workspace policy permit; confirmation is additional UI safety",
+    "access": "Developer Mode and tunnel access depend on separate ChatGPT workspace and Platform organization permissions"
+  },
+  "automated": {
+    "status": "VERIFIED",
+    "full_suite": "543 passed; 4 expected optional skips",
+    "mcp_enabled_suite": "63 passed",
+    "official_plugin_validator": "PASS",
+    "official_skill_validator": "PASS",
+    "installed_normal_wheel": "PASS",
+    "installed_mcp_wheel": "PASS",
+    "real_codex_hero_workflow": "PASS; one independently reviewed gate",
+    "surface_profiles": ["read-only", "controlled-actions"],
+    "project_grants": "VERIFIED",
+    "remote_origin": "VERIFIED",
+    "privacy_redaction": "VERIFIED",
+    "prompt_injection": "VERIFIED",
+    "replay_after_restart": "VERIFIED"
+  },
+  "manual_chatgpt": {
+    "status": "NOT_RUN",
+    "reason": "No tunnel_id, runtime API key, tunnel-client, or authorized ChatGPT development workspace was configured in the local release environment.",
+    "read_tools": "NOT_RUN",
+    "controlled_actions": "NOT_RUN",
+    "confirmation_behavior": "NOT_RUN"
+  },
+  "development_prerequisites": {
+    "tunnel_client": "NOT_AVAILABLE",
+    "tunnel_id": "NOT_CONFIGURED",
+    "runtime_api_key": "NOT_CONFIGURED",
+    "authorized_chatgpt_workspace": "NOT_VERIFIED"
+  },
+  "secrets_recorded": false,
+  "submission_performed": false,
+  "public_service_deployed": false
+}

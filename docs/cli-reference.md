@@ -221,7 +221,7 @@ cw explain
 
 ## cw mcp
 
-**Syntax:** `cw mcp [serve] [--project PATH] [--allowed-root PATH]`
+**Syntax:** `cw mcp [serve|chatgpt-dev] [--project PATH] [--allowed-root PATH] [--surface read-only|controlled-actions]`
 
 Starts the optional governed local MCP runtime over stdio. `--project`
 authorizes an initialized CW project and may be repeated. `--allowed-root`
@@ -239,6 +239,13 @@ configured validation, independent review request, narrow retry, and operation
 poll/cancel to the read tools. It exposes no arbitrary shell/filesystem/Git,
 gate, repair, rebaseline, or extension-authorization operation. Install the optional
 `codex-workflow[mcp]` dependency before serving.
+
+`cw mcp chatgpt-dev` is the Secure MCP Tunnel development bootstrap. It
+requires at least one explicit `--project`, fixes the typed origin to
+`chatgpt_app`, and defaults `--surface` to `read-only`. Select
+`--surface controlled-actions` only when the tested ChatGPT workspace permits
+write actions. A blocked known tool returns
+`PLATFORM_CAPABILITY_UNAVAILABLE`; high-consequence actions remain absent.
 
 ## cw inspect
 

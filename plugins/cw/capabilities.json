@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "source": "cw.application capability policy",
+  "exposed": {
+    "READ": [
+      "cw_project_status",
+      "cw_project_inspect",
+      "cw_history",
+      "cw_explain",
+      "cw_completion_status",
+      "cw_gate_status",
+      "cw_operation_status"
+    ],
+    "EXECUTION": [
+      "cw_validate",
+      "cw_request_review"
+    ],
+    "CONTROLLED_STATE_MUTATION": [
+      "cw_phase_start",
+      "cw_retry",
+      "cw_operation_cancel"
+    ]
+  },
+  "forbidden": [
+    "arbitrary_shell",
+    "arbitrary_filesystem",
+    "arbitrary_git",
+    "generic_execute",
+    "arbitrary_validation_command",
+    "gate_create",
+    "gate_approve",
+    "evidence_create",
+    "project_repair",
+    "destructive_repair",
+    "workflow_rebaseline",
+    "workflow_edit",
+    "completion_contract_replace",
+    "extension_authorize",
+    "update",
+    "release",
+    "deploy"
+  ],
+  "chatgpt_development": {
+    "transport": "secure-mcp-tunnel-to-stdio",
+    "default_profile": "read-only",
+    "profiles": {
+      "read-only": [
+        "cw_project_status",
+        "cw_project_inspect",
+        "cw_history",
+        "cw_explain",
+        "cw_completion_status",
+        "cw_gate_status"
+      ],
+      "controlled-actions": "exact accepted exposed surface"
+    },
+    "project_grants": "startup-only explicit project paths; tool calls use opaque handles"
+  },
+  "enforcement": "Server-side CWApplication policy is authoritative; plugin metadata and tool annotations are advisory."
+}

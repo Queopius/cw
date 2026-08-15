@@ -45,6 +45,7 @@ jobs:
         run: |
           python -m pip install --upgrade build
           python -m build
+          python scripts/build_plugin_candidate.py --output "dist/cw-plugin-$(cat VERSION).zip"
       - name: Verify installed wheel
         run: |
           python -m pip install --force-reinstall dist/*.whl
@@ -74,7 +75,23 @@ jobs:
       - name: Install MCP extra and run protocol/security tests
         run: |
           python -m pip install ".[mcp]"
-          python -m unittest tests.test_mcp_runtime tests.test_mcp_actions -v
+          python -m unittest tests.test_mcp_runtime tests.test_mcp_actions tests.test_chatgpt_development -v
+
+  plugin:
+    name: Plugin candidate contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Validate package, skill, permissions, security, and parity
+        run: |
+          python scripts/validate_plugin_candidate.py
+          python scripts/build_plugin_candidate.py --check
+          python -m unittest tests.test_plugin_candidate tests.test_chatgpt_development -v
 
   docs:
     name: Documentation

@@ -313,13 +313,15 @@
         "--no-color",
         "--project",
         "--quiet",
+        "--surface",
         "--verbose"
       ],
       "positionals": [
         {
           "name": "action",
           "choices": [
-            "serve"
+            "serve",
+            "chatgpt-dev"
           ],
           "required": false
         }

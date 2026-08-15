@@ -627,7 +627,7 @@ def render_help(console: Console) -> None:
             ("run", "Run a bounded multi-phase batch"),
             ("inspect", "Inspect a managed Codex execution"),
             ("logs", "View structured execution events"),
-            ("mcp", "Serve governed local MCP over stdio"),
+            ("mcp", "Serve governed local or ChatGPT-development MCP over stdio"),
         )),
         ("Maintenance", (
             ("doctor", "Check environment"),

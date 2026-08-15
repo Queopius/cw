@@ -77,7 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
     logs.add_argument("--run", dest="run_id")
     mcp = subcommands.add_parser("mcp", add_help=True)
     _common(mcp, suppress_defaults=True)
-    mcp.add_argument("action", nargs="?", choices=("serve",), default="serve")
+    mcp.add_argument(
+        "action", nargs="?", choices=("serve", "chatgpt-dev"), default="serve",
+    )
     mcp.add_argument(
         "--project", action="append", dest="projects", metavar="PATH",
         help="Authorize an initialized CW project (repeatable; startup-only)",
@@ -85,6 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
     mcp.add_argument(
         "--allowed-root", action="append", dest="allowed_roots", metavar="PATH",
         help="Constrain configured projects to a canonical local root (repeatable)",
+    )
+    mcp.add_argument(
+        "--surface", choices=("read-only", "controlled-actions"), default="read-only",
+        help="ChatGPT development capability profile (chatgpt-dev only)",
     )
     run = subcommands.add_parser("run", add_help=True)
     _common(run, suppress_defaults=True)

@@ -55,9 +55,16 @@ nav:
       - Plugin Readiness: plugin-readiness.md
       - MCP Runtime: mcp-runtime.md
       - MCP Tool Contract: mcp-tool-contract.md
-      - Draft Governed Skill: cw-read-only-skill-draft.md
+      - Plugin / App Candidate: plugin-app-candidate.md
+      - ChatGPT Development: chatgpt-development.md
+      - Plugin Listing Draft: plugin-listing-draft.md
+      - Plugin Privacy Draft: plugin-privacy.md
+      - Plugin Support: plugin-support.md
+      - Plugin Security Review: plugin-security.md
       - ADR — Multi-adapter Engine: adr/0001-multi-adapter-engine.md
       - ADR — MCP Transport: adr/0002-mcp-transport.md
+      - ADR — Plugin Candidate: adr/0003-plugin-candidate.md
+      - ADR — ChatGPT Development: adr/0004-chatgpt-development-and-public-runtime.md
       - Project Layout: project-layout.md
       - Platform Support: testing/platform-support.md
       - Windows VM Acceptance: testing/windows-vm-acceptance.md

@@ -31,18 +31,31 @@ _OPERATION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 class RuntimeConfig:
     project_paths: tuple[Path, ...]
     allowed_roots: tuple[Path, ...]
+    actor: Actor
+    enabled_tools: frozenset[str] | None = None
+    surface: str = "local-stdio"
 
     @classmethod
     def create(
         cls,
         project_paths: list[Path] | tuple[Path, ...],
         allowed_roots: list[Path] | tuple[Path, ...] | None = None,
+        *,
+        actor: Actor | None = None,
+        enabled_tools: frozenset[str] | set[str] | None = None,
+        surface: str = "local-stdio",
     ) -> "RuntimeConfig":
         projects = tuple(Path(item) for item in project_paths)
         if not projects:
             raise ValueError("At least one configured CW project is required")
         roots = tuple(Path(item) for item in (allowed_roots or projects))
-        return cls(projects, roots)
+        return cls(
+            projects,
+            roots,
+            actor or Actor("local-mcp-client", ActorOrigin.MCP_CLIENT),
+            None if enabled_tools is None else frozenset(enabled_tools),
+            surface,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +194,13 @@ class MCPRuntime:
         if len(self._projects) != len(opened):
             raise ValueError("Configured CW projects must have unique repository identities")
         self._tools = {item.name: item for item in TOOLS}
+        configured_tools = set(self._tools) if config.enabled_tools is None else set(config.enabled_tools)
+        unknown_tools = configured_tools - set(self._tools)
+        if unknown_tools:
+            raise ValueError(
+                "Configured MCP surface contains unknown tools: " + ", ".join(sorted(unknown_tools))
+            )
+        self._enabled_tools = frozenset(configured_tools)
 
     @property
     def private_roots(self) -> tuple[Path, ...]:
@@ -193,7 +213,7 @@ class MCPRuntime:
         ]
 
     def tool_contracts(self) -> list[dict[str, Any]]:
-        return [item.to_dict() for item in TOOLS]
+        return [item.to_dict() for item in TOOLS if item.name in self._enabled_tools]
 
     def emit_diagnostic(self, payload: dict[str, Any]) -> None:
         self._diagnostic(payload)
@@ -252,6 +272,16 @@ class MCPRuntime:
                     ApplicationErrorCode.AUTHORIZATION_REQUIRED,
                     "This MCP runtime does not expose that operation",
                 )
+            if name not in self._enabled_tools:
+                raise ApplicationError(
+                    ApplicationErrorCode.PLATFORM_CAPABILITY_UNAVAILABLE,
+                    "CW supports this capability, but it is unavailable on the configured client surface",
+                    details={
+                        "cw_capability_supported": True,
+                        "surface": self.config.surface,
+                        "surface_capability_available": False,
+                    },
+                )
             unexpected = set(supplied) - set(contract.allowed_arguments)
             if unexpected:
                 raise ApplicationError(
@@ -288,7 +318,7 @@ class MCPRuntime:
             project = self._project(project_id if isinstance(project_id, str) else None)
             request = OperationContext(
                 operation_id,
-                Actor("local-mcp-client", ActorOrigin.MCP_CLIENT),
+                self.config.actor,
                 contract.capability,
             )
             method = getattr(self.application, contract.application_method)

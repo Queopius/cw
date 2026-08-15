@@ -1,6 +1,8 @@
 # MCP tool contract
 
-CW 0.9 implements the local stdio read and controlled-action subset below. All
+CW implements the stdio read and controlled-action subset below. CW 0.11 may
+advertise only the six primary reads on a restricted ChatGPT development
+surface, but it never adds another tool. All
 tools have narrow schemas, opaque project scope, structured application results,
 and stable errors. No tool dispatches through the CLI.
 
@@ -56,7 +58,10 @@ Stable codes include `PROJECT_SCOPE_VIOLATION`, `PROJECT_COMPLETED`,
 `PHASE_NOT_STARTABLE`, `STATE_INCONSISTENT`, `OPERATION_IN_PROGRESS`,
 `OPERATION_CONFLICT`, `OPERATION_NOT_FOUND`, `OPERATION_CANCELLED`,
 `RETRY_NOT_ALLOWED`, `COMPLETION_EXTENSION_PENDING`, `AUTHORIZATION_REQUIRED`,
-and `INFRASTRUCTURE_FAILURE`. Normal responses do not contain tracebacks.
+`PLATFORM_CAPABILITY_UNAVAILABLE`, and `INFRASTRUCTURE_FAILURE`. The platform
+code means CW supports a known tool that the configured client-surface profile
+does not advertise; it is not a product/workflow failure. Normal responses do
+not contain tracebacks.
 
 ## High-consequence boundary
 

@@ -16,7 +16,9 @@ CWApplication → CW engine → .cw evidence
 ```
 
 This is not a generally writable MCP server, public ChatGPT plugin, hosted MCP
-endpoint, Apps SDK UI, or remote source-code service.
+endpoint, Apps SDK UI, or remote source-code service. CW 0.11 can expose this
+same stdio server through Secure MCP Tunnel using an explicit ChatGPT
+development profile.
 
 ## Install and start
 
@@ -52,7 +54,8 @@ codex mcp list
 
 See the official [Codex MCP documentation](https://developers.openai.com/codex/mcp/)
 for current client configuration. ChatGPT web does not consume local Codex
-stdio configuration; CW claims no hosted or public ChatGPT integration.
+stdio configuration; use the bounded [ChatGPT development setup](chatgpt-development.md)
+for Secure MCP Tunnel. CW claims no hosted or public ChatGPT integration.
 
 ## Read tools and resources
 

@@ -42,13 +42,18 @@ records SHA-256 approval gates before allowing another phase to begin.
 CW is designed for local Git repositories and offers bounded—not unlimited—
 autonomy. Use `cw version --verbose` for the installed build identity.
 
-CW 0.9 includes an optional local stdio MCP adapter over the same UI-independent
+CW 0.11 includes an optional local stdio MCP adapter over the same UI-independent
 application boundary used by the CLI. Alongside normalized inspection, it
 offers four governed actions: start the current authorized phase, run configured
 validation, request independent review, and retry an engine-approved failure.
 It exposes no arbitrary shell/filesystem/Git command, gate operation, repair,
-rebaseline, or extension authorization. It is not a hosted MCP service or
-public ChatGPT plugin. See [MCP runtime](docs/mcp-runtime.md).
+rebaseline, or extension authorization. The repository packages that accepted
+surface and a workflow skill as a reviewable, repo-local
+[OpenAI plugin candidate](docs/plugin-app-candidate.md). It is not a hosted MCP
+service, public ChatGPT web app, or submitted directory plugin. The same
+explicitly scoped stdio server can be tested through Secure MCP Tunnel without
+uploading the repository. See [MCP runtime](docs/mcp-runtime.md) and
+[ChatGPT development](docs/chatgpt-development.md).
 
 ## Quick start
 

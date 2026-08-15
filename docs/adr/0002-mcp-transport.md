@@ -1,6 +1,7 @@
 # ADR 0002: next MCP transport
 
-Status: accepted in CW 0.8; revalidated for controlled actions in CW 0.9.
+Status: accepted in CW 0.8; revalidated for controlled actions in CW 0.9 and
+ChatGPT development in CW 0.11.
 
 ## Options
 
@@ -19,11 +20,11 @@ input isolation, EOF shutdown, machine-only stdout, stderr diagnostics, and
 subprocess stdin isolation. Project roots remain local and no listening port or
 network authentication surface is introduced.
 
-Do not treat stdio as the final ChatGPT web transport. Official OpenAI
-documentation distinguishes local Codex stdio configuration from hosted
-ChatGPT plugin tools. A later remote milestone must design stable HTTPS
-streamable HTTP, OAuth/authorization, an authenticated user-controlled runtime
-bridge, and explicit privacy boundaries before exposing local repositories.
+Secure MCP Tunnel can now forward directly to a configured private stdio
+server. CW 0.11 therefore reuses this adapter for ChatGPT development instead
+of adding localhost HTTP. The tunnel is not a public submission endpoint. A
+later public milestone still needs stable HTTPS, OAuth, an authenticated
+user-controlled relay, and explicit privacy boundaries.
 
 Localhost HTTP and hosted MCP remain deferred. The MCP SDK and protocol binding
 live under `cw.adapters.mcp`; `cw.core` and `cw.application` import neither. A

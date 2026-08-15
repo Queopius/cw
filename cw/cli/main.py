@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -206,12 +207,31 @@ def command_logs(args: argparse.Namespace, console: Console) -> int:
 
 def command_mcp(args: argparse.Namespace, console: Console) -> int:
     # Lazy import preserves ordinary CLI operation without the optional MCP SDK.
-    from cw.adapters.mcp import RuntimeConfig
+    from cw.adapters.mcp import (
+        ChatGPTSurface,
+        RuntimeConfig,
+        chatgpt_development_config,
+    )
     from cw.adapters.mcp.server import serve
 
+    if args.action == "chatgpt-dev" and not args.projects:
+        print(
+            "cw mcp chatgpt-dev requires at least one explicit --project grant",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 2
     projects = [Path(item) for item in (args.projects or [Path.cwd()])]
     allowed_roots = [Path(item) for item in args.allowed_roots] if args.allowed_roots else projects
-    return serve(RuntimeConfig.create(projects, allowed_roots))
+    if args.action == "chatgpt-dev":
+        config = chatgpt_development_config(
+            projects,
+            allowed_roots,
+            surface=ChatGPTSurface(args.surface),
+        )
+    else:
+        config = RuntimeConfig.create(projects, allowed_roots)
+    return serve(config)
 
 
 def command_run(args: argparse.Namespace, console: Console) -> int:

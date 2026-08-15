@@ -134,7 +134,8 @@ def create_server(runtime: MCPReadOnlyRuntime) -> Any:
         ("cw_operation_status", operation_status),
         ("cw_operation_cancel", operation_cancel),
     ):
-        register_tool(name, function)
+        if any(item["name"] == name for item in runtime.tool_contracts()):
+            register_tool(name, function)
 
     @server.resource(
         "cw://projects",
@@ -182,6 +183,7 @@ def serve(config: RuntimeConfig) -> int:
         runtime.emit_diagnostic({
             "event": "startup", "transport": "stdio",
             "projects": len(runtime.project_handles()),
+            "surface": config.surface,
         })
         server = create_server(runtime)
         server.run(transport="stdio")

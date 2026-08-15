@@ -2,6 +2,22 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.11.0",
+      "changes": [
+        "Added an explicitly granted ChatGPT development profile for Secure MCP Tunnel over the existing stdio runtime.",
+        "Separated CW capability support from the read-only or controlled-action capability enabled on the tested ChatGPT surface.",
+        "Added remote-origin, privacy, injection, replay, recovery, and future authenticated-relay evidence without a hosted service."
+      ]
+    },
+    {
+      "version": "0.10.0",
+      "changes": [
+        "Packaged the accepted MCP surface as a current-format local OpenAI plugin candidate.",
+        "Added the production CW workflow skill, official assets, capability mapping, and development marketplace metadata.",
+        "Classified ChatGPT web/public support as requiring a future remote HTTPS runtime and authentication boundary."
+      ]
+    },
+    {
       "version": "0.9.0",
       "changes": [
         "Added four governed MCP actions through CWApplication with a persistent operation lifecycle.",

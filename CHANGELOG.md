@@ -4,6 +4,36 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.11.0 — 2026-08-15
+
+- Add a Secure MCP Tunnel-compatible ChatGPT development bootstrap over the
+  existing stdio runtime, with no HTTP server, hosted service, or new CW tool.
+- Add explicit startup project grants, fixed `chatgpt_app` origin, and separate
+  read-only/controlled-action surface profiles with structured platform
+  capability errors.
+- Add deterministic ChatGPT-boundary tests for discovery, scope, privacy,
+  prompt injection, actor forgery, replay/restart, and exact capability parity.
+- Document current Developer Mode/tunnel permissions, setup, revocation,
+  transmitted data, manual acceptance state, and the future authenticated
+  relay contract without deploying or submitting anything.
+
+## 0.10.0 — 2026-08-15
+
+- Package the accepted CW 0.9 engine and exact MCP capability surface as a
+  current-format, repo-local OpenAI plugin candidate with no new workflow
+  capabilities, hosted runtime, submission, or Apps SDK dependency.
+- Add the production CW workflow skill, official brand assets, scoped stdio MCP
+  definition, explicit capability mapping, and installable development
+  marketplace metadata.
+- Add deterministic plugin, skill, permission, security, privacy, semantic
+  parity, archive, and official Codex CLI discovery/installation validation.
+- Document the accurate surface split: local Codex and ChatGPT desktop can use
+  the stdio candidate, while ChatGPT web/public distribution requires a future
+  HTTPS remote runtime and authentication milestone.
+- Add a milestone Completion Contract, listing draft, support/privacy/security
+  drafts, transport/auth boundary, and CI package checks without submitting or
+  publishing the candidate.
+
 ## 0.9.0 — 2026-08-15
 
 - Add four narrow MCP controlled actions—authorized phase start, configured
