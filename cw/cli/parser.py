@@ -24,6 +24,14 @@ def build_parser() -> argparse.ArgumentParser:
     _common(plan, suppress_defaults=True)
     plan.add_argument("action", nargs="?", choices=("show", "approve", "rebuild"))
     plan.add_argument("--goal")
+    completion = subcommands.add_parser("completion", add_help=True)
+    _common(completion, suppress_defaults=True)
+    completion.add_argument("action", nargs="?", choices=("show", "review", "approve", "reject", "adopt"))
+    completion.add_argument(
+        "--target",
+        choices=("proof-of-concept", "functional-prototype", "internal-tool", "controlled-pilot", "production", "public-release"),
+        help="Readiness template for explicit legacy adoption",
+    )
     review = subcommands.add_parser("review", add_help=True)
     _common(review, suppress_defaults=True)
     review.add_argument("--hook", action="store_true", help=argparse.SUPPRESS)
@@ -62,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     integrations.add_argument("name", nargs="?")
     inspect = subcommands.add_parser("inspect", add_help=True)
     _common(inspect, suppress_defaults=True)
-    inspect.add_argument("action", nargs="?", choices=("run", "session"), default="session")
+    inspect.add_argument("action", nargs="?", choices=("run", "session", "completion"), default="session")
     inspect.add_argument("run_id", nargs="?")
     logs = subcommands.add_parser("logs", add_help=True)
     _common(logs, suppress_defaults=True)

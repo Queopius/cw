@@ -56,6 +56,9 @@ class EffectiveWorkflowState:
     last_gate: str | None
     last_review: str | None
     is_complete: bool
+    planned_scope_complete: bool
+    completion_mode: str
+    completion_satisfied: bool
     consistent: bool
     issues: tuple[str, ...]
 
@@ -135,14 +138,35 @@ def derive_effective_workflow_state(
     approved = list(chain.approved)
     approved_count = len(approved)
     phase_count = len(workflow.phases)
-    is_complete = approved_count == phase_count
+    planned_scope_complete = approved_count == phase_count
+    completion_mode = "contract" if workflow.completion_target is not None else "legacy"
+    completion_satisfied = False
+    if planned_scope_complete and workflow.completion_target is not None:
+        try:
+            from .completion import validate_completion_gate
+
+            validate_completion_gate(root, workflow)
+            completion_satisfied = True
+        except CwError:
+            completion_satisfied = False
+    is_complete = planned_scope_complete and (
+        workflow.completion_target is None or completion_satisfied
+    )
     current = state.get("current_phase")
     latest_reference = (
         gate_path(root, approved[-1][0]).relative_to(root).as_posix()
         if approved else None
     )
-    expected_current = None if is_complete else workflow.phases[approved_count].id
-    expected_status = WorkflowState.COMPLETED if is_complete else WorkflowState.IN_PROGRESS
+    expected_current = None if planned_scope_complete else workflow.phases[approved_count].id
+    if is_complete:
+        expected_status = WorkflowState.COMPLETED
+    elif planned_scope_complete:
+        from .completion import derive_completion_status
+
+        expected_status, expected_proposal = derive_completion_status(root, workflow, state)
+    else:
+        expected_status = WorkflowState.IN_PROGRESS
+        expected_proposal = None
     latest_review = approved[-1][1].get("review_reference") if approved else None
     if not isinstance(latest_review, str):
         latest_review = approved[-1][1].get("review_file") if approved else None
@@ -151,11 +175,24 @@ def derive_effective_workflow_state(
     issues = list(chain.issues)
     if state.get("last_gate") != latest_reference:
         issues.append(f"last_gate must be {latest_reference or 'null'}")
-    if is_complete:
+    if planned_scope_complete:
         if current is not None:
-            issues.append("Completed workflow still has an active phase")
-        if state.get("status") != WorkflowState.COMPLETED.value:
-            issues.append("All configured phases are approved, so state must be COMPLETED")
+            issues.append(
+                "Planned-complete workflow still has an active phase"
+                if workflow.completion_target is not None
+                else "Completed workflow still has an active phase"
+            )
+        if workflow.completion_target is None and state.get("status") != WorkflowState.COMPLETED.value:
+            issues.append("All configured legacy phases are approved, so state must be COMPLETED")
+        elif workflow.completion_target is not None:
+            if completion_satisfied and state.get("status") != WorkflowState.COMPLETED.value:
+                issues.append("Valid completion evidence requires state COMPLETED")
+            if not completion_satisfied and state.get("status") == WorkflowState.COMPLETED.value:
+                issues.append("Contract-aware workflow is marked complete without valid completion evidence")
+            if expected_status is WorkflowState.EXTENSION_PROPOSED and state.get("extension_proposal") != expected_proposal:
+                issues.append(f"extension_proposal must be {expected_proposal}")
+            if state.get("status") != expected_status.value:
+                issues.append(f"completion state must be {expected_status.value}")
     else:
         if current != expected_current:
             issues.append(f"current_phase must be {expected_current}")
@@ -195,10 +232,13 @@ def derive_effective_workflow_state(
         approved_phases=tuple(phase_id for phase_id, _ in approved),
         approved_count=approved_count,
         remaining_count=max(0, phase_count - approved_count),
-        active_count=0 if is_complete else 1,
+        active_count=0 if planned_scope_complete else 1,
         last_gate=latest_reference,
         last_review=latest_review,
         is_complete=is_complete,
+        planned_scope_complete=planned_scope_complete,
+        completion_mode=completion_mode,
+        completion_satisfied=completion_satisfied,
         consistent=not issues,
         issues=tuple(issues),
     )
@@ -388,10 +428,16 @@ def normalize_legacy_progress(
     position_stale = (
         current != expected_current
         or state.get("last_gate") != latest_reference
-        or (effective.is_complete and state.get("status") != expected_status)
+        or (effective.planned_scope_complete and state.get("status") != expected_status)
         or advanced_attempt_stale
         or resolved_cw_metadata_error(state)
     )
+    expected_proposal = None
+    if effective.planned_scope_complete and workflow.completion_target is not None:
+        from .completion import derive_completion_status
+
+        _, expected_proposal = derive_completion_status(root, workflow, state)
+        position_stale = position_stale or state.get("extension_proposal") != expected_proposal
     if position_stale:
         latest = workflow.phase(latest_id)
         state["last_gate"] = gate_path(root, latest.id).relative_to(root).as_posix()
@@ -399,9 +445,19 @@ def normalize_legacy_progress(
             state["last_review"] = latest_review
         state["last_error"] = None
         state["infrastructure_error"] = None
-        if effective.is_complete:
+        if effective.planned_scope_complete:
             state["current_phase"] = None
-            state["status"] = WorkflowState.COMPLETED.value
+            state["status"] = expected_status
+            state["extension_proposal"] = expected_proposal
+            if expected_status == WorkflowState.COMPLETED.value and workflow.completion_target is not None:
+                from .completion import completion_gate_path
+                from .utils import load_json
+
+                completion_gate = completion_gate_path(root)
+                gate_data = load_json(completion_gate)
+                state["last_completion_gate"] = completion_gate.relative_to(root).as_posix()
+                if isinstance(gate_data, dict) and isinstance(gate_data.get("cycle"), int):
+                    state["completion_cycle"] = gate_data["cycle"]
             state["attempt"] = 0
         else:
             state["current_phase"] = workflow.phases[len(approved)].id

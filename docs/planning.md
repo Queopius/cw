@@ -10,8 +10,14 @@ because they appear in that structure.
 The public command sends only that bounded evidence selection and detected stack
 hints to an ephemeral Codex planning invocation. The planner runs read-only with
 hooks, web search, ambient project instructions, and project execution rules
-disabled. It returns only phases through a strict JSON Schema; CW itself supplies
+disabled. It returns phases plus a Completion Contract through a strict JSON Schema; CW itself supplies
 project identity, policy, settings, and lifecycle state.
+
+The planner asks what evidence would prove the declared goal before deciding how
+to group the work. Readiness classes are extensible templates, not phase-count
+targets. Tests assert that POC, controlled-pilot, and production intent produce
+appropriately different evidence contracts without asserting incidental wording
+or a fixed number of phases.
 
 Recognized stacks include PHP/Composer, Laravel, Node.js, Next.js, Python, Rust,
 and Go. Stack detection provides planning hints and evidence-backed deterministic

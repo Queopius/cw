@@ -11,6 +11,11 @@ project/
 │   ├── state.json
 │   ├── gates/
 │   ├── reviews/
+│   ├── completion/
+│   │   ├── reviews/
+│   │   ├── proposals/
+│   │   ├── authorizations/
+│   │   └── completion.satisfied.json
 │   ├── runtime/
 │   ├── logs/
 │   └── backups/
@@ -26,6 +31,11 @@ Operational metadata such as current state, writer/schema version, history, and
 migration records is mutable only through trusted CW transactions. Gates and
 reviews are retained audit evidence. Runtime session/readiness files are scoped
 to one managed execution and cannot be copied between projects.
+
+Contract-aware completion evidence is also mutable only through the CW
+supervisor. Reviews, extension proposals, and human authorizations are
+append-only. The singular completion gate is created only after a `SATISFIED`
+system review and is authoritative for semantic completion.
 
 ## `.codex/`
 

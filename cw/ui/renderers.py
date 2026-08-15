@@ -79,6 +79,15 @@ def _status_actions(console: Console, data: dict[str, Any]) -> None:
     if data["state"] == "COMPLETED":
         console.action("cw history", "View the complete audit trail")
         return
+    if data["state"] in {"PLANNED_COMPLETE", "COMPLETION_REVIEW", "COMPLETION_BLOCKED"}:
+        console.action("cw completion review", "Run or retry independent completion review")
+        console.action("cw completion show", "Inspect Completion Contract evidence")
+        return
+    if data["state"] == "EXTENSION_PROPOSED":
+        console.action("cw completion show", "Inspect the proposed extension")
+        console.action("cw completion approve", "Authorize the extension")
+        console.action("cw completion reject", "Reject without changing phases")
+        return
     console.action("cw", "Continue development")
     console.action("cw validate", "Validate current phase")
     console.action("cw history", "View audit trail")
@@ -89,7 +98,8 @@ def _render_completed(console: Console, data: dict[str, Any], *, verbose: bool) 
     console.aligned(data["project"], data["branch"], left_style="1")
     console.rule()
     console.line()
-    console.line(f"  {console.style(SUCCESS, '32')} {console.style('WORKFLOW COMPLETE', '1;32')}")
+    title = "COMPLETION TARGET SATISFIED" if data.get("completion_mode") == "CONTRACT_AWARE" else "WORKFLOW COMPLETE"
+    console.line(f"  {console.style(SUCCESS, '32')} {console.style(title, '1;32')}")
     console.line()
     _progress(console, data["approved_count"], data["phase_count"])
     console.line()
@@ -104,7 +114,10 @@ def _render_completed(console: Console, data: dict[str, Any], *, verbose: bool) 
     console.rule()
     console.wrapped(f"{data['approved_count']} approved · 0 active · 0 remaining", 2)
     console.line()
-    console.wrapped("All configured gates are valid.", 2)
+    if data.get("completion_mode") == "CONTRACT_AWARE":
+        console.wrapped("All authorized phase gates and completion evidence are valid.", 2)
+    else:
+        console.wrapped("All configured gates are valid.", 2)
     _status_actions(console, data)
     if verbose:
         _status_details(console, data)
@@ -161,6 +174,45 @@ def _render_no_plan(console: Console, data: dict[str, Any], *, verbose: bool) ->
         _status_details(console, data)
 
 
+def _render_planned_complete(console: Console, data: dict[str, Any], *, verbose: bool) -> None:
+    console.header(version=True)
+    console.aligned(data["project"], data["branch"], left_style="1")
+    console.rule()
+    console.line()
+    console.line(f"  {console.style(SUCCESS, '32')} {console.style('PLANNED SCOPE COMPLETE', '1;32')}")
+    console.line()
+    _metric(console, "Gates", f"{data['approved_count']} / {data['phase_count']} valid", 18)
+    _metric(console, "Planned scope", "COMPLETE", 18)
+    target = data.get("completion_target") or {}
+    console.line()
+    console.subsection("Completion")
+    console.rule()
+    console.line()
+    _metric(console, "Target", str(target.get("name", "NOT DECLARED")), 18)
+    review = data.get("completion_review") or {}
+    _metric(console, "Review", str(review.get("decision", "PENDING")).replace("_", " "), 18)
+    _metric(
+        console, "Satisfied",
+        f"{data.get('completion_verified_count', 0)} / {data.get('completion_requirement_count', 0)} requirements",
+        18,
+    )
+    proposal = data.get("extension_proposal")
+    if isinstance(proposal, dict):
+        console.line()
+        console.subsection("Extension")
+        console.rule()
+        console.line()
+        _metric(console, "Proposed", f"{len(proposal.get('phases', []))} phases", 18)
+        _metric(console, "Authorization", "REQUIRED", 18)
+        console.wrapped("CW may recommend more work. Only the human may authorize more work.", 2)
+    elif data["state"] == "COMPLETION_BLOCKED":
+        console.line()
+        console.wrapped(f"{WARNING} Completion review is blocked and retryable; product failure was not inferred.", 2)
+    _status_actions(console, data)
+    if verbose:
+        _status_details(console, data)
+
+
 def render_status(console: Console, data: dict[str, Any], *, verbose: bool = False) -> None:
     if not data.get("consistent", True):
         console.header("Workflow Integrity")
@@ -189,6 +241,14 @@ def render_status(console: Console, data: dict[str, Any], *, verbose: bool = Fal
         return
     if not data["phases"]:
         _render_no_plan(console, data, verbose=verbose)
+        return
+    if (
+        data.get("completion_mode") == "CONTRACT_AWARE"
+        and data.get("planned_scope_complete")
+        and not data.get("completion_satisfied")
+        and not data.get("gate_error")
+    ):
+        _render_planned_complete(console, data, verbose=verbose)
         return
     if (
         data["state"] == "COMPLETED"

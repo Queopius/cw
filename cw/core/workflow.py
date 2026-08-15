@@ -8,7 +8,7 @@ from typing import Any
 from .commands import command_arguments
 from .errors import CwError, ErrorCode
 from .layout import safe_file
-from .models import PlanStatus, Workflow
+from .models import CompletionContract, PlanStatus, Workflow
 from .schema import schema_version
 from .severity import CANONICAL_CRITERION_SEVERITIES
 from .utils import atomic_write, safe_project_path, sha256_bytes
@@ -62,6 +62,10 @@ def workflow_from_document(root: Path, data: dict[str, Any]) -> Workflow:
             max_review_attempts=int(settings.get("max_review_attempts", 3)),
             command_timeout=int(settings.get("command_timeout_seconds", 1200)),
             review_timeout=int(reviewer.get("timeout_seconds", 1200)),
+            completion_target=(
+                CompletionContract.from_dict(data["completion_target"])
+                if isinstance(data.get("completion_target"), dict) else None
+            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise CwError("phases.yaml has invalid field types", ErrorCode.SCHEMA_VALIDATION_ERROR, details=str(exc)) from exc
@@ -84,7 +88,7 @@ def validate_workflow(root: Path, workflow: Workflow) -> None:
     for phase in workflow.phases:
         if not phase.id or not phase.name or not phase.objective:
             raise CwError("Every phase needs id, name, and objective", ErrorCode.SCHEMA_VALIDATION_ERROR)
-        if not re.fullmatch(r"[0-9]{2}-[a-z0-9][a-z0-9-]*", phase.id):
+        if not re.fullmatch(r"[0-9]{2,4}-[a-z0-9][a-z0-9-]*", phase.id):
             raise CwError(f"Phase ID is invalid: {phase.id}", ErrorCode.SCHEMA_VALIDATION_ERROR)
         if any(dep not in known for dep in phase.depends_on):
             raise CwError(f"Phase {phase.id} has a missing or future dependency", ErrorCode.SCHEMA_VALIDATION_ERROR)
@@ -98,6 +102,10 @@ def validate_workflow(root: Path, workflow: Workflow) -> None:
             not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", value) for value in phase.required_integrations
         ):
             raise CwError(f"Phase {phase.id} has invalid required integrations", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if len(phase.expected_evidence) != len(set(phase.expected_evidence)) or any(
+            not value.strip() for value in phase.expected_evidence
+        ):
+            raise CwError(f"Phase {phase.id} has invalid expected evidence", ErrorCode.SCHEMA_VALIDATION_ERROR)
         for artifact in phase.artifacts:
             if any(char in artifact for char in "*?["):
                 raise CwError(f"Phase {phase.id} artifact cannot be a glob", ErrorCode.SCHEMA_VALIDATION_ERROR)
@@ -124,6 +132,39 @@ def validate_workflow(root: Path, workflow: Workflow) -> None:
                     ErrorCode.SCHEMA_VALIDATION_ERROR,
                 )
         known.add(phase.id)
+    contract = workflow.completion_target
+    if contract is not None:
+        if (
+            not re.fullmatch(r"[a-z0-9][a-z0-9-]*", contract.id)
+            or not contract.name.strip()
+            or not contract.description.strip()
+            or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", contract.target_type)
+            or not contract.requirements
+        ):
+            raise CwError("Completion Contract is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        requirement_ids = [item.id for item in contract.requirements]
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise CwError("Completion requirement IDs must be unique", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        for requirement in contract.requirements:
+            if (
+                not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", requirement.id)
+                or not requirement.description.strip()
+                or not requirement.evidence_expectations
+                or any(not value.strip() for value in requirement.evidence_expectations)
+            ):
+                raise CwError(
+                    f"Completion requirement is invalid: {requirement.id}",
+                    ErrorCode.SCHEMA_VALIDATION_ERROR,
+                )
+        known_requirements = set(requirement_ids)
+        for phase in workflow.phases:
+            if len(phase.completion_requirements) != len(set(phase.completion_requirements)) or any(
+                value not in known_requirements for value in phase.completion_requirements
+            ):
+                raise CwError(
+                    f"Phase {phase.id} has invalid completion requirement links",
+                    ErrorCode.SCHEMA_VALIDATION_ERROR,
+                )
 
 
 def write_workflow(path: Path, payload: dict[str, Any]) -> None:

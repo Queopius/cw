@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.6.0",
+      "changes": [
+        "Separated planned-scope completion from Completion Contract satisfaction.",
+        "Added independent system completion review and distinct completion evidence.",
+        "Added human-authorized append-only workflow extensions with repeatable completion cycles."
+      ]
+    },
+    {
       "version": "0.5.1",
       "changes": [
         "Published reproducible Read the Docs configuration with the release snapshot.",

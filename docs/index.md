@@ -29,6 +29,11 @@ deterministic supervisor. Plans are explicit, implementation and review use
 separate agents, validation runs before approval, and every next phase depends
 on verified gate evidence.
 
+New workflows also declare what evidence would prove the product-level goal.
+After authorized phase work finishes, an independent completion review either
+records final evidence or proposes the smallest coherent extension for explicit
+human authorization.
+
 ## Quick start
 
 Run these commands from a Git repository after [installing CW](getting-started.md#install-cw):
@@ -80,8 +85,10 @@ when you intentionally want more than one gated phase.
     Use the [CLI reference](cli-reference.md) for concise syntax, options, and
     examples validated against the source parser.
 
-When every configured phase has a valid contiguous gate chain, the workflow is
-`COMPLETED`, has no current phase, and launches no further implementer.
+When every authorized phase has a valid contiguous gate chain, planned scope is
+complete and no further implementer is launched. Contract-aware projects become
+semantically `COMPLETED` only after valid completion evidence; legacy projects
+retain their existing completion behavior.
 
 > **All valid gates. No next phase.**
 

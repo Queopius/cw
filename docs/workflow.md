@@ -39,9 +39,9 @@ state. A non-final phase moves immediately to the next configured phase as
 `IN_PROGRESS` with attempt zero. Approval of the final configured phase writes
 `COMPLETED`; CW never invents a successor.
 
-## Completion is a first-class state
+## Planned completion and semantic completion
 
-Completion comes from the complete contiguous chain of configured gates:
+Legacy projects preserve the original rule:
 
 ```text
 all configured phases have valid dependency-ordered gates
@@ -57,7 +57,19 @@ The normal command, `cw retry`, and `cw run` all stop at this boundary. They do
 not retain the final approved phase as current and never wrap to the first
 phase.
 
-> **All valid gates. No next phase.**
+Contract-aware projects add an independent system boundary:
+
+```text
+all authorized phases have valid gates → PLANNED_COMPLETE
+PLANNED_COMPLETE → completion review → completion evidence → COMPLETED
+                                    ↘ extension proposal → human authorization
+```
+
+`PLANNED_COMPLETE` has no current phase and launches no implementer. It proves
+only that the authorized phase list is finished. See [Completion Contracts and
+program review](completion-contracts.md).
+
+> **All authorized phase gates valid. Completion Contract satisfied. No next phase.**
 
 ## Implementation session boundary
 

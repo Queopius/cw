@@ -27,6 +27,13 @@ TRANSITIONS: dict[WorkflowState, set[WorkflowState]] = {
     WorkflowState.HUMAN_REVIEW_REQUIRED: {WorkflowState.APPROVED, WorkflowState.IN_PROGRESS},
     WorkflowState.ERROR: {WorkflowState.IN_PROGRESS, WorkflowState.READY_FOR_REVIEW, WorkflowState.PLANNING},
     WorkflowState.PAUSED: {WorkflowState.IN_PROGRESS},
+    WorkflowState.PLANNED_COMPLETE: {WorkflowState.COMPLETION_REVIEW},
+    WorkflowState.COMPLETION_REVIEW: {
+        WorkflowState.COMPLETED, WorkflowState.EXTENSION_PROPOSED,
+        WorkflowState.COMPLETION_BLOCKED,
+    },
+    WorkflowState.EXTENSION_PROPOSED: {WorkflowState.IN_PROGRESS, WorkflowState.PLANNED_COMPLETE},
+    WorkflowState.COMPLETION_BLOCKED: {WorkflowState.COMPLETION_REVIEW},
     WorkflowState.COMPLETED: set(),
 }
 
@@ -40,6 +47,8 @@ def initial_state(project_id: str) -> dict[str, Any]:
         "last_review": None, "last_gate": None, "last_error": None,
         "infrastructure_error": None,
         "pending_goal": None,
+        "completion_cycle": 0, "last_completion_review": None,
+        "last_completion_gate": None, "extension_proposal": None,
         "history": [], "updated_at": utc_now(),
     }
 
@@ -80,6 +89,8 @@ def bind_plan(root: Path, state: dict[str, Any], workflow: Workflow) -> None:
         "attempt": 0, "last_review": None, "last_gate": None, "last_error": None,
         "infrastructure_error": None,
         "pending_goal": None,
+        "completion_cycle": 0, "last_completion_review": None,
+        "last_completion_gate": None, "extension_proposal": None,
     })
     save_state(root, state)
 
@@ -92,13 +103,34 @@ def validate_state(root: Path, state: dict[str, Any], workflow: Workflow) -> Non
     if (
         workflow.phases
         and state.get("current_phase") not in {phase.id for phase in workflow.phases}
-        and not (state.get("status") == WorkflowState.COMPLETED.value and state.get("current_phase") is None)
+        and not (
+            state.get("status") in {
+                WorkflowState.COMPLETED.value, WorkflowState.PLANNED_COMPLETE.value,
+                WorkflowState.COMPLETION_REVIEW.value, WorkflowState.EXTENSION_PROPOSED.value,
+                WorkflowState.COMPLETION_BLOCKED.value,
+            }
+            and state.get("current_phase") is None
+        )
     ):
         raise CwError("Current phase is not in the workflow", ErrorCode.INVALID_STATE)
     if workflow.phases:
         from .progress import validate_progress_state
 
         validate_progress_state(root, workflow, state)
+    for key, prefix in (
+        ("last_completion_review", ".cw/completion/reviews/"),
+        ("last_completion_gate", ".cw/completion/"),
+        ("extension_proposal", ".cw/completion/proposals/"),
+    ):
+        reference = state.get(key)
+        if reference is not None and (
+            not isinstance(reference, str) or not reference.startswith(prefix)
+            or not (root / reference).is_file() or (root / reference).is_symlink()
+        ):
+            raise CwError(f"State {key} reference is invalid", ErrorCode.INVALID_STATE, "Run: cw repair")
+    cycle = state.get("completion_cycle", 0)
+    if isinstance(cycle, bool) or not isinstance(cycle, int) or cycle < 0:
+        raise CwError("Completion cycle is invalid", ErrorCode.INVALID_STATE, "Run: cw repair")
     infrastructure = state.get("infrastructure_error")
     if infrastructure is not None:
         required = {"error_code", "retryable", "operation", "phase", "occurred_at"}
@@ -111,7 +143,10 @@ def validate_state(root: Path, state: dict[str, Any], workflow: Workflow) -> Non
             or set(infrastructure) - allowed
             or infrastructure.get("error_code") not in valid_codes
             or not isinstance(infrastructure.get("retryable"), bool)
-            or infrastructure.get("operation") not in {"review", "implementation", "planning", "codex"}
+            or infrastructure.get("operation") not in {
+                "review", "implementation", "planning", "codex",
+                "completion_review", "extension_planning",
+            }
             or infrastructure.get("phase") not in valid_phases
             or not isinstance(infrastructure.get("occurred_at"), str)
             or not infrastructure["occurred_at"]
@@ -171,7 +206,11 @@ def advance_after_approval(
     index = workflow.index(phase.id)
     next_phase = workflow.phases[index + 1] if index + 1 < len(workflow.phases) else None
     if next_phase is None:
-        state["status"] = WorkflowState.COMPLETED.value
+        state["status"] = (
+            WorkflowState.PLANNED_COMPLETE.value
+            if workflow.completion_target is not None
+            else WorkflowState.COMPLETED.value
+        )
         state["current_phase"] = None
         state["attempt"] = 0
     else:

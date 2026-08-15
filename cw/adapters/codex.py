@@ -62,7 +62,12 @@ class CodexAdapter:
         diagnostics = parse_mcp_diagnostics(completed.stderr)
         terminal_error = None
         if completed.returncode != 0:
-            error_role = "implementer" if role.startswith("implementer") else role
+            error_role = (
+                "implementer" if role.startswith("implementer")
+                else "reviewer" if role.endswith("reviewer")
+                else "planner" if role.endswith("planner")
+                else role
+            )
             terminal_error = self.classify_process_error(
                 completed.stderr, completed.stdout, role=error_role,
             )
@@ -345,14 +350,15 @@ class CodexAdapter:
                     root, role, command, environment, timeout=timeout,
                 )
             except subprocess.TimeoutExpired as exc:
-                code = ErrorCode.REVIEW_TIMEOUT if role == "reviewer" else ErrorCode.PLAN_TIMEOUT
-                label = "Independent reviewer" if role == "reviewer" else "Codex planner"
+                is_reviewer = role.endswith("reviewer")
+                code = ErrorCode.REVIEW_TIMEOUT if is_reviewer else ErrorCode.PLAN_TIMEOUT
+                label = "Independent reviewer" if is_reviewer else "Codex planner"
                 raise CwError(f"{label} timed out", code, "Run: cw retry", details=str(exc)) from exc
             if result.exit_code:
                 code = result.terminal_error or self.classify_process_error(
                     result.stderr, result.stdout, role=role,
                 )
-                label = "Independent reviewer" if role == "reviewer" else "Codex planner"
+                label = "Independent reviewer" if role.endswith("reviewer") else "Codex planner"
                 hint = "Run: cw error" if code in {
                     ErrorCode.PLANNER_SCHEMA_ERROR, ErrorCode.CODEX_CONFIG_ERROR,
                 } else "Run: cw retry"
@@ -364,12 +370,12 @@ class CodexAdapter:
             try:
                 payload = json.loads(output.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
-                code = ErrorCode.REVIEWER_PROCESS_ERROR if role == "reviewer" else ErrorCode.PLANNER_SCHEMA_ERROR
-                hint = "Run: cw retry" if role == "reviewer" else "Run: cw error"
+                code = ErrorCode.REVIEWER_PROCESS_ERROR if role.endswith("reviewer") else ErrorCode.PLANNER_SCHEMA_ERROR
+                hint = "Run: cw retry" if role.endswith("reviewer") else "Run: cw error"
                 raise CwError(f"{role.title()} returned invalid JSON", code, hint, details=str(exc)) from exc
             if not isinstance(payload, dict):
-                code = ErrorCode.REVIEWER_PROCESS_ERROR if role == "reviewer" else ErrorCode.PLANNER_SCHEMA_ERROR
-                hint = "Run: cw retry" if role == "reviewer" else "Run: cw error"
+                code = ErrorCode.REVIEWER_PROCESS_ERROR if role.endswith("reviewer") else ErrorCode.PLANNER_SCHEMA_ERROR
+                hint = "Run: cw retry" if role.endswith("reviewer") else "Run: cw error"
                 raise CwError(f"{role.title()} returned an invalid result", code, hint)
             return CodexRunResult(
                 payload, result.stderr, result.stdout, result.exit_code,
@@ -382,6 +388,12 @@ class CodexAdapter:
 
     def run_planner(self, root: Path, prompt: str, schema: Path, timeout: int) -> CodexResult:
         return self._run_structured(root, prompt, schema, timeout, role="planner")
+
+    def run_completion_reviewer(self, root: Path, prompt: str, schema: Path, timeout: int) -> CodexResult:
+        return self._run_structured(root, prompt, schema, timeout, role="completion_reviewer")
+
+    def run_extension_planner(self, root: Path, prompt: str, schema: Path, timeout: int) -> CodexResult:
+        return self._run_structured(root, prompt, schema, timeout, role="extension_planner")
 
     def smoke_test(self, root: Path, schema: Path, timeout: int = 60) -> CodexResult:
         return self.run_reviewer(

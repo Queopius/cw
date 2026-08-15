@@ -41,6 +41,7 @@ nav:
       - CLI Reference: cli-reference.md
   - Core Workflow:
       - Gates and Reviews: gates-and-reviews.md
+      - Completion Contracts: completion-contracts.md
       - Batch Execution: batch-execution.md
       - Live Execution: live-execution.md
       - Integrations: integrations.md

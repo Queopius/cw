@@ -119,6 +119,13 @@ def command_start(
         else:
             render_completed_start(console, workflow)
         return 0
+    if effective.planned_scope_complete:
+        raise CwError(
+            "Planned scope is complete; no implementation phase is authorized",
+            ErrorCode.INVALID_STATE,
+            "Run: cw completion review",
+            exit_code=3,
+        )
     phase = current_resolver(workflow, state)
     required_integrations = project_requirements(root) | set(phase.required_integrations)
     IntegrationManager().preflight(root, required_integrations)
@@ -283,13 +290,18 @@ including this exact session_id, and stop normally.
         raise failure
     state = load_state(root)
     status = WorkflowState(state["status"])
-    if state.get("current_phase") != phase.id or status is WorkflowState.COMPLETED:
+    if state.get("current_phase") != phase.id or status in {
+        WorkflowState.COMPLETED, WorkflowState.PLANNED_COMPLETE,
+    }:
         # A trusted Stop hook may have completed review and advanced the phase
         # while the implementer process was still active.
         from cw.core.gates import validate_gate
 
         validate_gate(root, workflow, phase.id)
-        following = None if status is WorkflowState.COMPLETED else workflow.phase(str(state["current_phase"]))
+        following = (
+            None if status in {WorkflowState.COMPLETED, WorkflowState.PLANNED_COMPLETE}
+            else workflow.phase(str(state["current_phase"]))
+        )
         if args.json:
             emit_json({
                 "event_type": "RUN_COMPLETED",
@@ -301,6 +313,27 @@ including this exact session_id, and stop normally.
         else:
             render_transition(console, phase, following)
         observer.finish(success=True)
+        if status is WorkflowState.PLANNED_COMPLETE and workflow.completion_target is not None:
+            from cw.core.completion import run_completion_review
+
+            with operation_lock(root, "completion-review"):
+                completion_report = run_completion_review(
+                    root, workflow, load_state(root), adapter_factory(),
+                )
+            if args.json:
+                emit_json({
+                    "event_type": "COMPLETION_REVIEW_COMPLETED",
+                    "decision": completion_report["decision"],
+                    "cycle": completion_report["cycle"],
+                })
+            else:
+                console.line()
+                console.section("Completion review")
+                console.field("Decision", completion_report["decision"].replace("_", " "))
+                console.wrapped(completion_report["summary"], 2)
+                if completion_report["decision"] == "EXTENSION_REQUIRED":
+                    console.wrapped("Human authorization is required before CW can continue.", 2)
+            return 0 if completion_report["decision"] == "SATISFIED" else 3
         return result
     if status is WorkflowState.ERROR:
         raw_error = str(state.get("last_error") or "")
@@ -397,6 +430,7 @@ def command_review(
     current_resolver: CurrentResolver,
     reviewer: ReviewRunner,
     human_approver: HumanApprover,
+    completion_reviewer: Callable[[Path, Any, dict[str, Any]], dict[str, Any]] | None = None,
 ) -> int:
     root = root_resolver()
     _, state, workflow = context(root)
@@ -435,7 +469,7 @@ def command_review(
             }
             index = workflow.index(phase.id)
             report["next_phase"] = workflow.phases[index + 1].id if index + 1 < len(workflow.phases) else None
-            report["workflow_completed"] = index + 1 == len(workflow.phases)
+            report["workflow_completed"] = load_state(root)["status"] == WorkflowState.COMPLETED.value
         else:
             try:
                 with execution_event_sink(review_observer if review_observer is not None else None):
@@ -453,6 +487,15 @@ def command_review(
             reason = "CW phase review completed. Run: cw status"
         print(json.dumps({"continue": False, "stopReason": reason, "systemMessage": reason}))
         return 0
+    refreshed = load_state(root)
+    if (
+        completion_reviewer is not None
+        and refreshed.get("status") == WorkflowState.PLANNED_COMPLETE.value
+        and workflow.completion_target is not None
+    ):
+        with operation_lock(root, "completion-review"):
+            completion_report = completion_reviewer(root, workflow, refreshed)
+        report["completion_review"] = completion_report
     if args.json:
         emit_json(report)
     else:
@@ -461,7 +504,8 @@ def command_review(
         report.get("decision") == "HUMAN_REVIEW_REQUIRED"
         or phase.requires_human_approval and not args.human_approve
     )
-    return 3 if requires_human else 1 if report.get("decision") == "REVISE" else 0
+    completion_decision = (report.get("completion_review") or {}).get("decision")
+    return 3 if requires_human or completion_decision in {"EXTENSION_REQUIRED", "BLOCKED"} else 1 if report.get("decision") == "REVISE" else 0
 
 
 def command_retry(
@@ -474,6 +518,7 @@ def command_retry(
     review_command: Command,
     start_command: Command,
     plan_command: Command,
+    completion_command: Command,
 ) -> int:
     root = root_resolver()
     _, state, workflow = context(root)
@@ -506,7 +551,11 @@ def command_retry(
                 save_state(root, state)
     metadata = retryable_infrastructure_error(state)
     status = WorkflowState(state["status"])
-    if metadata is None or status not in {WorkflowState.ERROR, WorkflowState.READY_FOR_REVIEW}:
+    if metadata is None or status not in {
+        WorkflowState.ERROR,
+        WorkflowState.READY_FOR_REVIEW,
+        WorkflowState.COMPLETION_BLOCKED,
+    }:
         raise CwError("There is no retryable infrastructure error", ErrorCode.INVALID_STATE)
     phase_id = state.get("current_phase")
     if metadata.get("phase") not in {None, phase_id}:
@@ -530,6 +579,12 @@ def command_retry(
     metadata = {**metadata, "retry_started_at": started_at}
     state["infrastructure_error"] = metadata
     save_state(root, state)
+
+    if operation in {"completion_review", "extension_planning"}:
+        if status is not WorkflowState.COMPLETION_BLOCKED or phase_id is not None:
+            raise CwError("Completion retry state is invalid", ErrorCode.INVALID_STATE)
+        args.action = "review"
+        return completion_command(args, console)
 
     if operation == "review":
         phase = current_resolver(workflow, state)

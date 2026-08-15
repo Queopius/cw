@@ -7,6 +7,7 @@ from typing import Any, Sequence
 from cw.adapters.codex import CodexAdapter
 from cw.agents.reviewer import human_approve, run_review
 from cw.cli.commands import config as config_commands
+from cw.cli.commands import completion as completion_commands
 from cw.cli.commands import execution as execution_commands
 from cw.cli.commands import lifecycle as lifecycle_commands
 from cw.cli.commands import read as read_commands
@@ -74,6 +75,12 @@ def command_plan(args: argparse.Namespace, console: Console) -> int:
     )
 
 
+def command_completion(args: argparse.Namespace, console: Console) -> int:
+    return completion_commands.command_completion(
+        args, console, root_resolver=_root, context=_raw_context,
+    )
+
+
 def _current(workflow: Any, state: dict[str, Any]) -> Any:
     return execution_commands.current_phase(workflow, state)
 
@@ -117,6 +124,8 @@ def _review_output(console: Console, phase: Any, report: dict[str, Any], workflo
 
 
 def command_review(args: argparse.Namespace, console: Console) -> int:
+    from cw.core.completion import run_completion_review
+
     return execution_commands.command_review(
         args,
         console,
@@ -125,6 +134,9 @@ def command_review(args: argparse.Namespace, console: Console) -> int:
         current_resolver=_current,
         reviewer=run_review,
         human_approver=human_approve,
+        completion_reviewer=lambda root, workflow, state: run_completion_review(
+            root, workflow, state, CodexAdapter(),
+        ),
     )
 
 
@@ -138,6 +150,7 @@ def command_retry(args: argparse.Namespace, console: Console) -> int:
         review_command=command_review,
         start_command=command_start,
         plan_command=command_plan,
+        completion_command=command_completion,
     )
 
 
@@ -224,7 +237,8 @@ def command_run(args: argparse.Namespace, console: Console) -> int:
 
 
 COMMANDS = {
-    "init": command_init, "plan": command_plan, "start": command_start, "status": command_status,
+    "init": command_init, "plan": command_plan, "completion": command_completion,
+    "start": command_start, "status": command_status,
     "validate": command_validate, "review": command_review, "retry": command_retry,
     "history": command_history, "doctor": command_doctor, "error": command_error,
     "repair": command_repair, "config": command_config, "version": command_version,

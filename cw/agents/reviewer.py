@@ -166,14 +166,19 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
             **report,
             "gate": gate_reference,
             "next_phase": next_phase.id if next_phase else None,
-            "workflow_completed": next_phase is None,
+            "planned_scope_complete": next_phase is None,
+            "workflow_completed": state["status"] == WorkflowState.COMPLETED.value,
         }
         if sink is not None:
             sink(ExecutionEvent(
                 ExecutionEventType.PHASE_ADVANCED,
                 source_type="cw.workflow",
-                status="completed" if next_phase is None else "advanced",
-                summary=next_phase.id if next_phase else "Workflow complete",
+                status="planned_complete" if next_phase is None else "advanced",
+                summary=(
+                    next_phase.id if next_phase
+                    else "Workflow complete" if state["status"] == WorkflowState.COMPLETED.value
+                    else "Planned scope complete; completion review required"
+                ),
             ))
     elif decision is ReviewDecision.HUMAN_REVIEW_REQUIRED:
         _event(state, phase.id, "human_review_required", attempt=attempt)

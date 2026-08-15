@@ -25,6 +25,10 @@ phase at a time.
 
 > **No valid gate. No next phase.**
 
+For new contract-aware workflows, planned work finished is not the same as the
+declared goal proven. A separate independent completion review must satisfy the
+goal-derived Completion Contract before CW records semantic completion.
+
 CW derives progress from the highest contiguous chain of validated gates. If
 cached state, readiness, history, and gate evidence disagree, read commands
 fail closed with an integrity explanation; `cw repair` performs backup-first
@@ -182,8 +186,9 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
 - Required commands run before AI review and come only from `phases.yaml`.
 - Reviewers run independently with `read-only`, ephemeral sessions, and hooks disabled.
 - Approved artifact hashes are rechecked before every dependent phase.
-- A verified non-final gate advances state immediately to the next configured
-  phase; the final gate completes the workflow.
+- A verified non-final gate advances state immediately to the next authorized
+  phase. The final gate completes planned scope; a contract-aware workflow then
+  requires independent system completion evidence.
 - Payment, cryptography, production, destructive migration, and similar goals can require a human gate.
 
 ## Commands
@@ -194,6 +199,7 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
 | `cw run N` | Run up to N phases within explicit safety budgets |
 | `cw init` | Initialize the current Git repository |
 | `cw plan [show\|approve\|rebuild]` | Manage the plan lifecycle |
+| `cw completion [show\|review\|approve\|reject\|adopt]` | Prove the target or authorize proposed extensions |
 | `cw status` | Show concise workflow progress |
 | `cw validate` | Run deterministic checks only |
 | `cw review` | Run independent review after readiness |

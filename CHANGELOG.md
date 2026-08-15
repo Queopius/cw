@@ -4,6 +4,21 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.6.0 — 2026-08-15
+
+- Add goal-derived Completion Contracts with extensible readiness templates and
+  explicit requirement/evidence/severity semantics.
+- Separate phase completion, planned-scope completion, and semantic product
+  completion while preserving unchanged legacy completion behavior.
+- Add independent read-only system completion review, strict normalized results,
+  repository snapshot binding, and a distinct completion evidence gate.
+- Add coherent extension proposals with explicit human approve/reject commands;
+  proposed work cannot start automatically and previous phase evidence remains
+  immutable.
+- Extend canonical state derivation, repair, status, explain, inspect, history,
+  fake-Codex acceptance, security guidance, and CLI drift protection across
+  repeated completion cycles.
+
 - Add native Windows user-local installation, centralized process/path/runtime
   activation portability boundaries, and UTF-8-safe subprocess and persistence
   behavior without changing workflow or gate schemas.

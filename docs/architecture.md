@@ -20,7 +20,7 @@ CW is a standard-library Python package with a console entry point.
 cw.cli      argument parsing and thin command orchestration
 cw.cli.commands  independently testable command implementations
 cw.ui       text/ANSI/JSON presentation
-cw.core     project identity, workflow, state, locks, config, gates, persistence
+cw.core     project identity, workflow, state, locks, gates, completion, persistence
 cw.planning repository inspection and plan proposal
 cw.checks   deterministic validation
 cw.agents   independent review policy and consistency checks
@@ -62,6 +62,13 @@ position. It validates the contiguous dependency/gate chain and exposes
 completion, current phase, approved/remaining/active counts, and final
 gate/review references. Status, repair, start, retry, and batch execution consume
 this result; persisted `current_phase` can never override completed evidence.
+
+For a contract-aware workflow, `EffectiveWorkflowState` derives planned-scope
+completion separately from semantic completion. `.cw/completion` contains
+append-only system reviews, extension proposals, human authorizations, and a
+distinct completion gate. The completion reviewer and extension planner are
+read-only sibling Codex processes; only the supervisor writes evidence or
+authorizes state transitions.
 
 `cw.core.layout` defines the trusted project filesystem topology. Validation is
 performed before init writes, lock acquisition, normal context loading, repair,

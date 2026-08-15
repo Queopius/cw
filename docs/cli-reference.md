@@ -29,6 +29,7 @@ returns `3`; and an interrupted foreground operation returns `130`.
 | `cw` / `cw start` | Start or resume the canonical current phase. |
 | `cw init` | Initialize CW in the current Git repository. |
 | `cw plan` | Propose, inspect, approve, or rebuild a development plan. |
+| `cw completion` | Inspect/review the Completion Contract or authorize an extension. |
 | `cw status` | Show canonical progress derived from validated evidence. |
 | `cw run` | Execute a bounded multi-phase batch. |
 | `cw validate` | Run current-phase deterministic validation. |
@@ -98,6 +99,29 @@ cw plan approve
 
 Planner infrastructure failures preserve the pending goal for `cw retry`; an
 invalid or partial plan is never installed.
+
+## cw completion
+
+**Syntax:** `cw completion [show|review|approve|reject|adopt] [--target TYPE]`
+
+- `show` is the default and displays the contract, latest review, coverage, and pending proposal.
+- `review` runs the independent read-only system completion reviewer.
+- `approve` explicitly authorizes and appends the current extension proposal.
+- `reject` records rejection without changing phases.
+- `adopt` with `--target TYPE` explicitly adds a contract to a legacy workflow.
+
+Supported adoption templates are `proof-of-concept`, `functional-prototype`,
+`internal-tool`, `controlled-pilot`, `production`, and `public-release`.
+
+```bash
+cw completion show
+cw completion review
+cw completion approve
+cw completion adopt --target controlled-pilot
+```
+
+`approve` is a supervisor-level human authorization boundary. A completion
+reviewer or extension planner cannot invoke it or start proposed work.
 
 ## cw status
 
@@ -196,13 +220,16 @@ cw explain
 
 ## cw inspect
 
-**Syntax:** `cw inspect [session|run] [RUN_ID]`
+**Syntax:** `cw inspect [session|run|completion] [RUN_ID]`
 
 `session` inspects the active/latest execution. `run RUN_ID` selects one record.
+`completion` emits normalized Completion Contract, review, proposal, and cycle
+evidence suitable for automation.
 
 ```bash
 cw inspect session
 cw inspect run run_0123456789abcdef0123456789abcdef --verbose
+cw inspect completion --json
 ```
 
 ## cw logs

@@ -21,6 +21,10 @@ from cw.core.gates import gate_path, validate_gate
 from cw.core.history import history_timeline
 from cw.core.integrity import snapshot_protected_paths
 from cw.core.progress import derive_effective_workflow_state
+from cw.core.completion import (
+    completion_gate_path, contract_payload, latest_completion_review,
+    load_extension_proposal, validate_completion_gate,
+)
 from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import load_session, process_is_alive, readiness_path
 from cw.core.utils import load_json
@@ -96,6 +100,22 @@ def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
         and (not isinstance(batch.get("pid"), int) or not process_is_alive(batch["pid"]))
     ):
         batch = {**batch, "status": "INTERRUPTED"}
+    contract = workflow.completion_target
+    completion_review = latest_completion_review(root) if contract is not None else None
+    contract_results = (
+        completion_review.get("contract_results", [])
+        if isinstance(completion_review, dict) else []
+    )
+    verified_requirements = sum(
+        isinstance(item, dict) and item.get("status") == "VERIFIED"
+        for item in contract_results
+    )
+    proposal = None
+    if contract is not None and state.get("extension_proposal"):
+        try:
+            proposal = load_extension_proposal(root, state, workflow)
+        except CwError:
+            proposal = None
     return {
         "schema_version": SCHEMA_VERSION, "project": project.project_id,
         "repository_root": str(root), "branch": git_branch(root),
@@ -108,6 +128,14 @@ def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
         "active_count": consistency.active_count if consistency is not None else 0,
         "effective_state": consistency.status.value if consistency is not None else state["status"],
         "is_complete": consistency.is_complete if consistency is not None else False,
+        "planned_scope_complete": consistency.planned_scope_complete if consistency is not None else False,
+        "completion_mode": "CONTRACT_AWARE" if contract is not None else "LEGACY",
+        "completion_target": contract_payload(contract) if contract is not None else None,
+        "completion_satisfied": consistency.completion_satisfied if consistency is not None else False,
+        "completion_review": completion_review,
+        "completion_verified_count": verified_requirements,
+        "completion_requirement_count": len(contract.requirements) if contract is not None else 0,
+        "extension_proposal": proposal,
         "attempt": state.get("attempt", 0), "max_attempts": workflow.max_review_attempts,
         "ready": (root / ".cw" / "runtime" / "READY_FOR_REVIEW.json").is_file(),
         "gate": gates.get(current, False) if current else False, "gates": gates,
@@ -184,6 +212,12 @@ def command_explain(
         "approved_through": data.get("approved_through"),
         "issues": data.get("consistency_issues", []),
         "recovery": "cw repair" if not data.get("consistent", True) else None,
+        "planned_scope_complete": data.get("planned_scope_complete", False),
+        "completion_mode": data.get("completion_mode"),
+        "completion_target": data.get("completion_target"),
+        "completion_satisfied": data.get("completion_satisfied", False),
+        "completion_review": data.get("completion_review"),
+        "extension_proposal": data.get("extension_proposal"),
     }
     if args.json:
         emit_json(payload)
@@ -191,7 +225,18 @@ def command_explain(
     console.header("Explain")
     if payload["consistent"]:
         console.item("✓", "Workflow state is consistent")
-        console.wrapped("Configured phases, approval gates and state agree.", 2)
+        if payload["completion_mode"] == "CONTRACT_AWARE" and payload["planned_scope_complete"] and not payload["completion_satisfied"]:
+            decision = (payload.get("completion_review") or {}).get("decision", "PENDING")
+            console.wrapped(
+                f"All authorized phase gates are valid, but the Completion Contract is not satisfied. Review: {decision}.", 2,
+            )
+            if payload.get("extension_proposal"):
+                console.wrapped("CW cannot append or implement the proposed phases without explicit human authorization.", 2)
+                console.action("cw completion show", "Inspect the contract gap and proposal")
+            else:
+                console.action("cw completion review", "Run independent completion review")
+        else:
+            console.wrapped("Configured phases, approval gates and completion evidence agree.", 2)
         return 0
     console.item("✕", "Why is the workflow blocked?")
     console.wrapped(
@@ -220,7 +265,14 @@ def command_history(
             if phase["phase"] == args.phase or phase["number"] == args.phase
         ]
     events = [event for event in state.get("history", []) if not args.phase or event.get("phase") == args.phase]
-    payload = {"workflow": workflow.id, "phases": phases, "events": events}
+    completion_events = [
+        event for event in state.get("history", [])
+        if isinstance(event, dict) and str(event.get("action", "")).startswith(("completion_", "extension_"))
+    ]
+    payload = {
+        "workflow": workflow.id, "phases": phases, "events": events,
+        "completion_cycles": completion_events,
+    }
     if args.json:
         emit_json(payload)
     else:
@@ -443,6 +495,39 @@ def command_inspect(
     root_resolver: RootResolver,
 ) -> int:
     root = root_resolver()
+    if args.action == "completion":
+        from cw.core.state import load_state
+        from cw.core.workflow import load_workflow
+
+        state = load_state(root)
+        workflow = load_workflow(root)
+        effective = derive_effective_workflow_state(root, workflow, state) if workflow.phases else None
+        latest = latest_completion_review(root) if workflow.completion_target is not None else None
+        proposal = None
+        if workflow.completion_target is not None and state.get("extension_proposal"):
+            try:
+                proposal = load_extension_proposal(root, state, workflow)
+            except CwError:
+                proposal = {"invalid_reference": state.get("extension_proposal")}
+        payload = {
+            "schema_version": SCHEMA_VERSION, "workflow": workflow.id,
+            "mode": "CONTRACT_AWARE" if workflow.completion_target is not None else "LEGACY",
+            "contract": contract_payload(workflow.completion_target) if workflow.completion_target else None,
+            "planned_scope_complete": bool(effective and effective.planned_scope_complete),
+            "completion_satisfied": bool(effective and effective.completion_satisfied),
+            "review": latest, "proposal": proposal,
+            "state": state.get("status"), "cycle": state.get("completion_cycle", 0),
+        }
+        if args.json:
+            emit_json(payload)
+        else:
+            console.header("Completion Inspection")
+            console.field("Mode", payload["mode"])
+            console.field("State", payload["state"])
+            console.field("Cycle", payload["cycle"])
+            console.field("Review", latest.get("decision") if isinstance(latest, dict) else "none")
+            console.field("Proposal", "present" if proposal else "none")
+        return 0
     active = load_active_run(root)
     if args.action == "session" and active is not None:
         run = active

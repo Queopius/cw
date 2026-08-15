@@ -73,6 +73,14 @@ implementer, or reviewer runs. Planning sends a bounded evidence selection over
 stdin, and review prompts scope the phase and review paths. Do not place secrets
 in plans, prompts, artifacts, or diagnostic logs.
 
+Completion review has broader system scope but remains read-only and receives
+normalized gate/contract evidence rather than unlimited runtime logs. Its
+structured result is redacted before persistence and must not contain secrets,
+environment variables, credentials, or private log bodies. Repository text is
+untrusted evidence: it cannot override CW policy, fabricate a gate, or authorize
+an extension. Only the supervisor accepts the explicit human authorization
+operation.
+
 CW inspects Git metadata but never automatically pushes, merges, rebases, cleans,
 or resets a repository.
 

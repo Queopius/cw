@@ -19,6 +19,8 @@ EVENT_ACTIONS = {
     "approved", "human_approved", "human_review_required", "revision_required",
     "protected_path_violation", "reopened", "infrastructure_error",
     "infrastructure_error_migrated", "retry_started", "readiness_resume_started",
+    "completion_contract_adopted", "completion_reviewed", "extension_proposed",
+    "extension_approved", "extension_rejected",
 }
 
 
@@ -111,6 +113,12 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
         phase = event.get("phase") if isinstance(event, dict) else None
         phase_valid = phase in phase_ids or (
             action == "retry_started" and event.get("operation") == "planning" and phase is None
+        ) or (
+            action in {
+                "completion_contract_adopted", "completion_reviewed", "extension_proposed",
+                "extension_rejected",
+            }
+            and phase is None
         )
         if (
             not isinstance(event, dict)
@@ -144,4 +152,10 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
                 raise CwError(f"Workflow infrastructure event is invalid: {index}", ErrorCode.INVALID_STATE)
         if action in {"retry_started", "readiness_resume_started"} and not isinstance(event.get("operation"), str):
             raise CwError(f"Workflow retry event is invalid: {index}", ErrorCode.INVALID_STATE)
-    return {"reviews": len(review_files), "gates": len(gate_files), "events": len(history)}
+    from .completion import audit_completion_history
+
+    completion = audit_completion_history(root, workflow)
+    result = {"reviews": len(review_files), "gates": len(gate_files), "events": len(history)}
+    if workflow.completion_target is not None or any(completion.values()):
+        result.update(completion)
+    return result
