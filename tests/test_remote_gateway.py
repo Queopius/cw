@@ -9,6 +9,7 @@ import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from cw.remote.agent import InProcessAgent, LocalAgentRuntime
 from cw.remote.agent import HTTPAgentClient
@@ -712,6 +713,11 @@ class OAuthResourceServerTests(unittest.TestCase):
             unauth = client.get("/remote/pair", follow_redirects=False)
             self.assertEqual(303, unauth.status_code)
             self.assertIn("/remote/pair/login", unauth.headers["location"])
+            self.assertNotIn("OAuth authorization code is missing", unauth.text)
+            self.assertIsNone(self.store.device(credential.device_id))
+            pending = self.store.pairing_challenge(challenge.challenge_id)
+            self.assertIsNotNone(pending)
+            self.assertIsNone(pending["confirmed_at"])
             client.cookies.set(web.cookie_name, _sign_cookie({
                 "principal_id": "principal-a",
                 "workspace_id": "workspace-a",
@@ -856,6 +862,75 @@ class OAuthResourceServerTests(unittest.TestCase):
                 response = client.get("/remote/pair/login")
         self.assertEqual(503, response.status_code)
         self.assertNotIn("Bearer ", response.text)
+
+    @unittest.skipUnless(HAS_REMOTE_CRYPTO and HAS_REMOTE_HTTP, "remote HTTP dependencies unavailable")
+    def test_browser_pairing_callback_without_authorization_code_is_rejected(self) -> None:
+        from starlette.testclient import TestClient
+
+        from cw.remote.server import PairingWebConfig, _sign_cookie, create_gateway_app
+
+        service = GatewayService(self.store, self.verifier)
+        web = PairingWebConfig(
+            client_id="pairing-client",
+            redirect_uri="https://cw.example.test/remote/pair/callback",
+            session_secret="s" * 32,
+        )
+        app = create_gateway_app(service, self.config, pairing_web=web)
+        state = "state-without-code"
+        oauth_cookie = _sign_cookie({
+            "state": state,
+            "verifier": "ignored",
+            "code": "",
+            "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp()),
+        }, web.session_secret)
+        with TestClient(app, base_url="http://127.0.0.1") as client:
+            client.cookies.set(web.oauth_cookie_name, oauth_cookie, path="/")
+            response = client.get(f"/remote/pair/callback?state={state}")
+        self.assertEqual(401, response.status_code)
+        self.assertIn("OAuth authorization code is missing", response.text)
+        self.assertNotIn("Bearer ", response.text)
+
+    @unittest.skipUnless(HAS_REMOTE_CRYPTO and HAS_REMOTE_HTTP, "remote HTTP dependencies unavailable")
+    def test_browser_pairing_login_starts_authorization_flow(self) -> None:
+        from unittest.mock import patch
+        from starlette.testclient import TestClient
+
+        from cw.remote.auth import AuthorizationServerMetadata
+        from cw.remote.server import PairingWebConfig, create_gateway_app
+
+        async def discover(*_args, **_kwargs) -> AuthorizationServerMetadata:
+            return AuthorizationServerMetadata(
+                issuer=self.config.issuer,
+                authorization_endpoint="https://auth.example.test/authorize",
+                token_endpoint="https://auth.example.test/token",
+                jwks_uri="https://auth.example.test/jwks.json",
+                code_challenge_methods_supported=("S256",),
+                client_id_metadata_document_supported=True,
+                registration_endpoint=None,
+                token_endpoint_auth_methods_supported=("none",),
+            )
+
+        web = PairingWebConfig(
+            client_id="pairing-client",
+            redirect_uri="https://cw.example.test/remote/pair/callback",
+            session_secret="s" * 32,
+        )
+        app = create_gateway_app(GatewayService(self.store, self.verifier), self.config, pairing_web=web)
+        with patch("cw.remote.server.discover_authorization_server", new=discover):
+            with TestClient(app, base_url="http://127.0.0.1") as client:
+                response = client.get("/remote/pair/login?code=ABCD-EFGH", follow_redirects=False)
+        self.assertEqual(303, response.status_code)
+        self.assertIn(web.oauth_cookie_name, response.headers.get("set-cookie", ""))
+        destination = response.headers["location"]
+        parsed = urlparse(destination)
+        query = parse_qs(parsed.query)
+        self.assertEqual("https://auth.example.test/authorize", parsed.scheme + "://" + parsed.netloc + parsed.path)
+        self.assertEqual(["code"], query["response_type"])
+        self.assertEqual(["pairing-client"], query["client_id"])
+        self.assertEqual(["https://cw.example.test/remote/pair/callback"], query["redirect_uri"])
+        self.assertEqual(["project.read"], query["scope"])
+        self.assertEqual(["https://cw.example.test/mcp"], query["resource"])
+        self.assertIn("S256", query["code_challenge_method"])
 
 
 @unittest.skipUnless(
