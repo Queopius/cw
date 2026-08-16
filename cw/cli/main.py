@@ -299,11 +299,13 @@ def command_remote(args: argparse.Namespace, console: Console) -> int:
             if args.json:
                 print(json.dumps(payload, sort_keys=True))
             elif not args.quiet:
+                pair_url = gateway.rstrip("/") + "/remote/pair"
                 console.item("✓", "Pairing requested")
                 console.wrapped(f"Device: {payload['device_id']}")
-                console.wrapped(f"Confirmation code: {payload['user_code']}")
+                console.wrapped(f"Open: {pair_url}")
+                console.wrapped(f"Enter code: {payload['user_code']}")
                 console.wrapped(f"Expires: {payload['expires_at']}")
-                console.wrapped("Confirm this exact device in the authenticated CW gateway pairing flow.")
+                console.wrapped("Approve or reject this exact device after signing in.")
             return 0
 
         credential = DeviceCredential.load(credential_path)

@@ -195,6 +195,14 @@ class RemoteStore:
         ).fetchone()
         return dict(row) if row is not None else None
 
+    def pending_pairing_challenges(self) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            """SELECT * FROM pairing_challenges
+               WHERE consumed_at IS NULL AND confirmed_at IS NULL
+               ORDER BY created_at DESC""",
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def confirm_pairing(
         self, *, challenge_id: str, code_hash: str, principal_id: str, workspace_id: str,
         confirmed_at: str,
@@ -228,6 +236,27 @@ class RemoteStore:
         result = self.device(str(row["device_id"]))
         assert result is not None
         return result
+
+    def reject_pairing(
+        self, *, challenge_id: str, code_hash: str, principal_id: str, workspace_id: str,
+        rejected_at: str,
+    ) -> None:
+        with self.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM pairing_challenges WHERE challenge_id = ? AND code_hash = ?",
+                (challenge_id, code_hash),
+            ).fetchone()
+            if row is None:
+                raise RemoteError(RemoteErrorCode.INVALID_REQUEST, "Pairing challenge is invalid")
+            if row["consumed_at"] is not None or row["confirmed_at"] is not None:
+                raise RemoteError(RemoteErrorCode.OPERATION_CONFLICT, "Pairing challenge was already used")
+            if row["expires_at"] <= rejected_at:
+                raise RemoteError(RemoteErrorCode.AUTHORIZATION_REQUIRED, "Pairing challenge has expired")
+            connection.execute(
+                """UPDATE pairing_challenges SET consumed_at = ?,
+                    principal_id = ?, workspace_id = ? WHERE challenge_id = ?""",
+                (rejected_at, principal_id, workspace_id, challenge_id),
+            )
 
     def device(self, device_id: str) -> DeviceRecord | None:
         row = self._connection.execute("SELECT * FROM devices WHERE device_id = ?", (device_id,)).fetchone()

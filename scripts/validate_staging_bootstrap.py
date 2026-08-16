@@ -34,6 +34,9 @@ REQUIRED_RENDER_KEYS = {
     "CW_OAUTH_ALGORITHMS",
     "CW_OAUTH_ISSUER_URL",
     "CW_OAUTH_JWKS_URL",
+    "CW_PAIRING_WEB_CLIENT_ID",
+    "CW_PAIRING_WEB_REDIRECT_URI",
+    "CW_PAIRING_SESSION_SECRET",
 }
 SECRET_PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
@@ -65,8 +68,8 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         errors.append("staging environment contract is missing required gateway variables")
     if any(set(item) != {"name", "group", "purpose", "required", "secret", "example", "owner"} for item in variables):
         errors.append("staging environment variable entries must use the exact documented schema")
-    if contract.get("gateway_secrets") != []:
-        errors.append("the current JWT resource-server gateway must not require a shared application secret")
+    if contract.get("gateway_secrets") != ["CW_PAIRING_SESSION_SECRET"]:
+        errors.append("browser pairing must require only the provider-managed session cookie secret")
     completion_path = root / "docs/staging-bootstrap-completion-contract.json"
     if not completion_path.is_file():
         errors.append("missing staging bootstrap Completion Contract")

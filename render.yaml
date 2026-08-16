@@ -54,3 +54,9 @@ services:
         sync: false
       - key: CW_OAUTH_JWKS_URL
         sync: false
+      - key: CW_PAIRING_WEB_CLIENT_ID
+        sync: false
+      - key: CW_PAIRING_WEB_REDIRECT_URI
+        value: https://staging-mcp.cwcli.dev/remote/pair/callback
+      - key: CW_PAIRING_SESSION_SECRET
+        sync: false

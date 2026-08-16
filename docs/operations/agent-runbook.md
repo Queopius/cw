@@ -10,8 +10,10 @@ local placeholders. Do not commit the resulting file.
      --credentials <private-device-file> --device-name "CW staging agent"
    ```
 
-2. Confirm the displayed short-lived code in the authenticated staging pairing
-   flow.
+2. Open the displayed `https://staging-mcp.cwcli.dev/remote/pair` URL, sign in
+   through OAuth, enter the displayed code, and explicitly approve or reject the
+   exact device. Opening the page or signing in must not pair the device by
+   itself.
 3. Grant exactly one initialized project and use the same project as the
    allowed root:
 

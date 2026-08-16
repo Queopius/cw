@@ -257,7 +257,9 @@ Starts or configures the optional CW Remote implementation candidate:
   signed agent control endpoints. A public deployment must terminate TLS and
   use canonical HTTPS issuer, resource, and JWKS URLs.
 - `pair` creates a local asymmetric device credential and requests a
-  short-lived, single-use pairing challenge.
+  short-lived, single-use pairing challenge. It prints the gateway pairing page
+  URL and a human-readable code; browser OAuth login and explicit Approve or
+  Reject complete the ceremony.
 - `grant` explicitly maps one canonical local CW project to a remotely opaque
   handle after the device has been paired.
 - `agent` starts the outbound-only long-poll client for the locally stored

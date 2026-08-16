@@ -27,6 +27,9 @@ def environment(database: Path) -> dict[str, str]:
         "CW_OAUTH_JWKS_URL": "https://tenant.eu.auth0.com/.well-known/jwks.json",
         "CW_OAUTH_WORKSPACE_CLAIM": "https://cwcli.dev/claims/workspace",
         "CW_OAUTH_ALGORITHMS": "RS256",
+        "CW_PAIRING_WEB_CLIENT_ID": "auth0-pairing-client",
+        "CW_PAIRING_WEB_REDIRECT_URI": "https://staging-mcp.cwcli.dev/remote/pair/callback",
+        "CW_PAIRING_SESSION_SECRET": "s" * 32,
         "PORT": "10000",
     }
 
@@ -43,6 +46,8 @@ class StagingConfigurationTests(unittest.TestCase):
         self.assertEqual("https://staging-mcp.cwcli.dev/mcp", config.oauth.resource)
         self.assertEqual("https://tenant.eu.auth0.com/", config.oauth.issuer)
         self.assertEqual(("RS256",), config.oauth.algorithms)
+        self.assertIsNotNone(config.pairing_web)
+        self.assertEqual("auth0-pairing-client", config.pairing_web.client_id)
         self.assertEqual(10000, config.port)
         self.assertEqual(4, config.limits.concurrent_requests_per_device)
 
@@ -75,6 +80,9 @@ class StagingConfigurationTests(unittest.TestCase):
                 {**base, "CW_GATEWAY_RESOURCE_URL": "http://staging-mcp.cwcli.dev/mcp"},
                 {**base, "CW_GATEWAY_DATABASE": "relative.sqlite3"},
                 {**base, "CW_GATEWAY_ALLOWED_HOSTS": "https://staging-mcp.cwcli.dev"},
+                {**base, "CW_PAIRING_WEB_REDIRECT_URI": "http://staging-mcp.cwcli.dev/remote/pair/callback"},
+                {**base, "CW_PAIRING_SESSION_SECRET": "short"},
+                {key: value for key, value in base.items() if key != "CW_PAIRING_WEB_CLIENT_ID"},
                 {**base, "CW_LIMIT_REQUESTS_PER_MINUTE": "0"},
                 {key: value for key, value in base.items() if key != "CW_OAUTH_ISSUER_URL"},
             )
@@ -85,8 +93,9 @@ class StagingConfigurationTests(unittest.TestCase):
     def test_machine_readable_environment_contract_contains_no_gateway_secret(self) -> None:
         root = Path(__file__).resolve().parents[1]
         payload = json.loads((root / "config/staging-environment.json").read_text(encoding="utf-8"))
-        self.assertEqual([], payload["gateway_secrets"])
-        self.assertFalse(any(item["secret"] for item in payload["variables"]))
+        self.assertEqual(["CW_PAIRING_SESSION_SECRET"], payload["gateway_secrets"])
+        secrets = {item["name"] for item in payload["variables"] if item["secret"]}
+        self.assertEqual({"CW_PAIRING_SESSION_SECRET"}, secrets)
 
     def test_static_staging_contract_validator_passes(self) -> None:
         self.assertEqual([], validation_errors())

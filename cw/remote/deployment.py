@@ -17,7 +17,14 @@ from urllib.parse import urlparse
 from .auth import OAuthResourceConfig, OAuthTokenVerifier
 from .gateway import GatewayLimits, GatewayService
 from .persistence import RemoteStore
-from .server import GatewayRuntimeIdentity, _validate_plugin_version, create_gateway_app, serve_gateway, _read_plugin_version
+from .server import (
+    GatewayRuntimeIdentity,
+    PairingWebConfig,
+    _read_plugin_version,
+    _validate_plugin_version,
+    create_gateway_app,
+    serve_gateway,
+)
 
 
 def _required(environment: Mapping[str, str], name: str) -> str:
@@ -69,6 +76,7 @@ class GatewayDeploymentConfig:
     port: int
     database: Path
     oauth: OAuthResourceConfig
+    pairing_web: PairingWebConfig | None
     allowed_hosts: tuple[str, ...]
     limits: GatewayLimits
 
@@ -107,6 +115,20 @@ class GatewayDeploymentConfig:
             algorithms=algorithms,
             documentation_url=documentation,
         )
+        pairing_values = {
+            "client": values.get("CW_PAIRING_WEB_CLIENT_ID", "").strip(),
+            "redirect": values.get("CW_PAIRING_WEB_REDIRECT_URI", "").strip(),
+            "secret": values.get("CW_PAIRING_SESSION_SECRET", "").strip(),
+        }
+        if any(pairing_values.values()) and not all(pairing_values.values()):
+            raise ValueError("Pairing web confirmation requires client ID, redirect URI, and session secret together")
+        pairing_web = None
+        if all(pairing_values.values()):
+            pairing_web = PairingWebConfig(
+                client_id=pairing_values["client"],
+                redirect_uri=pairing_values["redirect"],
+                session_secret=pairing_values["secret"],
+            )
         limits = GatewayLimits(
             requests_per_minute=_positive_int(values, "CW_LIMIT_REQUESTS_PER_MINUTE", 120),
             requests_per_device_per_minute=_positive_int(values, "CW_LIMIT_DEVICE_REQUESTS_PER_MINUTE", 240),
@@ -126,6 +148,7 @@ class GatewayDeploymentConfig:
             port=_positive_int(values, "PORT", 10000),
             database=database,
             oauth=oauth,
+            pairing_web=pairing_web,
             allowed_hosts=hosts,
             limits=limits,
         )
@@ -144,6 +167,7 @@ class GatewayDeploymentConfig:
                     cw_plugin_version=self.plugin_version,
                 ),
                 allowed_hosts=self.allowed_hosts,
+                pairing_web=self.pairing_web,
             )
         except Exception:
             store.close()

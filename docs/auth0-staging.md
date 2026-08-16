@@ -88,6 +88,12 @@ cannot be inferred from this claim alone.
 - Prefer **CIMD** when ChatGPT presents client-id metadata during client setup.
 - If CIMD is not available, use **DCR** temporarily for a controlled staging
   window only.
+- Create a separate browser OAuth application for human device-pairing
+  confirmation if the ChatGPT client registration cannot be reused for an
+  ordinary browser redirect.
+- Pairing callback URL: `https://staging-mcp.cwcli.dev/remote/pair/callback`.
+- Pairing login uses Authorization Code with PKCE S256 and stores no bearer
+  token in the browser URL, terminal, repository, or `.cw` state.
 
 If DCR is used:
 
@@ -109,6 +115,9 @@ Set gateway environment variables:
 
 - `CW_OAUTH_ISSUER_URL=<Issuer URL>`
 - `CW_OAUTH_JWKS_URL=<JWKS URL>`
+- `CW_PAIRING_WEB_CLIENT_ID=<Pairing browser application client ID>`
+- `CW_PAIRING_WEB_REDIRECT_URI=https://staging-mcp.cwcli.dev/remote/pair/callback`
+- `CW_PAIRING_SESSION_SECRET=<Render-managed random secret>`
 
 ### Render gateway variable policy (non-secret)
 
@@ -118,15 +127,20 @@ These are the Auth0 values in staging config:
 - `CW_OAUTH_JWKS_URL` (required, public metadata)
 - `CW_OAUTH_WORKSPACE_CLAIM` (required, non-secret)
 - `CW_OAUTH_ALGORITHMS` (required, non-secret, e.g. `RS256`)
+- `CW_PAIRING_WEB_CLIENT_ID` (required, public client identifier)
+- `CW_PAIRING_WEB_REDIRECT_URI` (required, public callback URL)
 
-No gateway client secret is required for token validation because verification uses
-public key metadata (JWKS).
+`CW_PAIRING_SESSION_SECRET` is the only gateway-managed secret in the staging
+contract. It signs short-lived browser pairing cookies and must be generated in
+Render. No OAuth client secret is required by the gateway for token validation
+because verification uses public key metadata (JWKS).
 
 ## Validation checks (must pass before pairing)
 
 Run these checks after configuration:
 
 - Protected-resource metadata reachable: `/.well-known/oauth-protected-resource`
+- Pairing page reachable: `/remote/pair`
 - Authorization server discovery reachable and consistent with issuer
 - PKCE `S256` advertised
 - `resource` equals gateway resource URL
@@ -166,6 +180,9 @@ Set these values only from non-secret sources in Render:
 - `CW_OAUTH_JWKS_URL`
 - `CW_OAUTH_WORKSPACE_CLAIM`
 - `CW_OAUTH_ALGORITHMS`
+- `CW_PAIRING_WEB_CLIENT_ID`
+- `CW_PAIRING_WEB_REDIRECT_URI`
+- `CW_PAIRING_SESSION_SECRET`
 
 Keep all of the following out of docs and code:
 
@@ -181,4 +198,5 @@ human actions remain:
 2. create API and token policy with the exact audience and scopes above,
 3. configure required claim emission,
 4. register ChatGPT client (CIMD first, DCR only if required),
-5. fill `CW_OAUTH_*` values in Render only with the non-secret values above.
+5. register the browser pairing callback URL,
+6. fill `CW_OAUTH_*` and `CW_PAIRING_*` values in Render.

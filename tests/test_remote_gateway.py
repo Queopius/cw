@@ -37,6 +37,10 @@ from tests.helpers import FakeAdapter, TempRepo, result
 
 READ_SCOPES = frozenset({"project.read", "gate.read", "history.read", "completion.read"})
 HAS_REMOTE_CRYPTO = __import__("importlib").util.find_spec("cryptography") is not None
+HAS_REMOTE_HTTP = (
+    __import__("importlib").util.find_spec("mcp") is not None
+    and __import__("importlib").util.find_spec("starlette") is not None
+)
 
 
 class BlockingAdapter(FakeAdapter):
@@ -688,6 +692,170 @@ class OAuthResourceServerTests(unittest.TestCase):
         with TestClient(app, base_url="http://127.0.0.1") as client:
             self.assertEqual(201, client.post("/remote/v1/pairing/request", json=payload).status_code)
             self.assertEqual(429, client.post("/remote/v1/pairing/request", json=payload).status_code)
+
+    @unittest.skipUnless(HAS_REMOTE_CRYPTO and HAS_REMOTE_HTTP, "remote HTTP dependencies unavailable")
+    def test_browser_pairing_requires_auth_and_get_does_not_mutate(self) -> None:
+        from starlette.testclient import TestClient
+
+        from cw.remote.server import PairingWebConfig, _sign_cookie, create_gateway_app
+
+        service = GatewayService(self.store, self.verifier)
+        web = PairingWebConfig(
+            client_id="pairing-client",
+            redirect_uri="https://cw.example.test/remote/pair/callback",
+            session_secret="s" * 32,
+        )
+        credential = DeviceCredential.generate()
+        challenge = service.pairing.request(credential, "Browser laptop")
+        app = create_gateway_app(service, self.config, pairing_web=web)
+        with TestClient(app, base_url="http://127.0.0.1") as client:
+            unauth = client.get("/remote/pair", follow_redirects=False)
+            self.assertEqual(303, unauth.status_code)
+            self.assertIn("/remote/pair/login", unauth.headers["location"])
+            client.cookies.set(web.cookie_name, _sign_cookie({
+                "principal_id": "principal-a",
+                "workspace_id": "workspace-a",
+                "client_id": "browser-client",
+                "scopes": ["project.read"],
+                "csrf": "csrf-token",
+                "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp()),
+            }, web.session_secret))
+            shown = client.get("/remote/pair?code=" + challenge.user_code)
+            self.assertEqual(200, shown.status_code, shown.text)
+            self.assertIn("Browser laptop", shown.text)
+            self.assertIn(challenge.user_code, shown.text)
+            self.assertNotIn(credential.private_key, shown.text)
+            self.assertIsNone(self.store.device(credential.device_id))
+
+    @unittest.skipUnless(HAS_REMOTE_CRYPTO and HAS_REMOTE_HTTP, "remote HTTP dependencies unavailable")
+    def test_browser_pairing_approve_reject_and_replay_are_explicit(self) -> None:
+        from starlette.testclient import TestClient
+
+        from cw.remote.server import PairingWebConfig, _sign_cookie, create_gateway_app
+
+        service = GatewayService(self.store, self.verifier)
+        web = PairingWebConfig(
+            client_id="pairing-client",
+            redirect_uri="https://cw.example.test/remote/pair/callback",
+            session_secret="s" * 32,
+        )
+        app = create_gateway_app(service, self.config, pairing_web=web)
+        session = _sign_cookie({
+            "principal_id": "principal-a",
+            "workspace_id": "workspace-a",
+            "client_id": "browser-client",
+            "scopes": ["project.read"],
+            "csrf": "csrf-token",
+            "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp()),
+        }, web.session_secret)
+        with TestClient(app, base_url="http://127.0.0.1") as client:
+            client.cookies.set(web.cookie_name, session)
+
+            rejected_credential = DeviceCredential.generate()
+            rejected = service.pairing.request(rejected_credential, "Reject laptop")
+            reject = client.post("/remote/pair", data={
+                "csrf": "csrf-token",
+                "code": rejected.user_code,
+                "decision": "reject",
+            })
+            self.assertEqual(200, reject.status_code, reject.text)
+            self.assertIn("rejected", reject.text.lower())
+            self.assertIsNone(self.store.device(rejected_credential.device_id))
+            replay_reject = client.post("/remote/pair", data={
+                "csrf": "csrf-token",
+                "code": rejected.user_code,
+                "decision": "approve",
+            })
+            self.assertEqual(400, replay_reject.status_code)
+
+            credential = DeviceCredential.generate()
+            challenge = service.pairing.request(credential, "Approve laptop")
+            bad_csrf = client.post("/remote/pair", data={
+                "csrf": "wrong",
+                "code": challenge.user_code,
+                "decision": "approve",
+            })
+            self.assertEqual(403, bad_csrf.status_code)
+            approved = client.post("/remote/pair", data={
+                "csrf": "csrf-token",
+                "code": challenge.user_code,
+                "decision": "approve",
+            })
+            self.assertEqual(200, approved.status_code, approved.text)
+            device = self.store.device(credential.device_id)
+            self.assertIsNotNone(device)
+            self.assertEqual("principal-a", device.principal_id)
+            self.assertEqual("workspace-a", device.workspace_id)
+            self.assertNotIn(credential.private_key, approved.text)
+            self.assertNotIn("Bearer ", approved.text)
+            replay = client.post("/remote/pair", data={
+                "csrf": "csrf-token",
+                "code": challenge.user_code,
+                "decision": "approve",
+            })
+            self.assertEqual(400, replay.status_code)
+
+    @unittest.skipUnless(HAS_REMOTE_CRYPTO and HAS_REMOTE_HTTP, "remote HTTP dependencies unavailable")
+    def test_browser_pairing_unknown_and_expired_codes_fail_closed(self) -> None:
+        from starlette.testclient import TestClient
+
+        from cw.remote.server import PairingWebConfig, _sign_cookie, create_gateway_app
+
+        service = GatewayService(self.store, self.verifier)
+        web = PairingWebConfig(
+            client_id="pairing-client",
+            redirect_uri="https://cw.example.test/remote/pair/callback",
+            session_secret="s" * 32,
+        )
+        credential = DeviceCredential.generate()
+        expired = service.pairing.request(credential, "Expired laptop")
+        with self.store.transaction() as connection:
+            connection.execute(
+                "UPDATE pairing_challenges SET expires_at = ? WHERE challenge_id = ?",
+                ("2000-01-01T00:00:00Z", expired.challenge_id),
+            )
+        app = create_gateway_app(service, self.config, pairing_web=web)
+        with TestClient(app, base_url="http://127.0.0.1") as client:
+            client.cookies.set(web.cookie_name, _sign_cookie({
+                "principal_id": "principal-a",
+                "workspace_id": "workspace-a",
+                "client_id": "browser-client",
+                "scopes": ["project.read"],
+                "csrf": "csrf-token",
+                "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp()),
+            }, web.session_secret))
+            unknown = client.get("/remote/pair?code=FFFF-FFFF")
+            self.assertEqual(400, unknown.status_code)
+            expired_response = client.get("/remote/pair?code=" + expired.user_code)
+            self.assertIn(expired_response.status_code, {400, 403})
+            self.assertNotIn(credential.private_key, expired_response.text)
+
+    @unittest.skipUnless(HAS_REMOTE_CRYPTO and HAS_REMOTE_HTTP, "remote HTTP dependencies unavailable")
+    def test_browser_pairing_login_discovery_failure_fails_closed(self) -> None:
+        from unittest.mock import patch
+
+        from starlette.testclient import TestClient
+
+        from cw.remote.server import PairingWebConfig, create_gateway_app
+
+        async def unavailable(*args, **kwargs):
+            raise RemoteError(
+                RemoteErrorCode.REMOTE_TRANSPORT_UNAVAILABLE,
+                "Authorization-server discovery is unavailable",
+                http_status=503,
+            )
+
+        web = PairingWebConfig(
+            client_id="pairing-client",
+            redirect_uri="https://cw.example.test/remote/pair/callback",
+            session_secret="s" * 32,
+        )
+        app = create_gateway_app(GatewayService(self.store, self.verifier), self.config, pairing_web=web)
+        with patch("cw.remote.server.discover_authorization_server", unavailable):
+            with TestClient(app, base_url="http://127.0.0.1") as client:
+                response = client.get("/remote/pair/login")
+        self.assertEqual(503, response.status_code)
+        self.assertNotIn("Bearer ", response.text)
 
 
 @unittest.skipUnless(

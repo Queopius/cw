@@ -217,6 +217,30 @@ class PairingService:
         )
         return record
 
+    def pending_by_user_code(self, user_code: str) -> dict[str, Any]:
+        normalized = user_code.strip().upper()
+        for record in self.store.pending_pairing_challenges():
+            if record["code_hash"] == self._hash_code(str(record["challenge_id"]), normalized):
+                if record["expires_at"] <= utc_now():
+                    raise RemoteError(RemoteErrorCode.AUTHORIZATION_REQUIRED, "Pairing challenge has expired")
+                return record
+        raise RemoteError(RemoteErrorCode.INVALID_REQUEST, "Pairing challenge is invalid")
+
+    def reject(
+        self, *, challenge_id: str, user_code: str, principal_id: str, workspace_id: str,
+    ) -> None:
+        self.store.reject_pairing(
+            challenge_id=challenge_id,
+            code_hash=self._hash_code(challenge_id, user_code),
+            principal_id=principal_id,
+            workspace_id=workspace_id,
+            rejected_at=utc_now(),
+        )
+        self.store.audit(
+            "device_pair_rejected", outcome="DENIED",
+            principal_id=principal_id, workspace_id=workspace_id,
+        )
+
 
 def signed_headers(credential: DeviceCredential, *, method: str, path: str, body: bytes) -> dict[str, str]:
     timestamp = utc_now()

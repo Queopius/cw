@@ -113,6 +113,33 @@
       "owner": "CW/Auth0 configuration"
     },
     {
+      "name": "CW_PAIRING_WEB_CLIENT_ID",
+      "group": "pairing_web",
+      "purpose": "Auth0 public application client identifier for browser pairing confirmation",
+      "required": true,
+      "secret": false,
+      "example": "<auth0-public-client-id>",
+      "owner": "Auth0 tenant administrator"
+    },
+    {
+      "name": "CW_PAIRING_WEB_REDIRECT_URI",
+      "group": "pairing_web",
+      "purpose": "OAuth callback URL for the gateway-hosted pairing page",
+      "required": true,
+      "secret": false,
+      "example": "https://staging-mcp.cwcli.dev/remote/pair/callback",
+      "owner": "CW deployment"
+    },
+    {
+      "name": "CW_PAIRING_SESSION_SECRET",
+      "group": "pairing_web",
+      "purpose": "Gateway-only HMAC secret for short-lived browser pairing session cookies",
+      "required": true,
+      "secret": true,
+      "example": "<provider-managed-random-secret>",
+      "owner": "Render secret"
+    },
+    {
       "name": "CW_LIMIT_REQUESTS_PER_MINUTE",
       "group": "rate_limits",
       "purpose": "Maximum requests per authenticated principal per minute",
@@ -194,7 +221,9 @@
       "owner": "CW operations"
     }
   ],
-  "gateway_secrets": [],
+  "gateway_secrets": [
+    "CW_PAIRING_SESSION_SECRET"
+  ],
   "prohibited": [
     "OAuth access or refresh tokens",
     "Auth0 Management API credentials",

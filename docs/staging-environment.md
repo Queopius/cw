@@ -26,10 +26,15 @@ This page explains how those values are owned and operated.
 | `CW_OAUTH_JWKS_URL` | yes | no | Auth0 admin | Tenant JWKS endpoint |
 | `CW_OAUTH_WORKSPACE_CLAIM` | yes | no | CW/Auth0 | Namespaced workspace claim |
 | `CW_OAUTH_ALGORITHMS` | yes | no | CW/Auth0 | Accepted asymmetric JWT algorithms |
+| `CW_PAIRING_WEB_CLIENT_ID` | yes | no | Auth0 admin | Browser OAuth client for human pairing confirmation |
+| `CW_PAIRING_WEB_REDIRECT_URI` | yes | no | CW/Auth0 | `https://staging-mcp.cwcli.dev/remote/pair/callback` |
+| `CW_PAIRING_SESSION_SECRET` | yes | yes | Render secret | HMAC secret for short-lived pairing session cookies |
 
 The gateway is an OAuth resource server and needs no OAuth client secret,
-Auth0 Management API credential, or signing private key. Those values must not
-be added to Render, Git, plugin metadata, or CW project state.
+Auth0 Management API credential, or signing private key. The only gateway
+secret in staging is `CW_PAIRING_SESSION_SECRET`; it signs HttpOnly browser
+pairing cookies and must be generated inside Render. Provider credentials must
+not be added to Render, Git, plugin metadata, or CW project state.
 
 ## Limits
 
