@@ -9,7 +9,6 @@ services:
     numInstances: 1
     autoDeployTrigger: checksPass
     healthCheckPath: /readyz
-    maxShutdownDelaySeconds: 30
     domains:
       - staging-mcp.cwcli.dev
     disk:
