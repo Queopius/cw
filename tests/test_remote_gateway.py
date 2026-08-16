@@ -588,6 +588,40 @@ class OAuthResourceServerTests(unittest.TestCase):
             self.verifier.verify(self.token(jti="revoked-token"))
         self.assertEqual(RemoteErrorCode.TOKEN_INVALID, revoked.exception.code)
 
+    def test_unsupported_algorithm_is_rejected(self) -> None:
+        secret_token = self.jwt.encode({
+            "iss": self.config.issuer,
+            "aud": self.config.resource,
+            "sub": "principal-a",
+            "cw_workspace": "workspace-a",
+            "client_id": "chatgpt-client",
+            "scope": "project.read",
+            "iat": int(datetime.now(timezone.utc).timestamp()),
+            "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp()),
+        }, key="local-staging-shared-secret", algorithm="HS256")
+        with self.assertRaises(RemoteError) as failure:
+            self.verifier.verify(secret_token)
+        self.assertEqual(RemoteErrorCode.TOKEN_INVALID, failure.exception.code)
+
+    def test_missing_or_malformed_workspace_claim_is_rejected(self) -> None:
+        def forge(claims: dict) -> str:
+            payload = self.jwt.decode(
+                self.token(),
+                self.public,
+                algorithms=["RS256"],
+                options={"verify_signature": False},
+            )
+            payload.pop("cw_workspace", None)
+            payload.update(claims)
+            return self.jwt.encode(payload, self.private, algorithm="RS256", headers={"kid": "fixture"})
+
+        malformed = forge({"cw_workspace": 1})
+        missing = forge({})
+        for token in (malformed, missing):
+            with self.assertRaises(RemoteError) as failure:
+                self.verifier.verify(token)
+            self.assertEqual(RemoteErrorCode.TOKEN_INVALID, failure.exception.code)
+
     @unittest.skipUnless(__import__("importlib").util.find_spec("mcp"), "MCP SDK unavailable")
     def test_streamable_http_metadata_auth_and_tool_discovery(self) -> None:
         from starlette.testclient import TestClient

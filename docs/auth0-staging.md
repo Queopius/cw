@@ -1,70 +1,184 @@
-# Auth0 staging configuration
+# Auth0 staging configuration for CW 0.14 remote gateway
 
-Auth0 is the approved CW 0.14 staging authorization server. It is not a CW
-Core dependency or a permanent production-vendor commitment. This procedure
-is prepared but **NOT EXERCISED** until a human creates the tenant.
+This document is the repository-side staging configuration for a real CW 0.14
+public endpoint. It is executable guidance for a human operator; no secrets are
+stored in this repository.
 
-## Current contracts
+## Scope
 
-OpenAI's current plugin authentication guide requires an OAuth 2.1 MCP flow,
-protected-resource metadata, authorization-server discovery, the `resource`
-parameter, Authorization Code with PKCE S256, and CIMD, DCR, or a predefined
-client. ChatGPT prefers CIMD when the authorization server and plugin builder
-select it. Auth0 recommends manual CIMD registration for production MCP and
-supports DCR as an alternative. Auth0 DCR is disabled by default and is open
-registration when enabled, so it must not be enabled casually.
+- Environment: `staging`
+- Gateway: `https://staging-mcp.cwcli.dev`
+- Gateway resource URL: `https://staging-mcp.cwcli.dev/mcp`
+- Tenant/IdP: **Auth0** (dedicated staging tenant, not reused for production)
+- Scope: prepare Auth0 only; no plugin submission, no deployment changes
 
-Reviewed 2026-08-16:
+## Reviewed references (2026-08-16)
 
+- <https://developers.openai.com/plugins/concepts/plugins>
 - <https://developers.openai.com/plugins/build/auth>
 - <https://developers.openai.com/plugins/deploy/connect-chatgpt>
+- <https://developers.openai.com/api/docs/guides/secure-mcp-tunnels>
 - <https://auth0.com/ai/docs/mcp/guides/registering-your-mcp-client-application>
 - <https://auth0.com/docs/get-started/applications/dynamic-client-registration>
 - <https://auth0.com/docs/get-started/authentication-and-authorization-flow/authorization-code-flow-with-pkce>
 
-## Tenant and API
+No material model change invalidated CW 0.13/0.14 assumptions.
 
-1. Create a dedicated staging tenant. Do not reuse a production tenant.
-2. Create the API/resource server with identifier
-   `https://staging-mcp.cwcli.dev/mcp`, RS256 signing, and a short access-token
-   lifetime appropriate for staging.
-3. Add the exact CW scopes: `project.read`, `gate.read`, `history.read`,
-   `completion.read`, `operation.read`, `validation.execute`, `review.execute`,
-   `phase.start`, `retry.execute`, and `operation.cancel`.
-4. Do not add `workflow.admin`, a wildcard write scope, or any
-   `HIGH_CONSEQUENCE_AUTHORIZATION` scope.
-5. Add a post-login Action that derives a stable CW workspace identifier from
-   approved tenant/app metadata and emits it only as the namespaced
-   `https://cwcli.dev/claims/workspace` access-token claim. Repository content
-   and conversation text cannot populate the claim.
-6. Confirm the issuer, JWKS URL, authorization endpoint, token endpoint,
-   `S256`, and token authentication methods in Auth0 discovery metadata.
-7. Configure the resource-parameter compatibility profile so the canonical
-   CW resource is preserved in authorization and token issuance.
+## Auth0 resource server contract (required)
 
-## Client registration
+Create one staging API and client configuration matching the values below.
 
-Prefer manual CIMD registration after ChatGPT displays the exact
-MCP-specific client metadata URL and callback URI. Import that exact HTTPS
-CIMD in Auth0 and allow only the callback shown by ChatGPT. Select public-client
-`none` with PKCE or `private_key_jwt` only when the observed Auth0/OpenAI
-metadata intersection supports it.
+### Resource/API
 
-If the tested ChatGPT flow cannot use CIMD, DCR is a documented fallback:
+- **API name**: `CW Staging MCP`
+- **Identifier / Audience**: `https://staging-mcp.cwcli.dev/mcp`
+- **Signing algorithm**: `RS256`
+- **Token lifetime**: short-lived access token (current policy assumes <= 10 minutes)
+- **Permission model**: token scopes (not client-credentials token privileges)
+- **RBAC**: optional only if claims remain scope-compatible with token validation
+- **Add Permissions in access token**: optional; current gateway validates `scope`
+- **Offline access**: use only if explicitly required; short absolute expiry preferred
+- **Issuer discovery**: must expose standard OAuth AS metadata for discovery validation
+- **JWKS URL**: HTTPS URL serving the tenant public signing keys
 
-- configure default third-party API permissions narrowly;
-- promote only the required login connection to domain level;
-- enable Auth0 DCR only for the acceptance window and apply tenant ACL/rate
-  controls where available;
-- verify DCR creates a third-party client with mandatory PKCE;
-- disable DCR after registration unless ongoing connector creation requires it.
+### Required scopes
 
-Never copy a returned client secret into Git or chat. The gateway itself does
-not need that secret.
+CW runtime currently expects exactly these scopes (no `workflow.admin` equivalent):
 
-## Revocation
+- Read:
+  - `project.read`
+  - `gate.read`
+  - `history.read`
+  - `completion.read`
+  - `operation.read`
+- Execution / controlled actions:
+  - `validation.execute`
+  - `review.execute`
+  - `phase.start`
+  - `retry.execute`
+  - `operation.cancel`
 
-Access expires according to Auth0 token policy. Revoke the ChatGPT client or
-its grants in Auth0, revoke the CW token ID locally where available, and revoke
-the CW device/project grant independently. Authentication, project access,
-controlled mutation, and high-consequence authority remain separate.
+High-consequence capabilities are intentionally unavailable and no OAuth scope
+must represent them.
+
+## Workspace claim (required)
+
+Gateway configuration expects:
+
+- `CW_OAUTH_WORKSPACE_CLAIM=https://cwcli.dev/claims/workspace`
+
+The claim must contain a stable string workspace identifier.
+
+### Minimal Action (or equivalent claim source)
+
+If Auth0 does not emit the required namespaced claim by default, attach one via an
+Action on Post-Login:
+
+- Input: tenant user/project context (for staging: explicit user/organization field)
+- Output: emit a single string claim at `https://cwcli.dev/claims/workspace`
+- Must fail closed if missing/invalid
+- Must not authorize anything by repository content or model text
+- Must not encode secrets
+
+The claim is identity metadata only. CW grants remain in local project grants and
+cannot be inferred from this claim alone.
+
+## Client registration model
+
+- Prefer **CIMD** when ChatGPT presents client-id metadata during client setup.
+- If CIMD is not available, use **DCR** temporarily for a controlled staging
+  window only.
+
+If DCR is used:
+
+1. Enable DCR only for the staging tenant registration endpoint.
+2. Restrict to expected client type and redirect URIs for ChatGPT.
+3. Require PKCE.
+4. Record allowed registration window and close it afterward.
+5. Keep existing registered clients valid; rotate/revoke as needed.
+6. Revoke and disable clients explicitly when stale.
+
+## Auth0 endpoints and metadata mapping
+
+After save, capture these non-secret URLs:
+
+- Issuer: tenant OpenID Connect issuer (e.g. `https://TENANT.eu.auth0.com/`)
+- JWKS: `https://TENANT.eu.auth0.com/.well-known/jwks.json`
+
+Set gateway environment variables:
+
+- `CW_OAUTH_ISSUER_URL=<Issuer URL>`
+- `CW_OAUTH_JWKS_URL=<JWKS URL>`
+
+### Render gateway variable policy (non-secret)
+
+These are the Auth0 values in staging config:
+
+- `CW_OAUTH_ISSUER_URL` (required, public metadata)
+- `CW_OAUTH_JWKS_URL` (required, public metadata)
+- `CW_OAUTH_WORKSPACE_CLAIM` (required, non-secret)
+- `CW_OAUTH_ALGORITHMS` (required, non-secret, e.g. `RS256`)
+
+No gateway client secret is required for token validation because verification uses
+public key metadata (JWKS).
+
+## Validation checks (must pass before pairing)
+
+Run these checks after configuration:
+
+- Protected-resource metadata reachable: `/.well-known/oauth-protected-resource`
+- Authorization server discovery reachable and consistent with issuer
+- PKCE `S256` advertised
+- `resource` equals gateway resource URL
+- `issuer` matches configured issuer exactly
+- token scope list is restricted to expected scopes
+- `HTTP`-scheme issuer/jwks URLs rejected (must be HTTPS)
+- `cimd` advertised or `registration_endpoint` available for DCR
+- project grant resolution remains explicit and opaque-handle based
+
+## Failure handling
+
+The gateway is fail-closed:
+
+- missing token -> `AUTHENTICATION_REQUIRED`
+- malformed/unsupported token -> `TOKEN_INVALID`
+- wrong issuer/audience -> `TOKEN_INVALID`
+- missing/malformed workspace claim -> `TOKEN_INVALID`
+- expired token -> `TOKEN_EXPIRED`
+- revoked token -> `TOKEN_INVALID`
+- missing scope -> `SCOPE_REQUIRED`
+
+No secret is stored in the repository for these operations.
+
+## Revocation and teardown
+
+- disable/revoke the ChatGPT client registration;
+- revoke user grants where applicable;
+- rotate OAuth keys per Auth0 policy;
+- locally revoke token IDs when fixture support is available;
+- revoke paired device/project grants when local access must be blocked.
+
+## Render variable map
+
+Set these values only from non-secret sources in Render:
+
+- `CW_OAUTH_ISSUER_URL`
+- `CW_OAUTH_JWKS_URL`
+- `CW_OAUTH_WORKSPACE_CLAIM`
+- `CW_OAUTH_ALGORITHMS`
+
+Keep all of the following out of docs and code:
+
+- client secrets, Management API tokens, private keys, repository tokens, local private
+  file paths, tunnel IDs
+
+## Human action after this document
+
+From this repository side, once the artifact changes are committed and tests pass,
+human actions remain:
+
+1. create a staging Auth0 tenant (not in-code),
+2. create API and token policy with the exact audience and scopes above,
+3. configure required claim emission,
+4. register ChatGPT client (CIMD first, DCR only if required),
+5. fill `CW_OAUTH_*` values in Render only with the non-secret values above.
