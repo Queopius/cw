@@ -15,6 +15,7 @@ PLUGIN = ROOT / "plugins" / "cw"
 MANIFEST = PLUGIN / ".codex-plugin" / "plugin.json"
 MCP = PLUGIN / ".mcp.json"
 CAPABILITIES = PLUGIN / "capabilities.json"
+PLUGIN_VERSION = PLUGIN / "VERSION"
 SKILL = PLUGIN / "skills" / "cw-workflow" / "SKILL.md"
 SKILL_UI = PLUGIN / "skills" / "cw-workflow" / "agents" / "openai.yaml"
 MARKETPLACE = ROOT / ".agents" / "plugins" / "marketplace.json"
@@ -127,10 +128,37 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     except (OSError, json.JSONDecodeError) as exc:
         return [f"invalid plugin JSON: {exc}"]
 
-    version = (root / "VERSION").read_text(encoding="utf-8").strip()
+    core_version = (root / "VERSION").read_text(encoding="utf-8").strip()
+    try:
+        plugin_version = PLUGIN_VERSION.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        errors.append(f"plugin VERSION file is missing: {exc}")
+        plugin_version = ""
     manifest_version = str(manifest.get("version", ""))
-    if manifest_version.split("+", 1)[0] != version:
-        errors.append("plugin manifest base version must equal VERSION")
+    if manifest_version.split("+", 1)[0] != plugin_version:
+        errors.append("plugin manifest base version must equal plugins/cw/VERSION")
+    compatibility = capabilities.get("compatibility", {})
+    if not isinstance(compatibility, dict):
+        errors.append("capability compatibility block must be an object")
+        compatibility = {}
+    else:
+        compat_plugin_version = str(compatibility.get("plugin_version", ""))
+        if compat_plugin_version != plugin_version:
+            errors.append("compatibility.plugin_version must match plugins/cw/VERSION")
+        cw_core = compatibility.get("cw_core", {})
+        if not isinstance(cw_core, dict):
+            errors.append("compatibility.cw_core must be an object")
+        else:
+            if not str(cw_core.get("minimum", "")) == "0.14.0":
+                errors.append("compatibility.cw_core.minimum must currently require Core >= 0.14.0")
+            if cw_core.get("compatible_policy") != ">=0.14.0,<1.0.0":
+                errors.append("compatibility.cw_core.compatible_policy must be deliberate and explicit")
+        remote_protocol = compatibility.get("remote_protocol", {})
+        if not isinstance(remote_protocol, dict):
+            errors.append("compatibility.remote_protocol must be an object")
+        else:
+            if str(remote_protocol.get("required", "")) != "cw.remote.v1":
+                errors.append("compatibility.remote_protocol.required must be cw.remote.v1")
     if contract.get("milestone_version") != "0.11.0":
         errors.append("ChatGPT development Completion Contract must remain historical 0.11 evidence")
     if manifest.get("name") != "cw":

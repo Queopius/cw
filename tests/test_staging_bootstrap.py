@@ -4,10 +4,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from cw import __version__
 
 from cw.remote.deployment import GatewayDeploymentConfig
 from cw.remote.protocol import PROTOCOL_VERSION
 from scripts.validate_staging_bootstrap import validation_errors
+from scripts.validate_plugin_candidate import PLUGIN
 
 
 HAS_REMOTE = __import__("importlib").util.find_spec("mcp") is not None
@@ -37,6 +39,7 @@ class StagingConfigurationTests(unittest.TestCase):
             )
         self.assertEqual("staging", config.environment)
         self.assertEqual(SHA, config.build_sha)
+        self.assertEqual((PLUGIN / "VERSION").read_text(encoding="utf-8").strip(), config.plugin_version)
         self.assertEqual("https://staging-mcp.cwcli.dev/mcp", config.oauth.resource)
         self.assertEqual("https://tenant.eu.auth0.com/", config.oauth.issuer)
         self.assertEqual(("RS256",), config.oauth.algorithms)
@@ -89,13 +92,16 @@ class StagingRuntimeTests(unittest.TestCase):
                 with TestClient(app, base_url="http://staging-mcp.cwcli.dev") as client:
                     health = client.get("/healthz")
                     readiness = client.get("/readyz")
-                self.assertEqual(200, health.status_code)
-                self.assertEqual(200, readiness.status_code)
-                self.assertEqual(SHA, readiness.json()["build"]["build_sha"])
-                self.assertEqual(PROTOCOL_VERSION, readiness.json()["build"]["protocol_version"])
-                encoded = json.dumps(readiness.json())
-                self.assertNotIn(str(Path.home()), encoded)
-                self.assertNotIn("tenant.eu.auth0.com", encoded)
+                    self.assertEqual(200, health.status_code)
+                    self.assertEqual(200, readiness.status_code)
+                    self.assertEqual(SHA, readiness.json()["build"]["build_sha"])
+                    self.assertEqual(__version__, readiness.json()["build"]["cw_core_version"])
+                    self.assertEqual((PLUGIN / "VERSION").read_text(encoding="utf-8").strip(), readiness.json()["build"]["cw_plugin_version"])
+                    self.assertEqual(PROTOCOL_VERSION, readiness.json()["build"]["protocol_version"])
+                    self.assertEqual(PROTOCOL_VERSION, readiness.json()["build"]["remote_protocol_version"])
+                    encoded = json.dumps(readiness.json())
+                    self.assertNotIn(str(Path.home()), encoded)
+                    self.assertNotIn("tenant.eu.auth0.com", encoded)
             finally:
                 store.close()
 

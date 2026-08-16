@@ -10,6 +10,10 @@ All notable changes to CW are documented here.
   existing remote gateway, with exact deploy identity, readiness checks,
   bounded runtime configuration, managed TLS/custom-domain intent, and no
   provider SDK in CW.
+- Introduce independent component versioning: Core/CLI remains
+  `0.14.0` while the plugin candidate adopts `0.1.0`, with an explicit
+  machine-readable plugin→Core→protocol compatibility contract and runtime
+  readiness/build metadata reporting that keeps these versions separated.
 - Retain the transactional SQLite backend on a single-instance encrypted
   staging disk, explicitly documenting deploy downtime and postponing a shared
   PostgreSQL backend until scale or availability evidence requires it.

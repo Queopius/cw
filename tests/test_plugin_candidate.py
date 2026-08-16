@@ -38,6 +38,7 @@ class PluginCandidateTests(unittest.TestCase):
         self.assertEqual([], validation_errors())
         self.assertEqual("cw", self.manifest["name"])
         self.assertEqual("CW — Codex Workflow", self.manifest["interface"]["displayName"])
+        self.assertEqual("0.1.0", self.manifest["version"])
         self.assertFalse((PLUGIN / ".app.json").exists())
         contract_document = json.loads(
             (ROOT / "docs/chatgpt-development-completion-contract.json").read_text(encoding="utf-8")
@@ -48,6 +49,26 @@ class PluginCandidateTests(unittest.TestCase):
         skill = (PLUGIN / "skills/cw-workflow/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("No valid gate. No next phase.", skill)
         self.assertIn("Do not authorize", skill)
+
+    def test_component_version_separation_is_explicit(self) -> None:
+        plugin_version = (PLUGIN / "VERSION").read_text(encoding="utf-8").strip()
+        compatibility = self.capabilities["compatibility"]
+        self.assertEqual("0.1.0", plugin_version)
+        self.assertEqual("0.14.0", (ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        self.assertEqual(plugin_version, self.manifest["version"])
+        self.assertEqual(plugin_version, compatibility["plugin_version"])
+        self.assertEqual("0.14.0", compatibility["cw_core"]["minimum"])
+        self.assertEqual(">=0.14.0,<1.0.0", compatibility["cw_core"]["compatible_policy"])
+        self.assertEqual("cw.remote.v1", compatibility["remote_protocol"]["required"])
+        self.assertEqual("strict", compatibility["remote_protocol"]["negotiation"])
+
+    def test_component_change_does_not_force_core_version_equivalence(self) -> None:
+        self.assertNotEqual("0.1.0", (ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        self.assertEqual(
+            "0.1.0",
+            self.capabilities["compatibility"]["plugin_version"],
+        )
+        self.assertEqual("cw.remote.v1", self.capabilities["compatibility"]["remote_protocol"]["required"])
 
     def test_capability_discovery_has_exact_accepted_mcp_surface(self) -> None:
         declared = {
@@ -147,6 +168,7 @@ class PluginCandidateTests(unittest.TestCase):
             second = build(output)
             self.assertEqual(first_digest, hashlib.sha256(output.read_bytes()).hexdigest())
             self.assertEqual(first["sha256"], second["sha256"])
+            self.assertEqual(self.capabilities["compatibility"]["plugin_version"], first["plugin_version"])
             self.assertGreaterEqual(first["files"], 8)
 
     @unittest.skipUnless(shutil.which("codex"), "official Codex CLI is not installed")

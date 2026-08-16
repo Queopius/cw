@@ -5,6 +5,7 @@ import re
 import sys
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -35,6 +36,16 @@ def _dependencies() -> tuple[Any, Any, Any, Any]:
     return FastMCP, ToolAnnotations, Request, JSONResponse
 
 
+def _read_plugin_version() -> str:
+    plugin_version_file = (
+        Path(__file__).resolve().parents[2] / "plugins" / "cw" / "VERSION"
+    )
+    try:
+        return plugin_version_file.read_text(encoding="utf-8").strip() or "0.0.0-unknown"
+    except OSError:
+        return "0.0.0-unknown"
+
+
 def _remote_failure(error: RemoteError, operation_id: str | None = None) -> dict[str, Any]:
     return {
         "schema_version": 1,
@@ -50,6 +61,10 @@ class GatewayRuntimeIdentity:
 
     environment: str = "development"
     build_sha: str = "development"
+    cw_core_version: str = __version__
+    cw_plugin_version: str = _read_plugin_version()
+    remote_protocol_version: str = PROTOCOL_VERSION
+    # Compatibility aliases retained for existing callers.
     version: str = __version__
     protocol_version: str = PROTOCOL_VERSION
 
@@ -58,10 +73,17 @@ class GatewayRuntimeIdentity:
             raise ValueError("Gateway deployment environment is invalid")
         if self.build_sha != "development" and re.fullmatch(r"[0-9a-f]{40}", self.build_sha) is None:
             raise ValueError("Gateway build SHA must be a full lowercase Git SHA")
+        if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", self.cw_core_version):
+            raise ValueError("Gateway core version must be SemVer")
+        if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", self.cw_plugin_version):
+            raise ValueError("Gateway plugin version must be SemVer")
 
     def to_dict(self) -> dict[str, str]:
         return {
             "environment": self.environment,
+            "cw_core_version": self.cw_core_version,
+            "cw_plugin_version": self.cw_plugin_version,
+            "remote_protocol_version": self.remote_protocol_version,
             "version": self.version,
             "build_sha": self.build_sha,
             "protocol_version": self.protocol_version,
@@ -149,7 +171,7 @@ def create_gateway_app(
                     "scopes": [required_scope(name)],
                 }],
                 "cw/capability": contract.capability,
-                "cw/protocolVersion": "cw.remote.v1",
+                "cw/protocolVersion": PROTOCOL_VERSION,
             },
             structured_output=True,
         )(function)

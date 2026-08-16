@@ -107,5 +107,16 @@
       "business_enterprise": "workspace-admin opt-in plus least-privilege scopes; same CW server policy",
       "unknown_surface": "read-only"
     }
+  },
+  "compatibility": {
+    "plugin_version": "0.1.0",
+    "cw_core": {
+      "minimum": "0.14.0",
+      "compatible_policy": ">=0.14.0,<1.0.0"
+    },
+    "remote_protocol": {
+      "required": "cw.remote.v1",
+      "negotiation": "strict"
+    }
   }
 }

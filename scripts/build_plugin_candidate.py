@@ -20,6 +20,10 @@ PLUGIN = ROOT / "plugins" / "cw"
 FIXED_TIME = (2026, 8, 15, 0, 0, 0)
 
 
+def plugin_version() -> str:
+    return (PLUGIN / "VERSION").read_text(encoding="utf-8").strip()
+
+
 def build(output: Path) -> dict[str, object]:
     errors = validation_errors()
     if errors:
@@ -37,6 +41,7 @@ def build(output: Path) -> dict[str, object]:
     return {
         "schema_version": 1,
         "archive": output.name,
+        "plugin_version": plugin_version(),
         "sha256": digest,
         "files": len(members),
     }
@@ -59,8 +64,7 @@ def main() -> int:
                 raise RuntimeError("plugin candidate archive is not deterministic")
             print(json.dumps(first, sort_keys=True))
         return 0
-    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    output = args.output or ROOT / "artifacts" / f"cw-plugin-{version}.zip"
+    output = args.output or ROOT / "artifacts" / f"cw-plugin-{plugin_version()}.zip"
     print(json.dumps(build(output), sort_keys=True))
     return 0
 

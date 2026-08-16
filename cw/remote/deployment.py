@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from .auth import OAuthResourceConfig, OAuthTokenVerifier
 from .gateway import GatewayLimits, GatewayService
 from .persistence import RemoteStore
-from .server import GatewayRuntimeIdentity, create_gateway_app, serve_gateway
+from .server import GatewayRuntimeIdentity, create_gateway_app, serve_gateway, _read_plugin_version
 
 
 def _required(environment: Mapping[str, str], name: str) -> str:
@@ -64,6 +64,7 @@ def _https(name: str, value: str) -> str:
 class GatewayDeploymentConfig:
     environment: str
     build_sha: str
+    plugin_version: str
     host: str
     port: int
     database: Path
@@ -80,6 +81,7 @@ class GatewayDeploymentConfig:
         build_sha = (values.get("CW_BUILD_SHA") or values.get("RENDER_GIT_COMMIT") or "").strip()
         if re.fullmatch(r"[0-9a-f]{40}", build_sha) is None:
             raise ValueError("CW_BUILD_SHA or RENDER_GIT_COMMIT must be a full lowercase Git SHA")
+        plugin_version = _read_plugin_version()
         resource = _https("CW_GATEWAY_RESOURCE_URL", _required(values, "CW_GATEWAY_RESOURCE_URL"))
         issuer = _https("CW_OAUTH_ISSUER_URL", _required(values, "CW_OAUTH_ISSUER_URL"))
         jwks = _https("CW_OAUTH_JWKS_URL", _required(values, "CW_OAUTH_JWKS_URL"))
@@ -118,6 +120,7 @@ class GatewayDeploymentConfig:
         return cls(
             environment=deployment_environment,
             build_sha=build_sha,
+            plugin_version=plugin_version,
             host=values.get("CW_GATEWAY_HOST", "0.0.0.0").strip() or "0.0.0.0",
             port=_positive_int(values, "PORT", 10000),
             database=database,
@@ -137,6 +140,7 @@ class GatewayDeploymentConfig:
                 runtime_identity=GatewayRuntimeIdentity(
                     environment=self.environment,
                     build_sha=self.build_sha,
+                    cw_plugin_version=self.plugin_version,
                 ),
                 allowed_hosts=self.allowed_hosts,
             )
