@@ -734,6 +734,39 @@ class OAuthResourceServerTests(unittest.TestCase):
             self.assertIsNone(self.store.device(credential.device_id))
 
     @unittest.skipUnless(HAS_REMOTE_CRYPTO and HAS_REMOTE_HTTP, "remote HTTP dependencies unavailable")
+    def test_browser_pairing_entrypoint_does_not_render_callback_error(self) -> None:
+        from unittest.mock import patch
+        from cw.remote.auth import AuthorizationServerMetadata
+        from cw.remote.server import PairingWebConfig, create_gateway_app
+        from starlette.testclient import TestClient
+
+        async def discover(*_args, **_kwargs) -> AuthorizationServerMetadata:
+            return AuthorizationServerMetadata(
+                issuer=self.config.issuer,
+                authorization_endpoint="https://auth.example.test/authorize",
+                token_endpoint="https://auth.example.test/token",
+                jwks_uri="https://auth.example.test/jwks.json",
+                code_challenge_methods_supported=("S256",),
+                client_id_metadata_document_supported=True,
+                registration_endpoint=None,
+                token_endpoint_auth_methods_supported=("none",),
+            )
+
+        service = GatewayService(self.store, self.verifier)
+        web = PairingWebConfig(
+            client_id="pairing-client",
+            redirect_uri="https://cw.example.test/remote/pair/callback",
+            session_secret="s" * 32,
+        )
+        app = create_gateway_app(service, self.config, pairing_web=web)
+        with patch("cw.remote.server.discover_authorization_server", new=discover):
+            with TestClient(app, base_url="http://127.0.0.1") as client:
+                entry = client.get("/remote/pair", follow_redirects=False)
+        self.assertEqual(303, entry.status_code)
+        self.assertIn("/remote/pair/login", entry.headers["location"])
+        self.assertNotIn("OAuth authorization code is missing", entry.text)
+
+    @unittest.skipUnless(HAS_REMOTE_CRYPTO and HAS_REMOTE_HTTP, "remote HTTP dependencies unavailable")
     def test_browser_pairing_approve_reject_and_replay_are_explicit(self) -> None:
         from starlette.testclient import TestClient
 
