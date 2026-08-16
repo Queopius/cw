@@ -7,6 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml VERSION README.md LICENSE NOTICE ./
+COPY plugins/cw/VERSION plugins/cw/VERSION
 COPY cw ./cw
 
 RUN python -m pip install --no-cache-dir ".[remote]" \

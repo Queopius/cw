@@ -53,6 +53,20 @@ class StagingConfigurationTests(unittest.TestCase):
             config = GatewayDeploymentConfig.from_environment(values)
         self.assertEqual("b" * 40, config.build_sha)
 
+    def test_explicit_plugin_version_override_is_honored(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            values = environment(Path(directory) / "gateway.sqlite3")
+            values["CW_PLUGIN_VERSION"] = "1.2.3"
+            config = GatewayDeploymentConfig.from_environment(values)
+        self.assertEqual("1.2.3", config.plugin_version)
+
+    def test_invalid_plugin_version_override_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            values = environment(Path(directory) / "gateway.sqlite3")
+            values["CW_PLUGIN_VERSION"] = "invalid"
+            with self.assertRaises(ValueError):
+                GatewayDeploymentConfig.from_environment(values)
+
     def test_invalid_or_unsafe_deployment_configuration_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             base = environment(Path(directory) / "gateway.sqlite3")
@@ -94,6 +108,7 @@ class StagingRuntimeTests(unittest.TestCase):
                     readiness = client.get("/readyz")
                     self.assertEqual(200, health.status_code)
                     self.assertEqual(200, readiness.status_code)
+                    self.assertEqual("ok", health.json()["status"])
                     self.assertEqual(SHA, readiness.json()["build"]["build_sha"])
                     self.assertEqual(__version__, readiness.json()["build"]["cw_core_version"])
                     self.assertEqual((PLUGIN / "VERSION").read_text(encoding="utf-8").strip(), readiness.json()["build"]["cw_plugin_version"])
@@ -102,6 +117,32 @@ class StagingRuntimeTests(unittest.TestCase):
                     encoded = json.dumps(readiness.json())
                     self.assertNotIn(str(Path.home()), encoded)
                     self.assertNotIn("tenant.eu.auth0.com", encoded)
+                    self.assertNotIn(str(Path.home()), encoded)
+            finally:
+                store.close()
+
+    def test_health_readiness_have_distinct_payloads(self) -> None:
+        from starlette.testclient import TestClient
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = GatewayDeploymentConfig.from_environment(
+                environment(Path(directory) / "gateway.sqlite3")
+            )
+            app, store = config.create_app()
+            try:
+                with TestClient(app, base_url="http://staging-mcp.cwcli.dev") as client:
+                    health = client.get("/healthz").json()
+                    readiness = client.get("/readyz").json()
+                    self.assertNotEqual(health, readiness)
+                    self.assertEqual("service", health.get("service"))
+                    self.assertEqual("cw-remote-gateway", health.get("service"))
+                    self.assertIn("status", health)
+                    self.assertIn("status", readiness)
+                    self.assertEqual("ok", health["status"])
+                    self.assertEqual("ready", readiness["status"])
+                    self.assertNotIn("schema_version", health)
+                    self.assertIn("schema_version", readiness)
+                    self.assertIn("build", readiness)
             finally:
                 store.close()
 

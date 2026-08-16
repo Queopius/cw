@@ -15,3 +15,4 @@ tests
 demo
 docs
 plugins
+!plugins/cw/VERSION

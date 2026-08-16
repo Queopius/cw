@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import os
 import json
 import re
 import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from urllib.parse import urlparse
 
 from cw import __version__
@@ -25,6 +26,29 @@ from .gateway import GatewayService
 from .protocol import PROTOCOL_VERSION, REMOTE_TOOLS, RemoteResponse, required_scope
 
 
+SEMVER_PATTERN = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
+
+
+def _read_plugin_version(environment: Mapping[str, str] | None = None) -> str:
+    if environment is not None:
+        explicit = environment.get("CW_PLUGIN_VERSION", "").strip()
+    else:
+        explicit = os.getenv("CW_PLUGIN_VERSION", "").strip()
+    if explicit:
+        return explicit
+
+    candidate_roots = [*Path(__file__).resolve().parents, Path.cwd(), Path("/app")]
+    for root in candidate_roots:
+        plugin_version_file = root / "plugins" / "cw" / "VERSION"
+        try:
+            value = plugin_version_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if value:
+            return value
+    return "0.0.0-unknown"
+
+
 def _dependencies() -> tuple[Any, Any, Any, Any]:
     try:
         from mcp.server.fastmcp import FastMCP
@@ -36,14 +60,9 @@ def _dependencies() -> tuple[Any, Any, Any, Any]:
     return FastMCP, ToolAnnotations, Request, JSONResponse
 
 
-def _read_plugin_version() -> str:
-    plugin_version_file = (
-        Path(__file__).resolve().parents[2] / "plugins" / "cw" / "VERSION"
-    )
-    try:
-        return plugin_version_file.read_text(encoding="utf-8").strip() or "0.0.0-unknown"
-    except OSError:
-        return "0.0.0-unknown"
+def _validate_plugin_version(value: str) -> None:
+    if not SEMVER_PATTERN.fullmatch(value):
+        raise ValueError("Gateway plugin version must be SemVer")
 
 
 def _remote_failure(error: RemoteError, operation_id: str | None = None) -> dict[str, Any]:
@@ -75,8 +94,7 @@ class GatewayRuntimeIdentity:
             raise ValueError("Gateway build SHA must be a full lowercase Git SHA")
         if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", self.cw_core_version):
             raise ValueError("Gateway core version must be SemVer")
-        if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", self.cw_plugin_version):
-            raise ValueError("Gateway plugin version must be SemVer")
+        _validate_plugin_version(self.cw_plugin_version)
 
     def to_dict(self) -> dict[str, str]:
         return {
