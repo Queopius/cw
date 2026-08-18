@@ -124,6 +124,18 @@ Read the Docs build:
 Do not publish an interim `readthedocs.io` hostname as CW's canonical public
 documentation identity, and do not guess the custom-domain DNS target.
 
+After each promotion, repoint the `stable` RTD alias explicitly:
+
+```bash
+python3 scripts/sync_readthedocs_stable.py \
+  --project cw-codex-workflow \
+  --alias stable \
+  --ref prod
+```
+
+(or run the `Read the Docs stable alias sync` workflow) before treating
+`docs.cwcli.dev` as the canonical documentation home.
+
 Before promotion, run the offline installation/isolation demonstration:
 
 ```bash

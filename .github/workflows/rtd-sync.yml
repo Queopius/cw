@@ -1,0 +1,47 @@
+name: Read the Docs stable alias sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: VCS ref to repoint stable docs alias (tag/branch)
+        required: true
+        default: prod
+      trigger_build:
+        description: Trigger RTD rebuild after alias update
+        required: false
+        default: "true"
+      project:
+        description: Read the Docs project slug
+        required: false
+        default: cw-codex-workflow
+
+permissions:
+  contents: read
+
+jobs:
+  sync-stable:
+    name: Sync RTD stable alias
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Require RTD token
+        run: |
+          if [ -z "${READTHEDOCS_TOKEN:-}" ]; then
+            echo "READTHEDOCS_TOKEN secret is required." >&2
+            exit 1
+          fi
+        env:
+          READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+
+      - name: Sync stable alias
+        env:
+          READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+        run: |
+          args=(--project "${{ github.event.inputs.project }}" --alias stable --ref "${{ github.event.inputs.ref }}")
+          if [ "${{ github.event.inputs.trigger_build }}" = "true" ]; then
+            args+=(--trigger-build)
+          fi
+          python3 scripts/sync_readthedocs_stable.py "${args[@]}"

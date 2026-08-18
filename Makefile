@@ -1,4 +1,7 @@
-.PHONY: test install check docs-check plugin-check production-readiness-check acceptance-local demo demo-hero demo-check public-version-sync
+.PHONY: test install check docs-check plugin-check production-readiness-check acceptance-local demo demo-hero demo-check public-version-sync docs-sync-stable
+
+RTD_PROJECT_SLUG ?= cw-codex-workflow
+RTD_STABLE_REF ?= prod
 
 test:
 	python3 -m unittest discover -s tests -v
@@ -33,6 +36,12 @@ docs-check:
 	python3 scripts/check_docs_policy.py
 	python3 scripts/check_public_version.py
 	python3 -m mkdocs build --strict
+
+docs-sync-stable:
+	python3 scripts/sync_readthedocs_stable.py \
+		--project $(RTD_PROJECT_SLUG) \
+		--alias stable \
+		--ref $(RTD_STABLE_REF)
 
 public-version-sync:
 	python3 scripts/sync_public_version.py
