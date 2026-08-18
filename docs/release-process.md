@@ -50,6 +50,12 @@ remain welcome; only maintainers decide which reviewed changes are merged.
 
 4. Update `VERSION`, `cw.__version__`, `pyproject.toml`, and `CHANGELOG.md` in the
    release candidate.
+   After bumping `VERSION`, also run:
+
+   ```bash
+   make public-version-sync
+   ```
+   to refresh public docs version surfaces.
 5. Create an annotated tag while checked out on `release`:
 
    ```bash
