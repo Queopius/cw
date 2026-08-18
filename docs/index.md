@@ -21,6 +21,12 @@
     <li>Review</li>
     <li>Gate</li>
   </ol>
+  <p class="cw-hero__description">
+    <a href="https://github.com/Queopius/cw/releases/latest">
+      <img alt="CW release"
+           src="https://img.shields.io/github/v/release/Queopius/cw?display_name=tag&sort=semver">
+    </a>
+  </p>
   <p class="cw-invariant">No valid gate. No next phase.</p>
 </div>
 
