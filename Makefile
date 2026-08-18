@@ -10,6 +10,7 @@ check:
 	python3 scripts/check_error_docs.py
 	python3 scripts/check_doc_links.py
 	python3 scripts/check_docs_policy.py
+	python3 scripts/check_public_version.py
 	python3 scripts/validate_hero_demo.py
 
 docs-check:
@@ -17,6 +18,7 @@ docs-check:
 	python3 scripts/check_error_docs.py
 	python3 scripts/check_doc_links.py
 	python3 scripts/check_docs_policy.py
+	python3 scripts/check_public_version.py
 	python3 -m mkdocs build --strict
 
 acceptance-local: check docs-check
