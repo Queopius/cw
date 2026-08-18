@@ -18,6 +18,9 @@ def _errors() -> list[str]:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     if "img.shields.io/github/v/release/Queopius/cw?display_name=tag&sort=semver" not in readme:
         errors.append("README missing dynamic GitHub latest-release badge URL.")
+    docs_index = (ROOT / "docs" / "index.md").read_text(encoding="utf-8")
+    if "img.shields.io/github/v/release/Queopius/cw?display_name=tag&sort=semver" not in docs_index:
+        errors.append("docs/index.md missing dynamic GitHub latest-release badge URL.")
 
     versioning = (ROOT / "docs" / "versioning.md").read_text(encoding="utf-8")
     core_match = re.search(r"(?m)^- \*\*CW Core / CLI\*\*: `([^`]+)`\s*$", versioning)
