@@ -5,6 +5,7 @@ import shlex
 import sys
 import tempfile
 import unittest
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -81,6 +82,38 @@ class CommandSecurityTests(unittest.TestCase):
             phase = replace(repo.workflow.phases[0], required_commands=(command,))
             workflow = replace(repo.workflow, phases=(phase,))
             self.assertTrue(validate_phase(repo.root, workflow, phase).passed)
+        finally:
+            repo.close()
+
+    def test_validation_child_cannot_consume_mcp_protocol_stdin(self):
+        repo = TempRepo(phases=1)
+        try:
+            repo.artifact()
+            command_text = f"{shlex.quote(sys.executable)} -c pass"
+            repo.ready(checks=[{"command": command_text, "exit_code": 0}])
+            phase = replace(
+                repo.workflow.phases[0],
+                required_commands=(RequiredCommand(command_text),),
+            )
+            workflow = replace(repo.workflow, phases=(phase,))
+            completed = subprocess.CompletedProcess([sys.executable, "-c", "pass"], 0, "", "")
+            with patch("cw.checks.deterministic.subprocess.run", return_value=completed) as run:
+                validation = validate_phase(repo.root, workflow, phase)
+            self.assertTrue(validation.passed)
+            self.assertEqual(subprocess.DEVNULL, run.call_args.kwargs["stdin"])
+        finally:
+            repo.close()
+
+    def test_gate_git_probe_cannot_consume_mcp_protocol_stdin(self):
+        repo = TempRepo(phases=1)
+        try:
+            repo.artifact()
+            review = repo.approved_review(1)
+            completed = subprocess.CompletedProcess(["git", "rev-parse", "HEAD"], 0, "abc123\n", "")
+            with patch("cw.core.gates.subprocess.run", return_value=completed) as run:
+                create_gate(repo.root, repo.workflow, repo.workflow.phases[0], review)
+            self.assertEqual(subprocess.DEVNULL, run.call_args.kwargs["stdin"])
+            self.assertEqual(10, run.call_args.kwargs["timeout"])
         finally:
             repo.close()
 

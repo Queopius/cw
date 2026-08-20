@@ -35,7 +35,7 @@ def validate_codex_output_schema(path: Path, *, role: str) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        code = ErrorCode.PLANNER_SCHEMA_ERROR if role == "planner" else ErrorCode.REVIEWER_PROCESS_ERROR
+        code = ErrorCode.PLANNER_SCHEMA_ERROR if role.endswith("planner") else ErrorCode.REVIEWER_PROCESS_ERROR
         raise CwError(
             f"{role.title()} output schema is invalid",
             code,
@@ -47,7 +47,7 @@ def validate_codex_output_schema(path: Path, *, role: str) -> dict[str, Any]:
     else:
         paths = _unsupported(payload)
     if paths:
-        code = ErrorCode.PLANNER_SCHEMA_ERROR if role == "planner" else ErrorCode.REVIEWER_PROCESS_ERROR
+        code = ErrorCode.PLANNER_SCHEMA_ERROR if role.endswith("planner") else ErrorCode.REVIEWER_PROCESS_ERROR
         raise CwError(
             f"{role.title()} output schema is incompatible with Codex",
             code,

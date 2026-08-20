@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "milestone_version": "0.14.0",
+  "completion_target": {
+    "id": "public-staging-chatgpt-acceptance",
+    "name": "CW Public Staging Deployment & ChatGPT Acceptance",
+    "requirements": [
+      {"id": "repository-bootstrap", "blocking": true, "status": "PASS", "evidence": "Portable Render deployment, Auth0 contract, staging config, agent profile, validators, and runbooks are committed."},
+      {"id": "public-render-service", "blocking": true, "status": "NOT_RUN", "evidence": "Requires human Render account and repository authorization."},
+      {"id": "dns-tls", "blocking": true, "status": "NOT_RUN", "evidence": "Exact Render custom-domain target is unavailable before service creation."},
+      {"id": "real-auth0", "blocking": true, "status": "NOT_RUN", "evidence": "Requires a human-created staging tenant, API, scopes, and client registration."},
+      {"id": "real-agent-project", "blocking": true, "status": "NOT_RUN", "evidence": "Requires explicit human pairing and one explicit local project grant."},
+      {"id": "machine-e2e", "blocking": true, "status": "NOT_RUN", "evidence": "Runs only after public HTTPS and real OAuth are healthy."},
+      {"id": "real-chatgpt-read", "blocking": true, "status": "NOT_RUN", "evidence": "Runs only after machine acceptance."},
+      {"id": "controlled-actions", "blocking": false, "status": "NOT_RUN", "evidence": "Required only where the tested ChatGPT surface supports the accepted actions."},
+      {"id": "operations", "blocking": true, "status": "NOT_RUN", "evidence": "Backup/restore, restart, revocation, and reliability must be exercised externally."}
+    ]
+  },
+  "plugin_submission_in_scope": false,
+  "production_launch_in_scope": false,
+  "high_consequence_authorization_in_scope": false
+}

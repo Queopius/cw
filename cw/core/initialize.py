@@ -275,6 +275,7 @@ def _rebind_same_repository_metadata(root: Path, project_id_value: str) -> None:
     paths = [
         *sorted((root / ".cw/reviews").glob("*.json")),
         *sorted((root / ".cw/gates").glob("*.json")),
+        *sorted((root / ".cw/completion").glob("**/*.json")),
         root / ".cw/runtime/implementer-session.json",
     ]
     for path in paths:
@@ -340,6 +341,10 @@ def initialize(root: Path) -> tuple[Project, bool]:
         data.setdefault("last_error", None)
         data.setdefault("infrastructure_error", None)
         data.setdefault("pending_goal", None)
+        data.setdefault("completion_cycle", 0)
+        data.setdefault("last_completion_review", None)
+        data.setdefault("last_completion_gate", None)
+        data.setdefault("extension_proposal", None)
         data.setdefault("history", [])
         data.setdefault("updated_at", utc_now())
         if data.get("workflow_id") != project.project_id:
@@ -358,7 +363,7 @@ def initialize(root: Path) -> tuple[Project, bool]:
 
 def backup_metadata(root: Path) -> Path:
     validate_project_layout(root)
-    relatives = ("project.json", "state.json", "config.toml", "runtime", "reviews", "gates", "logs", "locks")
+    relatives = ("project.json", "state.json", "config.toml", "runtime", "reviews", "gates", "completion", "logs", "locks")
     for relative in relatives:
         source = root / ".cw" / relative
         if source.is_dir():
@@ -479,6 +484,10 @@ def repair(root: Path, *, report: dict | None = None) -> Path:
             state.setdefault("created_with_cw_version", state.get("cw_version", __version__))
             state["cw_version"] = __version__
             state.setdefault("infrastructure_error", None)
+            state.setdefault("completion_cycle", 0)
+            state.setdefault("last_completion_review", None)
+            state.setdefault("last_completion_gate", None)
+            state.setdefault("extension_proposal", None)
             atomic_json(state_path, state)
         except (CwError, AttributeError, TypeError):
             atomic_json(state_path, initial_state(current_id))
@@ -487,7 +496,13 @@ def repair(root: Path, *, report: dict | None = None) -> Path:
     from .workflow import load_workflow, workflow_hash
     workflow = load_workflow(root)
     state = load_json(state_path)
-    from .progress import normalize_legacy_progress, valid_gate_ids
+    from .completion import recover_approved_extension
+
+    recovered_extension = recover_approved_extension(root, workflow, state)
+    if recovered_extension:
+        atomic_json(state_path, state)
+        workflow = load_workflow(root)
+    from .progress import derive_effective_workflow_state, normalize_legacy_progress, valid_gate_ids
     verified = valid_gate_ids(root, workflow)
     history_before = len(state.get("history", [])) if isinstance(state.get("history"), list) else 0
     workflow, progress_changed = normalize_legacy_progress(root, workflow, state)
@@ -497,6 +512,7 @@ def repair(root: Path, *, report: dict | None = None) -> Path:
         report["phase_count"] = len(workflow.phases)
         report["history_reconstructed"] = max(0, len(state.get("history", [])) - history_before)
         report["state_reconciled"] = progress_changed
+        report["extension_recovered"] = recovered_extension
     if not workflow.phases and state.get("status") == "UNINITIALIZED":
         state["status"] = "INITIALIZED"
     phase_ids = {phase.id for phase in workflow.phases}
@@ -505,9 +521,14 @@ def repair(root: Path, *, report: dict | None = None) -> Path:
         if all_phases_approved:
             # Completion is canonical, not a missing-position fallback. A null
             # current phase is required and must never restart at phase one.
-            if state.get("status") != "COMPLETED" or state.get("current_phase") is not None:
+            expected_terminal = (
+                "COMPLETED"
+                if workflow.completion_target is None
+                else derive_effective_workflow_state(root, workflow, state).status.value
+            )
+            if state.get("status") != expected_terminal or state.get("current_phase") is not None:
                 raise CwError(
-                    "Completed workflow reconciliation did not converge",
+                    "Planned workflow reconciliation did not converge",
                     ErrorCode.INVALID_STATE,
                 )
             state["workflow_version"] = workflow.version

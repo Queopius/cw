@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "milestone_version": "0.10.0",
+  "submission_in_scope": false,
+  "completion_target": {
+    "id": "cw-plugin-app-candidate",
+    "name": "CW Plugin / App Candidate",
+    "description": "Prove that the accepted CW engine and MCP surface are packaged as an installable, reviewable local OpenAI plugin candidate without public submission or additional capabilities.",
+    "target_type": "plugin-candidate",
+    "requirements": [
+      {
+        "id": "official-format",
+        "description": "Use the current official OpenAI plugin package model and supported manifest fields.",
+        "severity": "blocking",
+        "evidence_expectations": [
+          "Validated plugin manifest, skill layout, bundled MCP configuration, and official-document decision record."
+        ],
+        "project_specific": true
+      },
+      {
+        "id": "skill-validity",
+        "description": "Provide a valid production CW skill that preserves evidence-first workflow semantics.",
+        "severity": "blocking",
+        "evidence_expectations": [
+          "Skill validator and deterministic behavioral contract tests."
+        ],
+        "project_specific": true
+      },
+      {
+        "id": "capability-validity",
+        "description": "Expose exactly the accepted CW 0.9 MCP tool surface.",
+        "severity": "blocking",
+        "evidence_expectations": [
+          "Plugin-to-runtime registry parity test."
+        ],
+        "project_specific": true
+      },
+      {
+        "id": "permission-mapping",
+        "description": "Map READ, EXECUTION, and CONTROLLED_STATE_MUTATION accurately while excluding HIGH_CONSEQUENCE_AUTHORIZATION.",
+        "severity": "blocking",
+        "evidence_expectations": [
+          "Capability map, tool annotations, server-side mismatch test, and forbidden-tool audit."
+        ],
+        "project_specific": true
+      },
+      {
+        "id": "security-privacy",
+        "description": "Preserve project scope, actor/origin, injection resistance, idempotency, redaction, and minimum disclosure.",
+        "severity": "blocking",
+        "evidence_expectations": [
+          "Plugin threat model and deterministic malicious-client tests."
+        ],
+        "project_specific": true
+      },
+      {
+        "id": "codex-acceptance",
+        "description": "Validate local Codex discovery/installation and the governed MCP connection on a disposable initialized project.",
+        "severity": "blocking",
+        "evidence_expectations": [
+          "Official local plugin tooling plus deterministic MCP lifecycle evidence."
+        ],
+        "project_specific": true
+      },
+      {
+        "id": "chatgpt-classification",
+        "description": "Classify ChatGPT desktop-local and web/public support from current official documentation without false compatibility claims.",
+        "severity": "blocking",
+        "evidence_expectations": [
+          "Documented surface matrix and remote/authentication boundary."
+        ],
+        "project_specific": true
+      },
+      {
+        "id": "installation-docs",
+        "description": "Document ordinary CLI, MCP extra, plugin discovery, initialized-project onboarding, and limitations.",
+        "severity": "blocking",
+        "evidence_expectations": [
+          "Strict documentation build and link/policy checks."
+        ],
+        "project_specific": true
+      },
+      {
+        "id": "package-build",
+        "description": "Keep ordinary CLI/MCP packaging intact and validate plugin package integrity cross-platform.",
+        "severity": "blocking",
+        "evidence_expectations": [
+          "Full suite, plugin validator, wheel acceptance, and native platform CI contract."
+        ],
+        "project_specific": true
+      }
+    ]
+  }
+}

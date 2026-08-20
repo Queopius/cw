@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
+import sys
 from pathlib import Path
 from typing import Any, Sequence
 
 from cw.adapters.codex import CodexAdapter
+from cw.application.context import load_project_context
 from cw.agents.reviewer import human_approve, run_review
 from cw.cli.commands import config as config_commands
+from cw.cli.commands import completion as completion_commands
 from cw.cli.commands import execution as execution_commands
 from cw.cli.commands import lifecycle as lifecycle_commands
 from cw.cli.commands import read as read_commands
@@ -42,14 +47,7 @@ def _context(root: Path) -> tuple[Any, dict[str, Any], Any]:
 
 
 def _raw_context(root: Path) -> tuple[Any, dict[str, Any], Any]:
-    validate_project_layout(root)
-    project = load_project(root)
-    workflow = load_workflow(root)
-    if workflow.id != project.project_id or workflow.repository != project.project_id:
-        raise CwError("Project workflow mismatch", ErrorCode.WORKFLOW_PROJECT_MISMATCH, "Run: cw repair", details=f"Workflow: {workflow.repository or workflow.id}\nRepository: {project.project_id}")
-    workflow = apply_policy(workflow, load_policy(root, workflow=workflow))
-    state = load_state(root)
-    return project, state, workflow
+    return load_project_context(root, validate=False)
 
 
 def _git_branch(root: Path) -> str:
@@ -71,6 +69,12 @@ def command_init(args: argparse.Namespace, console: Console) -> int:
 def command_plan(args: argparse.Namespace, console: Console) -> int:
     return lifecycle_commands.command_plan(
         args, console, root_resolver=_root, context=_context,
+    )
+
+
+def command_completion(args: argparse.Namespace, console: Console) -> int:
+    return completion_commands.command_completion(
+        args, console, root_resolver=_root, context=_raw_context,
     )
 
 
@@ -117,6 +121,8 @@ def _review_output(console: Console, phase: Any, report: dict[str, Any], workflo
 
 
 def command_review(args: argparse.Namespace, console: Console) -> int:
+    from cw.core.completion import run_completion_review
+
     return execution_commands.command_review(
         args,
         console,
@@ -125,6 +131,9 @@ def command_review(args: argparse.Namespace, console: Console) -> int:
         current_resolver=_current,
         reviewer=run_review,
         human_approver=human_approve,
+        completion_reviewer=lambda root, workflow, state: run_completion_review(
+            root, workflow, state, CodexAdapter(),
+        ),
     )
 
 
@@ -138,6 +147,7 @@ def command_retry(args: argparse.Namespace, console: Console) -> int:
         review_command=command_review,
         start_command=command_start,
         plan_command=command_plan,
+        completion_command=command_completion,
     )
 
 
@@ -197,6 +207,175 @@ def command_logs(args: argparse.Namespace, console: Console) -> int:
     return read_commands.command_logs(args, console, root_resolver=_root)
 
 
+def command_mcp(args: argparse.Namespace, console: Console) -> int:
+    # Lazy import preserves ordinary CLI operation without the optional MCP SDK.
+    from cw.adapters.mcp import (
+        ChatGPTSurface,
+        RuntimeConfig,
+        chatgpt_development_config,
+    )
+    from cw.adapters.mcp.server import serve
+
+    if args.action == "chatgpt-dev" and not args.projects:
+        print(
+            "cw mcp chatgpt-dev requires at least one explicit --project grant",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 2
+    projects = [Path(item) for item in (args.projects or [Path.cwd()])]
+    allowed_roots = [Path(item) for item in args.allowed_roots] if args.allowed_roots else projects
+    if args.action == "chatgpt-dev":
+        config = chatgpt_development_config(
+            projects,
+            allowed_roots,
+            surface=ChatGPTSurface(args.surface),
+        )
+    else:
+        config = RuntimeConfig.create(projects, allowed_roots)
+    return serve(config)
+
+
+def command_remote(args: argparse.Namespace, console: Console) -> int:
+    """Bootstrap the optional remote adapter without moving policy into CLI."""
+
+    from cw.core.platform import global_config_dir
+    from cw.remote.agent import (
+        HTTPAgentClient,
+        LocalAgentRuntime,
+        LocalAgentState,
+        register_project_grant,
+        request_pairing,
+    )
+    from cw.remote.auth import OAuthResourceConfig, OAuthTokenVerifier
+    from cw.remote.device import DeviceCredential
+    from cw.remote.errors import RemoteError
+    from cw.remote.gateway import GatewayService
+    from cw.remote.persistence import RemoteStore
+
+    directory = global_config_dir() / "remote"
+    credential_path = Path(args.credentials) if args.credentials else directory / "device.json"
+    state_path = Path(args.state) if args.state else directory / "projects.json"
+
+    def required(value: str | None, option: str) -> str:
+        if not value:
+            raise ValueError(f"cw remote {args.action} requires {option}")
+        return value
+
+    try:
+        if args.action == "gateway":
+            from cw.remote.server import create_gateway_app, serve_gateway
+
+            config = OAuthResourceConfig(
+                issuer=required(args.issuer_url, "--issuer-url"),
+                resource=required(args.resource_url, "--resource-url"),
+                jwks_uri=required(args.jwks_url, "--jwks-url"),
+                documentation_url="https://docs.cwcli.dev/remote-auth/",
+            )
+            database = Path(required(args.database, "--database"))
+            store = RemoteStore(database)
+            try:
+                verifier = OAuthTokenVerifier(config, store)
+                return serve_gateway(
+                    create_gateway_app(GatewayService(store, verifier), config),
+                    host=args.host,
+                    port=args.port,
+                )
+            finally:
+                store.close()
+
+        gateway = required(args.gateway_url, "--gateway-url")
+        if args.action == "pair":
+            if credential_path.exists():
+                credential = DeviceCredential.load(credential_path)
+            else:
+                credential = DeviceCredential.generate()
+                credential.save(credential_path)
+            payload = asyncio.run(request_pairing(
+                gateway_url=gateway,
+                credential=credential,
+                display_name=args.device_name,
+            ))
+            if args.json:
+                print(json.dumps(payload, sort_keys=True))
+            elif not args.quiet:
+                pair_url = gateway.rstrip("/") + "/remote/pair"
+                console.item("✓", "Pairing requested")
+                console.wrapped(f"Device: {payload['device_id']}")
+                console.wrapped(f"Open: {pair_url}")
+                console.wrapped(f"Enter code: {payload['user_code']}")
+                console.wrapped(f"Expires: {payload['expires_at']}")
+                console.wrapped("Approve or reject this exact device after signing in.")
+            return 0
+
+        credential = DeviceCredential.load(credential_path)
+        state = LocalAgentState.load(state_path)
+        if args.action == "grant":
+            if not args.projects or len(args.projects) != 1:
+                raise ValueError("cw remote grant requires exactly one --project")
+            project = Path(args.projects[0]).resolve(strict=True)
+            allowed = [Path(item).resolve(strict=True) for item in (args.allowed_roots or [project])]
+            # Opening the runtime proves initialized state and canonical root
+            # containment before any grant metadata crosses the network.
+            probe = LocalAgentRuntime(
+                project_paths=[project], allowed_roots=allowed,
+                grant_handles={project: "cwp_" + "A" * 24},
+            )
+            probe.shutdown()
+            payload = asyncio.run(register_project_grant(
+                gateway_url=gateway, credential=credential, project=project,
+            ))
+            grants = dict(state.grants)
+            grants[payload["project_handle"]] = {
+                "project_path": str(project),
+                "principal_id": payload["principal_id"],
+                "workspace_id": payload["workspace_id"],
+                "device_id": payload["device_id"],
+                "display_name": payload["display_name"],
+            }
+            LocalAgentState(grants).save(state_path)
+            if args.json:
+                print(json.dumps({
+                    "project_handle": payload["project_handle"],
+                    "display_name": payload["display_name"],
+                }, sort_keys=True))
+            elif not args.quiet:
+                console.item("✓", "Project grant created")
+                console.wrapped(f"Handle: {payload['project_handle']}")
+                console.wrapped(f"Project: {payload['display_name']}")
+            return 0
+
+        if not state.grants:
+            raise ValueError("cw remote agent requires at least one locally authorized project grant")
+        project_paths = [Path(record["project_path"]) for record in state.grants.values()]
+        allowed = [Path(item) for item in args.allowed_roots] if args.allowed_roots else project_paths
+        runtime = LocalAgentRuntime(
+            project_paths=project_paths,
+            allowed_roots=allowed,
+            grant_handles={Path(record["project_path"]): handle for handle, record in state.grants.items()},
+            grant_identities={
+                handle: (record["principal_id"], record["workspace_id"], record["device_id"])
+                for handle, record in state.grants.items()
+            },
+        )
+        async def run_agent() -> None:
+            stop = asyncio.Event()
+            await HTTPAgentClient(
+                gateway_url=gateway, credential=credential, runtime=runtime,
+            ).run(stop)
+        try:
+            asyncio.run(run_agent())
+            return 0
+        finally:
+            runtime.shutdown(wait=True)
+    except (RemoteError, ValueError, OSError, json.JSONDecodeError) as exc:
+        if args.json:
+            print(json.dumps({"error": {"code": getattr(getattr(exc, "code", None), "value", "INVALID_REQUEST"), "message": str(exc)}}))
+        else:
+            print(str(exc), file=sys.stderr, flush=True)
+        return 2
+
+
 def command_run(args: argparse.Namespace, console: Console) -> int:
     def execute_phase(phase_id: str, remaining_seconds: float) -> int:
         root = _root()
@@ -224,7 +403,8 @@ def command_run(args: argparse.Namespace, console: Console) -> int:
 
 
 COMMANDS = {
-    "init": command_init, "plan": command_plan, "start": command_start, "status": command_status,
+    "init": command_init, "plan": command_plan, "completion": command_completion,
+    "start": command_start, "status": command_status,
     "validate": command_validate, "review": command_review, "retry": command_retry,
     "history": command_history, "doctor": command_doctor, "error": command_error,
     "repair": command_repair, "config": command_config, "version": command_version,
@@ -234,6 +414,8 @@ COMMANDS = {
     "run": command_run,
     "inspect": command_inspect,
     "logs": command_logs,
+    "mcp": command_mcp,
+    "remote": command_remote,
 }
 
 

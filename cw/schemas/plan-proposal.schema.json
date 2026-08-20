@@ -2,12 +2,36 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["phases"],
+  "required": ["completion_target", "phases"],
   "properties": {
+    "completion_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "description", "target_type", "requirements"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "name": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1},
+        "target_type": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "requirements": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "description", "severity", "evidence_expectations", "project_specific"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "description": {"type": "string", "minLength": 1},
+              "severity": {"enum": ["blocking", "advisory"]},
+              "evidence_expectations": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+              "project_specific": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    },
     "phases": {
       "type": "array",
       "minItems": 1,
-      "maxItems": 20,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -17,7 +41,7 @@
           "blocking_criteria", "requires_human_approval"
         ],
         "properties": {
-          "id": {"type": "string", "pattern": "^[0-9]{2}-[a-z0-9][a-z0-9-]*$"},
+          "id": {"type": "string", "pattern": "^[0-9]{2,4}-[a-z0-9][a-z0-9-]*$"},
           "name": {"type": "string", "minLength": 1, "maxLength": 100},
           "objective": {"type": "string", "minLength": 1, "maxLength": 1000},
           "depends_on": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "product": "CW",
-  "cw_version": "0.5.0",
+  "cw_version": "0.14.0",
   "recording_kind": "real-workflow-recording",
   "goal": "Add a deterministic greeting function with automated tests in one development phase using Python 3",
   "brand": {
@@ -11,7 +11,7 @@
   },
   "provenance": {
     "recorded_from_real_workflow": true,
-    "source_commit": "084d3823adff8804b74c72beabcf18475e46c19b"
+    "source_commit": "8fafe4a12cf082272d924135de5ba78123ce271e"
   },
   "events": [
     {
@@ -39,7 +39,7 @@
     },
     {
       "type": "phase",
-      "text": "01-greeting-and-tests · Implement deterministic greeting with tests"
+      "text": "01-implement-greeting · Implement and test deterministic greeting"
     },
     {
       "type": "command",
@@ -68,10 +68,6 @@
       "text": "Implementation active"
     },
     {
-      "type": "info",
-      "text": "Project files updated · 2 changes"
-    },
-    {
       "type": "active",
       "text": "Running python3 -m unittest discover -v",
       "command": "python3 -m unittest discover -v"
@@ -80,7 +76,11 @@
       "type": "success",
       "text": "python3 -m unittest discover -v completed",
       "command": "python3 -m unittest discover -v",
-      "actual_duration_ms": 18
+      "actual_duration_ms": 12
+    },
+    {
+      "type": "info",
+      "text": "Project files updated · 2 changes"
     },
     {
       "type": "info",
@@ -107,8 +107,13 @@
       "result": "verified"
     },
     {
+      "type": "review",
+      "text": "Completion review satisfied",
+      "result": "SATISFIED"
+    },
+    {
       "type": "complete",
-      "text": "Workflow complete"
+      "text": "Completion target satisfied"
     }
   ],
   "final_result": {

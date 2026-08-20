@@ -169,7 +169,11 @@ def _validate_review(
         ReviewDecision.APPROVE: (
             WorkflowState.HUMAN_REVIEW_REQUIRED
             if phase.requires_human_approval
-            else WorkflowState.COMPLETED
+            else (
+                WorkflowState.PLANNED_COMPLETE
+                if workflow.completion_target is not None
+                else WorkflowState.COMPLETED
+            )
             if index == len(workflow.phases) - 1
             else WorkflowState.IN_PROGRESS
         ),

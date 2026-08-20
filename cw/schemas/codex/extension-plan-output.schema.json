@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["phases"],
+  "properties": {
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "name", "objective", "depends_on", "artifacts", "review_paths",
+          "required_commands", "acceptance_criteria", "blocking_criteria",
+          "requires_human_approval", "expected_evidence", "completion_requirements"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[0-9]{2,4}-[a-z0-9][a-z0-9-]*$"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 100},
+          "objective": {"type": "string", "minLength": 1, "maxLength": 1000},
+          "depends_on": {"type": "array", "items": {"type": "string"}},
+          "artifacts": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "review_paths": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "required_commands": {
+            "type": "array",
+            "items": {
+              "type": "object", "additionalProperties": false, "required": ["command"],
+              "properties": {"command": {"type": "string", "minLength": 1}}
+            }
+          },
+          "acceptance_criteria": {
+            "type": "array", "minItems": 1,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["id", "severity", "description"],
+              "properties": {
+                "id": {"type": "string", "minLength": 1},
+                "severity": {"enum": ["blocking", "advisory"]},
+                "description": {"type": "string", "minLength": 1}
+              }
+            }
+          },
+          "blocking_criteria": {"type": "array", "items": {"type": "string"}},
+          "requires_human_approval": {"type": "boolean"},
+          "expected_evidence": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "completion_requirements": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    }
+  }
+}

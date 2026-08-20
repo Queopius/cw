@@ -57,6 +57,20 @@ def command_run(
                 detail="0 phases are available to run. No implementation session was started.",
             )
         return 0
+    if effective_state.planned_scope_complete:
+        payload = {
+            "status": "PLANNED_COMPLETE", "approved": effective_state.approved_count,
+            "phases": len(workflow.phases), "available_phases": 0,
+            "implementation_started": False, "next": "cw completion review",
+        }
+        if args.json:
+            emit_json(payload)
+        else:
+            console.header("Batch Run")
+            console.item("✓", "All authorized phase gates are valid")
+            console.wrapped("Completion review is required before semantic completion.", 2)
+            console.run("cw completion review")
+        return 3
     settings = load_execution_settings(root)
     existing = load_batch(root)
     if (

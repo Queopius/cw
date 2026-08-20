@@ -2,11 +2,75 @@
   "schema_version": 1,
   "releases": [
     {
-      "version": "0.5.2",
+      "version": "0.14.0",
       "changes": [
-        "Added native Windows installation and centralized cross-platform process, path, locking, and runtime activation boundaries.",
-        "Added installed-wheel deterministic acceptance across Linux, Windows, macOS Intel, and macOS arm64.",
-        "Removed public per-page documentation edit actions while preserving canonical GitHub source access."
+        "Prepared a portable Render staging web-service deployment for the existing OAuth-protected gateway with exact build identity and bounded environment validation.",
+        "Selected single-instance SQLite on a persistent staging disk while retaining the provider-neutral persistence boundary and documenting the availability limitation.",
+        "Added the Auth0, agent, operations, security, and acceptance contracts needed for a human-authorized real staging deployment without adding credentials or changing the CW tool surface."
+      ]
+    },
+    {
+      "version": "0.13.0",
+      "changes": [
+        "Implemented a hosting-neutral OAuth-protected Streamable HTTP MCP gateway and outbound-only local CW agent.",
+        "Added asymmetric device pairing, opaque tenant-bound project grants, typed cw.remote.v1 routing, revocation, replay protection, and minimal remote persistence.",
+        "Proved the accepted read and controlled-action registries through deterministic remote E2E while keeping repositories, raw .cw state, and high-consequence authority local."
+      ]
+    },
+    {
+      "version": "0.12.0",
+      "changes": [
+        "Defined the production ChatGPT plugin gateway, local-agent, authentication, authorization, and privacy architecture.",
+        "Kept the accepted MCP surface unchanged and high-consequence authorization outside normal OAuth and tool invocation.",
+        "Added deterministic production-readiness, submission, security, and data-flow contracts without deploying or publishing."
+      ]
+    },
+    {
+      "version": "0.11.0",
+      "changes": [
+        "Added an explicitly granted ChatGPT development profile for Secure MCP Tunnel over the existing stdio runtime.",
+        "Separated CW capability support from the read-only or controlled-action capability enabled on the tested ChatGPT surface.",
+        "Added remote-origin, privacy, injection, replay, recovery, and future authenticated-relay evidence without a hosted service."
+      ]
+    },
+    {
+      "version": "0.10.0",
+      "changes": [
+        "Packaged the accepted MCP surface as a current-format local OpenAI plugin candidate.",
+        "Added the production CW workflow skill, official assets, capability mapping, and development marketplace metadata.",
+        "Classified ChatGPT web/public support as requiring a future remote HTTPS runtime and authentication boundary."
+      ]
+    },
+    {
+      "version": "0.9.0",
+      "changes": [
+        "Added four governed MCP actions through CWApplication with a persistent operation lifecycle.",
+        "Added project-scoped idempotency, polling, safe queued cancellation, and expected mutation-set enforcement.",
+        "Kept gates, review decisions, repair, rebaseline, and extension authorization outside the MCP action surface."
+      ]
+    },
+    {
+      "version": "0.8.0",
+      "changes": [
+        "Added an optional local stdio MCP runtime with six narrow read-only CW tools.",
+        "Added opaque project scoping, path/secret redaction, read-only resources, and typed MCP origin.",
+        "Added protocol, security, parity, no-mutation, packaging, and cross-platform MCP tests."
+      ]
+    },
+    {
+      "version": "0.7.0",
+      "changes": [
+        "Added a UI-independent CW application facade and structured operation contracts.",
+        "Added scoped project handles, shared adapter locking, and idempotent human authorization.",
+        "Defined plugin skill, MCP capability, security, and transport architecture without shipping a server."
+      ]
+    },
+    {
+      "version": "0.6.0",
+      "changes": [
+        "Separated planned-scope completion from Completion Contract satisfaction.",
+        "Added independent system completion review and distinct completion evidence.",
+        "Added human-authorized append-only workflow extensions with repeatable completion cycles."
       ]
     },
     {

@@ -5,11 +5,14 @@ import json
 import os
 import shutil
 import sys
-import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
 from cw import __version__
+from cw.application.status import git_branch as application_git_branch
+from cw.application.status import explain_status as application_explain_status
+from cw.application.status import project_status as application_project_status
+from cw.application.facade import CWApplication
 from cw.adapters.codex import CodexAdapter
 from cw.adapters.invocation import latest_invocation
 from cw.adapters.structured_output import codex_schema
@@ -18,7 +21,6 @@ from cw.core.audit import audit_history
 from cw.core.diagnostics import legacy_diagnostic, load_diagnostic, load_global_diagnostic, raw_diagnostic
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_gate
-from cw.core.history import history_timeline
 from cw.core.integrity import snapshot_protected_paths
 from cw.core.progress import derive_effective_workflow_state
 from cw.core.schema import SCHEMA_VERSION
@@ -51,88 +53,11 @@ DoctorProvider = Callable[[Path | None, bool, bool, bool], list[dict[str, Any]]]
 
 
 def git_branch(root: Path) -> str:
-    result = subprocess.run(
-        ["git", "branch", "--show-current"], cwd=root,
-        text=True, encoding="utf-8", errors="replace", capture_output=True, check=False,
-    )
-    return result.stdout.strip() or "detached HEAD"
+    return application_git_branch(root)
 
 
 def status_payload(root: Path, context: ContextLoader) -> dict[str, Any]:
-    project, state, workflow = context(root)
-    consistency = derive_effective_workflow_state(root, workflow, state) if workflow.phases else None
-    current = state.get("current_phase")
-    try:
-        index = workflow.index(current) if current and workflow.phases else None
-    except StopIteration:
-        index = None
-    gates: dict[str, bool] = {}
-    gate_states: dict[str, str] = {}
-    invalid_gates: list[str] = []
-    gate_error = None
-    gate_error_code = None
-    gate_error_details = None
-    if consistency is not None:
-        gate_states.update(consistency.chain.states)
-        for phase in workflow.phases:
-            gates[phase.id] = gate_states.get(phase.id) == "approved"
-        invalid_gates = [phase.id for phase in workflow.phases if gate_states.get(phase.id) == "invalid"]
-        if consistency.chain.issues:
-            gate_error = "Approval gate chain is invalid"
-            gate_error_code = ErrorCode.INVALID_GATE.value
-            gate_error_details = "\n".join(consistency.chain.issues)
-    batch = load_batch(root)
-    managed_run = load_active_run(root)
-    if managed_run is not None:
-        process = ProcessInspector().inspect(managed_run.get("process_pid"))
-        supervisor = ProcessInspector().inspect(managed_run.get("supervisor_pid"))
-        managed_run = {
-            **managed_run,
-            "alive": process.alive or supervisor.alive,
-            "stale": not (process.alive or supervisor.alive),
-        }
-    if (
-        batch and batch.get("status") == "RUNNING"
-        and (not isinstance(batch.get("pid"), int) or not process_is_alive(batch["pid"]))
-    ):
-        batch = {**batch, "status": "INTERRUPTED"}
-    return {
-        "schema_version": SCHEMA_VERSION, "project": project.project_id,
-        "repository_root": str(root), "branch": git_branch(root),
-        "workflow": "INITIALIZED" if not workflow.phases else "ACTIVE",
-        "plan": workflow.status, "state": state["status"], "phase": current,
-        "phase_index": index, "position": index + 1 if index is not None else None,
-        "phase_count": len(workflow.phases),
-        "approved_count": consistency.approved_count if consistency is not None else 0,
-        "remaining_count": consistency.remaining_count if consistency is not None else 0,
-        "active_count": consistency.active_count if consistency is not None else 0,
-        "effective_state": consistency.status.value if consistency is not None else state["status"],
-        "is_complete": consistency.is_complete if consistency is not None else False,
-        "attempt": state.get("attempt", 0), "max_attempts": workflow.max_review_attempts,
-        "ready": (root / ".cw" / "runtime" / "READY_FOR_REVIEW.json").is_file(),
-        "gate": gates.get(current, False) if current else False, "gates": gates,
-        "gate_states": gate_states, "invalid_gates": invalid_gates,
-        "gate_error": gate_error, "gate_error_code": gate_error_code,
-        "gate_error_details": gate_error_details,
-        "phases": [
-            {
-                "id": phase.id,
-                "number": phase.id.split("-", 1)[0],
-                "name": phase.name,
-                "objective": phase.objective,
-                "depends_on": list(phase.depends_on),
-            }
-            for phase in workflow.phases
-        ],
-        "last_error": state.get("last_error"),
-        "infrastructure_error": state.get("infrastructure_error"),
-        "batch": batch,
-        "run": managed_run,
-        "consistent": consistency.consistent if consistency is not None else True,
-        "consistency_issues": list(consistency.issues) if consistency is not None else [],
-        "expected_phase": consistency.expected_current if consistency is not None else None,
-        "approved_through": consistency.chain.approved[-1][0] if consistency and consistency.chain.approved else None,
-    }
+    return application_project_status(root, context)
 
 
 def render_status(console: Console, data: dict[str, Any], verbose: bool = False) -> None:
@@ -177,21 +102,25 @@ def command_explain(
 ) -> int:
     root = root_resolver()
     data = status_payload(root, context)
-    payload = {
-        "consistent": data.get("consistent", True),
-        "current_phase": data.get("phase"),
-        "expected_phase": data.get("expected_phase"),
-        "approved_through": data.get("approved_through"),
-        "issues": data.get("consistency_issues", []),
-        "recovery": "cw repair" if not data.get("consistent", True) else None,
-    }
+    payload = application_explain_status(data)
     if args.json:
         emit_json(payload)
         return 1 if not payload["consistent"] else 0
     console.header("Explain")
     if payload["consistent"]:
         console.item("✓", "Workflow state is consistent")
-        console.wrapped("Configured phases, approval gates and state agree.", 2)
+        if payload["completion_mode"] == "CONTRACT_AWARE" and payload["planned_scope_complete"] and not payload["completion_satisfied"]:
+            decision = (payload.get("completion_review") or {}).get("decision", "PENDING")
+            console.wrapped(
+                f"All authorized phase gates are valid, but the Completion Contract is not satisfied. Review: {decision}.", 2,
+            )
+            if payload.get("extension_proposal"):
+                console.wrapped("CW cannot append or implement the proposed phases without explicit human authorization.", 2)
+                console.action("cw completion show", "Inspect the contract gap and proposal")
+            else:
+                console.action("cw completion review", "Run independent completion review")
+        else:
+            console.wrapped("Configured phases, approval gates and completion evidence agree.", 2)
         return 0
     console.item("✕", "Why is the workflow blocked?")
     console.wrapped(
@@ -211,16 +140,23 @@ def command_history(
     args: argparse.Namespace, console: Console, *, root_resolver: RootResolver, context: ContextLoader,
 ) -> int:
     root = root_resolver()
-    _, state, workflow = context(root)
-    audit_history(root, workflow, state)
-    phases = history_timeline(root, workflow, state)
+    application = CWApplication(allowed_roots=[root])
+    base = application.history(application.open_project(root)).data
+    phases = base["phases"]
     if args.phase:
         phases = [
             phase for phase in phases
             if phase["phase"] == args.phase or phase["number"] == args.phase
         ]
-    events = [event for event in state.get("history", []) if not args.phase or event.get("phase") == args.phase]
-    payload = {"workflow": workflow.id, "phases": phases, "events": events}
+    events = [event for event in base["events"] if not args.phase or event.get("phase") == args.phase]
+    completion_events = [
+        event for event in base["events"]
+        if isinstance(event, dict) and str(event.get("action", "")).startswith(("completion_", "extension_"))
+    ]
+    payload = {
+        "workflow": base["workflow"], "phases": phases, "events": events,
+        "completion_cycles": completion_events,
+    }
     if args.json:
         emit_json(payload)
     else:
@@ -443,6 +379,21 @@ def command_inspect(
     root_resolver: RootResolver,
 ) -> int:
     root = root_resolver()
+    if args.action == "completion":
+        application = CWApplication(allowed_roots=[root])
+        payload = application.completion(application.open_project(root)).data
+        latest = payload["review"]
+        proposal = payload["proposal"]
+        if args.json:
+            emit_json(payload)
+        else:
+            console.header("Completion Inspection")
+            console.field("Mode", payload["mode"])
+            console.field("State", payload["state"])
+            console.field("Cycle", payload["cycle"])
+            console.field("Review", latest.get("decision") if isinstance(latest, dict) else "none")
+            console.field("Proposal", "present" if proposal else "none")
+        return 0
     active = load_active_run(root)
     if args.action == "session" and active is not None:
         run = active

@@ -64,7 +64,26 @@ def _plan(root: Path) -> dict[str, Any]:
             "requires_human_approval": False,
         })
         previous = phase_id
-    return {"phases": phases}
+    return {
+        "completion_target": {
+            "id": "functional-prototype", "name": "Functional Prototype",
+            "description": "Prove the deterministic acceptance goal.",
+            "target_type": "functional-prototype",
+            "requirements": [
+                {
+                    "id": "FUNCTIONAL_BEHAVIOR", "description": "The declared behavior works end to end.",
+                    "severity": "blocking", "evidence_expectations": ["Executable acceptance evidence"],
+                    "project_specific": False,
+                },
+                {
+                    "id": "VERIFICATION_BASELINE", "description": "Deterministic verification passes.",
+                    "severity": "blocking", "evidence_expectations": ["Current test evidence"],
+                    "project_specific": False,
+                },
+            ],
+        },
+        "phases": phases,
+    }
 
 
 def _review(root: Path) -> dict[str, Any]:
@@ -89,6 +108,57 @@ def _review(root: Path) -> dict[str, Any]:
         "blocking_issues": ["Deterministic revision requested"] if revise else [],
         "summary": "Deterministic reviewer requested revision" if revise else "Deterministic reviewer approved",
     }
+
+
+def _completion_review(root: Path) -> dict[str, Any]:
+    plan = json.loads((root / ".codex/workflow/phases.yaml").read_text(encoding="utf-8"))
+    contract = plan["completion_target"]
+    artifact = plan["phases"][-1]["artifacts"][0]
+    extend = _scenario() == "completion_extension"
+    missing = contract["requirements"][0]["id"] if extend else None
+    results = [{
+        "id": item["id"],
+        "status": "MISSING" if item["id"] == missing else "VERIFIED",
+        "evidence": ["MISSING: deterministic extension evidence"] if item["id"] == missing else [f"{artifact}:1 deterministic completion evidence"],
+        "rationale": "Missing in the extension scenario" if item["id"] == missing else "Verified by deterministic acceptance evidence",
+    } for item in contract["requirements"]]
+    return {
+        "decision": "EXTENSION_REQUIRED" if extend else "SATISFIED",
+        "contract_results": results,
+        "system_findings": [] if not extend else [{
+            "category": "acceptance", "severity": "blocking",
+            "summary": "Deterministic extension required",
+            "evidence": ["MISSING: deterministic extension evidence"],
+            "requirement_ids": [missing],
+        }],
+        "missing_evidence": [] if not extend else ["Deterministic extension evidence"],
+        "extension_recommendation": {
+            "rationale": "" if not extend else "Add one acceptance hardening phase",
+            "requirement_ids": [] if not extend else [missing],
+        },
+        "summary": "Deterministic completion review satisfied" if not extend else "Deterministic completion extension required",
+    }
+
+
+def _extension_plan(root: Path) -> dict[str, Any]:
+    plan = json.loads((root / ".codex/workflow/phases.yaml").read_text(encoding="utf-8"))
+    number = len(plan["phases"]) + 1
+    previous = plan["phases"][-1]["id"]
+    requirement = plan["completion_target"]["requirements"][0]["id"]
+    phase_id = f"{number:02d}-acceptance-hardening"
+    return {"phases": [{
+        "id": phase_id, "name": "Acceptance Hardening",
+        "objective": "Close deterministic completion evidence gaps.",
+        "depends_on": [previous], "artifacts": [f"artifacts/phase-{number}.txt"],
+        "review_paths": ["artifacts/**/*"], "required_commands": [],
+        "acceptance_criteria": [{
+            "id": f"EXT-{number:02d}-001", "severity": "blocking",
+            "description": "Completion evidence is present.",
+        }],
+        "blocking_criteria": [], "requires_human_approval": False,
+        "expected_evidence": ["Deterministic acceptance evidence"],
+        "completion_requirements": [requirement],
+    }]}
 
 
 def _implement(root: Path, arguments: list[str]) -> int:
@@ -172,6 +242,15 @@ def main() -> int:
             print("connection refused while contacting reviewer", file=sys.stderr)
             return 44
         _write_output(arguments, _review(root))
+        return 0
+    if os.environ.get("CW_COMPLETION_REVIEWER_ACTIVE") == "1":
+        if scenario == "reviewer_infrastructure_failure":
+            print("connection refused while contacting completion reviewer", file=sys.stderr)
+            return 44
+        _write_output(arguments, _completion_review(root))
+        return 0
+    if os.environ.get("CW_EXTENSION_PLANNER_ACTIVE") == "1":
+        _write_output(arguments, _extension_plan(root))
         return 0
     if os.environ.get("CW_IMPLEMENTER_ACTIVE") == "1":
         return _implement(root, arguments)

@@ -24,6 +24,14 @@ def build_parser() -> argparse.ArgumentParser:
     _common(plan, suppress_defaults=True)
     plan.add_argument("action", nargs="?", choices=("show", "approve", "rebuild"))
     plan.add_argument("--goal")
+    completion = subcommands.add_parser("completion", add_help=True)
+    _common(completion, suppress_defaults=True)
+    completion.add_argument("action", nargs="?", choices=("show", "review", "approve", "reject", "adopt"))
+    completion.add_argument(
+        "--target",
+        choices=("proof-of-concept", "functional-prototype", "internal-tool", "controlled-pilot", "production", "public-release"),
+        help="Readiness template for explicit legacy adoption",
+    )
     review = subcommands.add_parser("review", add_help=True)
     _common(review, suppress_defaults=True)
     review.add_argument("--hook", action="store_true", help=argparse.SUPPRESS)
@@ -62,11 +70,43 @@ def build_parser() -> argparse.ArgumentParser:
     integrations.add_argument("name", nargs="?")
     inspect = subcommands.add_parser("inspect", add_help=True)
     _common(inspect, suppress_defaults=True)
-    inspect.add_argument("action", nargs="?", choices=("run", "session"), default="session")
+    inspect.add_argument("action", nargs="?", choices=("run", "session", "completion"), default="session")
     inspect.add_argument("run_id", nargs="?")
     logs = subcommands.add_parser("logs", add_help=True)
     _common(logs, suppress_defaults=True)
     logs.add_argument("--run", dest="run_id")
+    mcp = subcommands.add_parser("mcp", add_help=True)
+    _common(mcp, suppress_defaults=True)
+    mcp.add_argument(
+        "action", nargs="?", choices=("serve", "chatgpt-dev"), default="serve",
+    )
+    mcp.add_argument(
+        "--project", action="append", dest="projects", metavar="PATH",
+        help="Authorize an initialized CW project (repeatable; startup-only)",
+    )
+    mcp.add_argument(
+        "--allowed-root", action="append", dest="allowed_roots", metavar="PATH",
+        help="Constrain configured projects to a canonical local root (repeatable)",
+    )
+    mcp.add_argument(
+        "--surface", choices=("read-only", "controlled-actions"), default="read-only",
+        help="ChatGPT development capability profile (chatgpt-dev only)",
+    )
+    remote = subcommands.add_parser("remote", add_help=True)
+    _common(remote, suppress_defaults=True)
+    remote.add_argument("action", choices=("gateway", "pair", "grant", "agent"))
+    remote.add_argument("--gateway-url", help="Canonical HTTPS CW gateway origin")
+    remote.add_argument("--issuer-url", help="OAuth authorization-server issuer (gateway)")
+    remote.add_argument("--resource-url", help="Canonical public MCP resource URL (gateway)")
+    remote.add_argument("--jwks-url", help="OAuth authorization-server JWKS URL (gateway)")
+    remote.add_argument("--database", metavar="PATH", help="Gateway transactional metadata database")
+    remote.add_argument("--host", default="127.0.0.1", help="Gateway bind host (gateway)")
+    remote.add_argument("--port", type=int, default=8765, help="Gateway bind port (gateway)")
+    remote.add_argument("--credentials", metavar="PATH", help="Local device credential file")
+    remote.add_argument("--state", metavar="PATH", help="Local opaque project-grant mapping")
+    remote.add_argument("--device-name", default="CW local agent", help="Pairing display name")
+    remote.add_argument("--project", action="append", dest="projects", metavar="PATH")
+    remote.add_argument("--allowed-root", action="append", dest="allowed_roots", metavar="PATH")
     run = subcommands.add_parser("run", add_help=True)
     _common(run, suppress_defaults=True)
     run.add_argument("phase_count", nargs="?", type=int)
