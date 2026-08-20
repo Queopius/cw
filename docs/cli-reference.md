@@ -368,14 +368,18 @@ cw config set execution.default_phases 1
 
 ## cw governance
 
-**Syntax:** `cw governance [configure|diagnose|authorize|remote-plan] [--mode solo-maintainer|team-reviewed|detect] [--pr NUMBER] [--yes] [--non-interactive] [--replace]`
+**Syntax:** `cw governance [configure|diagnose|authorize|invalidate|remote-plan] [--mode solo-maintainer|team-reviewed|detect] [--pr NUMBER] [--head-sha SHA] [--base-sha SHA] [--reason TEXT] [--yes] [--non-interactive] [--replace]`
 
 - `configure` selects an explicit review model; `detect` uses current GitHub permissions.
 - `diagnose` reads collaborators, reviews, protection, and checks without mutation.
 - `authorize` creates SHA-bound solo-maintainer evidence after all checks pass.
+- `invalidate` preserves and invalidates one exact authorization before a separate reauthorization.
 - `remote-plan` shows the minimum branch-protection change but never applies it.
 - `--mode` selects `solo-maintainer`, `team-reviewed`, or explicit GitHub detection.
 - `--pr` binds diagnosis and authorization to one pull request.
+- `--head-sha` identifies the exact authorization head commit to invalidate.
+- `--base-sha` disambiguates authorizations sharing a PR and head.
+- `--reason` records a required, non-empty invalidation reason.
 - `--non-interactive` disables prompts and requires explicit mode/confirmation options.
 - `--yes` is the explicit non-interactive authorization confirmation.
 - `--replace` is required to replace an existing explicit mode.
@@ -384,6 +388,7 @@ cw config set execution.default_phases 1
 cw governance configure --mode solo-maintainer --non-interactive
 cw governance diagnose --pr 34
 cw governance authorize --pr 34 --yes --non-interactive
+cw governance invalidate --pr 37 --head-sha SHA --reason incomplete-base-sha-evidence
 cw governance remote-plan --pr 34 --json
 ```
 

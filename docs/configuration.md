@@ -5,6 +5,11 @@ it cannot be confused with phase-review policy. Use `cw governance configure`;
 projects without a mode remain compatible and receive a recommendation rather
 than an automatic migration.
 
+Governance authorization schema upgrades are fail-closed. Schema 1 records
+without `base_sha` remain readable and unchanged, but cannot authorize a merge.
+Use the supported append-only `cw governance invalidate` operation and then
+create a separate authorization from a fresh GitHub snapshot.
+
 ## Precedence and effective policy
 
 Configuration precedence is:

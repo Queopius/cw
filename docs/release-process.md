@@ -7,6 +7,12 @@ require green checks and explicit SHA-bound CW authorization; team repositories
 require a current approval from another authorized account. CW authorization is
 not a GitHub review.
 
+Authorization evidence binds both the head SHA and base SHA plus the required
+check/policy fingerprint. Before merge, validate it against a fresh PR snapshot.
+Legacy evidence without `base_sha` is historical only: invalidate it with
+`cw governance invalidate`, preserve the original, and perform a separate new
+human authorization. Never infer or backfill a historical base SHA.
+
 If branch protection conflicts with the selected mode, run
 `cw governance remote-plan --pr NUMBER`. It displays the minimum diff but never
 changes remote settings, required checks, direct-push restrictions, force-push
