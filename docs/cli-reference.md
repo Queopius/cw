@@ -85,11 +85,16 @@ not silently launch a mutating agent.
 
 ## cw plan
 
-**Syntax:** `cw plan [show|approve|rebuild|rebaseline] [--goal TEXT] [--proposal PATH] [--reason TEXT] [--apply ID] [--authorize] [--operation-id ID]`
+**Syntax:** `cw plan [show|approve|rebuild|rebaseline|amend] [--goal TEXT] [--file PATH] [--expected-workflow-sha256 SHA256] [--proposal PATH] [--reason TEXT] [--apply ID] [--authorize] [--operation-id ID]`
 
 - `--goal TEXT` supplies an explicit planning goal.
+- `--file PATH` supplies the repository-relative corrected proposal for `amend`.
+- `--expected-workflow-sha256 SHA256` supplies the mandatory compare-and-swap guard for `amend`.
 - `show` displays the proposed or approved plan.
 - `approve` approves the current proposal without rewriting it.
+- `amend --file PATH --expected-workflow-sha256 SHA256` transactionally
+  replaces only the current unapproved `PLAN_PROPOSED` document after complete
+  validation and optimistic-concurrency verification.
 - `rebuild` replaces only an unreviewed workflow proposal. Once review evidence
   exists, CW requires the auditable `rebaseline` ceremony.
 - `rebaseline --goal ... --reason ...` asks the planner for a corrected proposal.
@@ -104,6 +109,7 @@ above.
 ```bash
 cw plan --goal "Add subscription billing"
 cw plan show
+cw plan amend --file corrected-phases.yaml --expected-workflow-sha256 sha256:<current-hash>
 cw plan approve
 cw plan rebaseline --proposal corrected-plan.json --reason "Remove circular criteria" --json
 cw plan rebaseline --apply pp-... --authorize --operation-id operator-change-42 --json
@@ -111,6 +117,40 @@ cw plan rebaseline --apply pp-... --authorize --operation-id operator-change-42 
 
 Planner infrastructure failures preserve the pending goal for `cw retry`; an
 invalid or partial plan is never installed.
+
+`amend` accepts a repository-relative regular file outside `.cw/`, `.codex/`,
+and `.git/`. JSON and single-document YAML are supported in every normal wheel
+installation through the constrained PyYAML runtime dependency and safe loader;
+unsafe tags and multiple documents are rejected. The supplied SHA is either the
+raw 64-character hexadecimal digest or the canonical `sha256:<64-hex>` physical
+workflow hash reported by `cw plan show --json`; surrounding whitespace and
+other algorithm prefixes are rejected. CW validates
+the complete proposal in memory, refuses all Completion Contract changes,
+creates the standard metadata backup, journals the transaction, atomically
+updates workflow and state, and reloads both before committing. A stale SHA,
+invalid document, incompatible evidence, active session/readiness/run, or
+failed integrity check leaves the prior proposal active. Interrupted writes
+are recovered from the byte-exact backup before the same amendment can retry.
+The input is opened once as a regular non-symlink file, with its identity checked
+before and after the read; its audit hash is calculated from the exact bytes
+parsed for the proposal.
+
+`amend` differs from `rebuild`: it cannot invoke the planner or change the
+Completion Contract, and it preserves the proposal lifecycle. It differs from
+`approve`: it always leaves both workflow and state proposed, creates no plan
+revision, review, gate, readiness, authorization, or execution, and still
+requires `cw plan approve` as the next human action.
+
+The parser exposes these scoped options as `cw plan --file` and
+`cw plan --expected-workflow-sha256`; both are rejected unless the selected
+action is `amend`, and both are mandatory for that action.
+
+Expected amendment failures use stable codes: `STALE_WORKFLOW_SHA` (exit 4),
+invalid file/schema or arguments (exit 2), disallowed state or Completion
+Contract change (exit 3), and integrity/rollback failures (exit 1).
+
+> A plan amendment changes only an unapproved proposal. It never authorizes
+> execution or satisfies a human gate.
 
 A rebaseline is permitted only in `REVISION_REQUIRED` with an active `REVISE`
 review and no gate for the current phase. Preview creates no active revision.

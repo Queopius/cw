@@ -18,6 +18,7 @@ CRITICAL_FILES = (
     ".cw/runtime/active-run.json",
     ".cw/runtime/READY_FOR_REVIEW.json",
     ".cw/runtime/plan-rebaseline-transaction.json",
+    ".cw/runtime/plan-amend-transaction.json",
     ".codex/hooks.json",
     ".codex/hooks/phase_gate.py",
     ".codex/workflow/phases.yaml",

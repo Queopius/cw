@@ -4,6 +4,15 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+- Add public `cw plan amend --file ... --expected-workflow-sha256 ...` support
+  for transactional, backup-first correction of an unapproved proposal. The
+  command preserves the Completion Contract, uses optimistic concurrency and
+  crash recovery, remains `PLAN_PROPOSED`, and never invokes agents or creates
+  approval/execution evidence.
+- Accept raw and canonical SHA-256 compare-and-swap forms without ambiguous
+  whitespace, and make safe single-document YAML support a normal runtime
+  capability through constrained PyYAML packaging.
+
 - Add explicit, human-authorized plan rebaseline proposals with immutable plan
   revision snapshots, append-only review supersession records, revision-bound
   validation/review/gate evidence, monotonic global attempts, and deterministic

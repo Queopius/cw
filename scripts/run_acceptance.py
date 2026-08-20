@@ -7,7 +7,6 @@ import os
 import platform
 import re
 import signal
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,9 +19,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from cw.core.platform import popen_process_group_kwargs, process_is_alive
 from cw.core.diagnostics import redact
-
+from cw.core.platform import popen_process_group_kwargs, process_is_alive
 
 FAKE_CODEX = ROOT / "tests/fixtures/fake_codex/fake_codex.py"
 STATUSES = {"PASS", "FAIL", "SKIPPED", "NOT_CONFIGURED"}
@@ -92,7 +90,7 @@ def _venv_bin(venv_root: Path) -> Path:
     return venv_root / ("Scripts" if os.name == "nt" else "bin")
 
 
-def _install_wheel(base: Path, environment: dict[str, str]) -> tuple[Path, Path]:
+def _install_wheel(base: Path, environment: dict[str, str]) -> tuple[Path, Path, Path]:
     wheelhouse = base / "wheelhouse"
     wheelhouse.mkdir()
     build_tools = base / "build-tools"
@@ -112,14 +110,28 @@ def _install_wheel(base: Path, environment: dict[str, str]) -> tuple[Path, Path]
     wheels = sorted(wheelhouse.glob("*.whl"))
     if len(wheels) != 1:
         raise AcceptanceFailure(f"expected one wheel, found {len(wheels)}")
+    no_dependencies = base / "runtime-no-deps"
+    venv.EnvBuilder(with_pip=True, clear=True).create(no_dependencies)
+    no_dependencies_python = _python_bin(no_dependencies)
+    _run(
+        [
+            str(no_dependencies_python), "-m", "pip", "install", "--no-deps",
+            str(wheels[0]),
+        ],
+        cwd=base, environment=environment, timeout=300,
+    )
+    _run(
+        [str(_cw_bin(no_dependencies)), "version", "--json"],
+        cwd=base, environment=environment,
+    )
     runtime = base / "runtime"
     venv.EnvBuilder(with_pip=True, clear=True).create(runtime)
     python = _python_bin(runtime)
     _run(
-        [str(python), "-m", "pip", "install", "--no-deps", str(wheels[0])],
+        [str(python), "-m", "pip", "install", str(wheels[0])],
         cwd=base, environment=environment, timeout=300,
     )
-    return runtime, wheels[0]
+    return runtime, wheels[0], no_dependencies
 
 
 def _install_fake_codex(directory: Path) -> Path:
@@ -403,8 +415,13 @@ def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
         bootstrap = os.environ.copy()
         bootstrap.pop("PYTHONPATH", None)
         try:
-            runtime, wheel = _install_wheel(base, bootstrap)
-            tests["package_install"] = _result("PASS", wheel.name)
+            runtime, wheel, no_dependencies = _install_wheel(base, bootstrap)
+            tests["package_install"] = _result(
+                "PASS", f"dependency-resolved {wheel.name}"
+            )
+            tests["package_no_deps_smoke"] = _result(
+                "PASS", f"{_cw_bin(no_dependencies).name} version from --no-deps wheel"
+            )
             fake_bin = base / "fake codex bin"
             _install_fake_codex(fake_bin)
             environment = _environment(base, runtime, fake_bin)
@@ -418,11 +435,30 @@ def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
             installed_python = _python_bin(runtime)
             _run(
                 [
-                    str(installed_python), "-c",
-                    "import importlib.util, sys; "
-                    "import cw.core, cw.application, cw.adapters.mcp.runtime; "
-                    "assert importlib.util.find_spec('mcp') is None; "
-                    "assert 'mcp' not in sys.modules",
+                    str(installed_python),
+                    "-c",
+                    (
+                        "from cw.core.workflow import workflow_document_from_text; "
+                        "value=workflow_document_from_text('schema_version: 1\\nworkflow: {}\\n'); "
+                        "assert value['schema_version'] == 1 and value['workflow'] == {}"
+                    ),
+                ],
+                cwd=base,
+                environment=environment,
+            )
+            tests["native_yaml"] = _result(
+                "PASS", "installed wheel safely parses native single-document YAML"
+            )
+            _run(
+                [
+                    str(installed_python),
+                    "-c",
+                    (
+                        "import importlib.util, sys; "
+                        "import cw.core, cw.application, cw.adapters.mcp.runtime; "
+                        "assert importlib.util.find_spec('mcp') is None; "
+                        "assert 'mcp' not in sys.modules"
+                    ),
                 ],
                 cwd=base, environment=environment,
             )

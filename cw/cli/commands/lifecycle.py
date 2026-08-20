@@ -12,6 +12,7 @@ from cw.core.gates import gate_path, validate_gate
 from cw.core.initialize import backup_metadata, initialize, repair as repair_metadata
 from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
+from cw.core.plan_amendment import amend_plan
 from cw.core.recovery import mark_infrastructure_error
 from cw.core.state import bind_plan, initial_state, save_state, transition
 from cw.core.utils import safe_project_path, utc_now
@@ -102,6 +103,7 @@ def _show_plan(
     workflow: Any,
 ) -> int:
     payload = _plan_payload(workflow)
+    payload["workflow_sha256"] = workflow_hash(root / ".codex/workflow/phases.yaml")
     payload["current_phase"] = state.get("current_phase")
     for phase in payload["phases"]:
         phase["status"] = "current" if phase["id"] == state.get("current_phase") else "pending"
@@ -179,7 +181,10 @@ def command_plan(
     context: ContextLoader,
 ) -> int:
     root = root_resolver()
-    project, state, workflow = context(root)
+    amend_options = (
+        getattr(args, "file", None),
+        getattr(args, "expected_workflow_sha256", None),
+    )
     rebaseline_options = tuple(
         getattr(args, name, None)
         for name in ("reason", "proposal", "apply", "authorize", "operation_id")
@@ -190,6 +195,42 @@ def command_plan(
             ErrorCode.USAGE_ERROR,
             exit_code=2,
         )
+    if args.action != "amend" and any(value not in {None, False} for value in amend_options):
+        raise CwError(
+            "Amendment options require 'cw plan amend'",
+            ErrorCode.USAGE_ERROR,
+            exit_code=2,
+        )
+    if args.action == "amend":
+        if any(value not in {None, False} for value in rebaseline_options) or args.goal:
+            raise CwError(
+                "Plan amend accepts only --file and --expected-workflow-sha256",
+                ErrorCode.USAGE_ERROR,
+                exit_code=2,
+            )
+        if not args.file or not args.expected_workflow_sha256:
+            raise CwError(
+                "Plan amend requires --file and --expected-workflow-sha256",
+                ErrorCode.USAGE_ERROR,
+                exit_code=2,
+            )
+        with operation_lock(root, "plan-amend"):
+            payload = amend_plan(root, args.file, args.expected_workflow_sha256)
+        if args.json:
+            emit_json(payload)
+        else:
+            console.header("Plan amended")
+            console.item("✓", "Unapproved proposal replaced safely")
+            console.field("State", payload["status"])
+            console.field("Phases", payload["phase_count"])
+            console.field("Backup", payload["backup"])
+            console.field("Previous workflow", payload["previous_workflow_sha256"])
+            console.field("Current workflow", payload["workflow_sha256"])
+            console.field("Completion Contract", "preserved")
+            console.field("Approval required", "YES")
+            console.run("cw plan approve")
+        return 0
+    project, state, workflow = context(root)
     if args.action == "show":
         return _show_plan(args, console, root, state, workflow)
     if args.action == "approve":

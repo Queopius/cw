@@ -47,6 +47,9 @@ def _context(root: Path) -> tuple[Any, dict[str, Any], Any]:
 
 
 def _raw_context(root: Path) -> tuple[Any, dict[str, Any], Any]:
+    from cw.core.plan_amendment import ensure_no_pending_plan_amendment
+
+    ensure_no_pending_plan_amendment(root)
     return load_project_context(root, validate=False)
 
 

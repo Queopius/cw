@@ -1,5 +1,43 @@
 # Plan revisions and review supersession
 
+## Amending an unapproved proposal
+
+Before approval or any implementation starts, a human may replace a planner's
+schema-valid but semantically incomplete proposal through the public,
+transactional command:
+
+```bash
+cw plan show --json
+cw plan amend \
+  --file corrected-phases.yaml \
+  --expected-workflow-sha256 sha256:<current-hash> \
+  --json
+```
+
+This operation exists only in `PLAN_PROPOSED`. The expected physical SHA-256
+is a mandatory compare-and-swap guard. CW accepts either 64 hexadecimal
+characters or the canonical `sha256:<64-hex>` form, normalizes both to the
+canonical form, and rejects whitespace or other algorithm prefixes. JSON and
+single-document YAML use safe parsing; unsafe YAML tags and multiple documents
+fail closed. CW validates the proposed workflow and
+its dependency graph in memory and requires the canonical Completion Contract
+payload and hash to remain identical. It then creates the official `.cw`
+backup, records a recovery journal, writes workflow and state atomically, and
+reloads their derived consistency. Any ordinary failure restores the old
+workflow and state byte-for-byte; a process interruption leaves a journal that
+the same command recovers before retrying.
+
+Successful amendment retains `PLAN_PROPOSED`, zero approved phases and the
+existing completion cycle. It appends only a `plan_amended` history event with
+old/new workflow hashes, input hash, Contract hash and backup path. It does not
+run a planner, implementer or reviewer and cannot create a revision, review,
+gate, readiness manifest or authorization. `cw plan approve` remains a
+separate human decision.
+
+Amendment is not rebaseline. Rebaseline changes a reviewed active phase under
+explicit authorization and supersession rules; amendment changes only an
+unapproved proposal and cannot change its Completion Contract.
+
 CW identifies every current-format approved plan by a `plan_revision_id`
 derived from the full SHA-256 of its canonical JSON document. The immutable
 snapshot retains the exact phases, criteria, manifest, Completion Contract,

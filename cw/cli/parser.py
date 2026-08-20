@@ -20,10 +20,31 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("init", "start", "status", "validate", "retry", "version", "help", "changelog", "explain"):
         command = subcommands.add_parser(name, add_help=True)
         _common(command, suppress_defaults=True)
-    plan = subcommands.add_parser("plan", add_help=True)
+    plan = subcommands.add_parser(
+        "plan",
+        add_help=True,
+        description=(
+            "Propose, inspect, amend, approve, rebuild, or rebaseline a plan. "
+            "Amend is available only in PLAN_PROPOSED and never approves execution."
+        ),
+        epilog=(
+            "Amend example: cw plan amend --file corrected-phases.yaml "
+            "--expected-workflow-sha256 sha256:<current-hash>. "
+            "It validates before writing, creates a backup, preserves the Completion Contract, "
+            "and still requires: cw plan approve."
+        ),
+    )
     _common(plan, suppress_defaults=True)
-    plan.add_argument("action", nargs="?", choices=("show", "approve", "rebuild", "rebaseline"))
+    plan.add_argument("action", nargs="?", choices=("show", "approve", "rebuild", "rebaseline", "amend"))
     plan.add_argument("--goal")
+    plan.add_argument(
+        "--file",
+        help="Repository-relative corrected workflow (JSON or safe single-document YAML) for plan amend",
+    )
+    plan.add_argument(
+        "--expected-workflow-sha256",
+        help="Required optimistic-concurrency SHA-256 for plan amend",
+    )
     plan.add_argument("--reason", help="Mandatory audit reason for a plan rebaseline")
     plan.add_argument("--proposal", help="Repository-relative proposed workflow document")
     plan.add_argument("--apply", metavar="PROPOSAL_ID", help="Apply an immutable rebaseline proposal")

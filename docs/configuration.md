@@ -119,7 +119,9 @@ with `cw retry` without writing a partial plan.
 Plans also carry phase-specific required commands and reviewer timeouts. Commands
 are never taken from the readiness manifest. A command-specific timeout takes
 precedence over the effective default. JSON-formatted `phases.yaml` is intentional:
-JSON is a valid YAML subset and keeps the core runtime dependency-free.
+JSON is a valid YAML subset and gives canonical deterministic writes. Public
+workflow input also accepts native, single-document YAML through PyYAML's safe
+loader; unsafe tags and multiple documents are rejected.
 
 Global settings are preferences only. Project identity, plans, state, reviews,
 gates, artifacts, and acceptance criteria are always repository-local.

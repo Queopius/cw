@@ -96,6 +96,8 @@
       "options": [
         "--apply",
         "--authorize",
+        "--expected-workflow-sha256",
+        "--file",
         "--goal",
         "--json",
         "--no-color",
@@ -112,7 +114,8 @@
             "show",
             "approve",
             "rebuild",
-            "rebaseline"
+            "rebaseline",
+            "amend"
           ],
           "required": false
         }

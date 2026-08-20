@@ -36,6 +36,10 @@ stored diagnostic proves that retry is safe.
 | `PLANNER_PROCESS_ERROR` | Planner process exited without a valid result | Context | Inspect `cw error`; retry if offered |
 | `PLANNER_SCHEMA_ERROR` | Planner returned invalid structured plan data | Context | Inspect diagnostics; retry after environment/build correction |
 | `PLAN_TIMEOUT` | Planner exceeded its bounded timeout | Yes, when recorded | `cw retry` or adjust the supported timeout policy |
+| `STALE_WORKFLOW_SHA` | Proposed workflow no longer matches the amendment's required SHA-256 | No | Reload `cw plan show --json` and prepare the correction against that exact proposal |
+| `COMPLETION_CONTRACT_CHANGE_REQUIRES_REBUILD` | An amendment attempted to change the Completion Contract | Human boundary | Use an explicitly authorized plan rebuild instead of amendment |
+| `PLAN_AMEND_INTEGRITY_ERROR` | Amendment failed and the previous proposal was restored | No automatic retry | Inspect the diagnostic and verified backup before retrying intentionally |
+| `PLAN_AMEND_ROLLBACK_FAILED` | CW could not prove restoration from the amendment backup | Operator | Stop all workflow operations and restore the recorded backup |
 
 ## Implementation and validation errors
 
@@ -113,7 +117,7 @@ with the expected structured result.
 | `PLAN_REBASELINE_REQUIRED` | Reviewed workflow correction requires the explicit rebaseline ceremony | Human boundary | Create and inspect an exact proposal with a reason, then authorize it |
 | `PLAN_REVISION_INVALID` | Active or historical plan revision identity/hash/contract is invalid | No | Stop; inspect revision evidence and recover from the verified backup |
 | `SUPERSESSION_INVALID` | Review supersession, its authorization, or its historical links are invalid | No | Stop; preserve evidence and investigate tampering or incomplete migration |
-| `TRANSACTION_RECOVERY_REQUIRED` | A rebaseline transaction journal cannot be recovered deterministically | Operator | Do not edit state; restore the recorded backup or repair Core first |
+| `TRANSACTION_RECOVERY_REQUIRED` | A rebaseline or plan-amend transaction awaits deterministic recovery | Operator | Do not edit state; resume the supported operation or restore its recorded backup |
 | `PROJECT_COMPLETED` | A controlled action targeted a semantically completed project | No | Inspect completion evidence; do not reopen implicitly |
 | `PHASE_NOT_STARTABLE` | Current state/readiness/session does not permit phase start | Context | Inspect status and finish or reconcile the current operation |
 | `OPERATION_IN_PROGRESS` | A conflicting/running operation cannot be replaced or cancelled safely | Later | Poll the active operation; do not assume rollback |

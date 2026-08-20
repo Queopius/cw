@@ -23,6 +23,7 @@ EVENT_ACTIONS = {
     "extension_approved", "extension_rejected",
     "plan_rebaseline_proposed", "plan_rebaseline_authorized",
     "review_superseded", "plan_revision_activated",
+    "plan_amended",
 }
 
 
@@ -139,7 +140,7 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
         ) or (
             action in {
                 "completion_contract_adopted", "completion_reviewed", "extension_proposed",
-                "extension_rejected",
+                "extension_rejected", "plan_amended",
             }
             and phase is None
         )
@@ -210,6 +211,34 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
             or not isinstance(event.get("parent_plan_revision_id"), str)
         ):
             raise CwError(f"Plan revision activation event is invalid: {index}", ErrorCode.INVALID_STATE)
+        if action == "plan_amended" and (
+            not isinstance(event.get("previous_workflow_sha256"), str)
+            or SHA256.fullmatch(event["previous_workflow_sha256"]) is None
+            or not isinstance(event.get("workflow_sha256"), str)
+            or SHA256.fullmatch(event["workflow_sha256"]) is None
+            or not isinstance(event.get("completion_contract_sha256"), str)
+            or not isinstance(event.get("backup"), str)
+            or not event["backup"].startswith(".cw/backups/")
+            or not isinstance(event.get("input_sha256"), str)
+            or SHA256.fullmatch(event["input_sha256"]) is None
+        ):
+            raise CwError(f"Plan amendment event is invalid: {index}", ErrorCode.INVALID_STATE)
+        if action == "plan_amended":
+            from .completion import contract_hash
+            from .utils import sha256_file
+
+            backup = safe_project_path(root, event["backup"], must_exist=True)
+            backup_workflow = backup / "phases.yaml"
+            expected_contract = contract_hash(workflow.completion_target) if workflow.completion_target else "none"
+            if (
+                backup.is_symlink()
+                or not backup.is_dir()
+                or backup_workflow.is_symlink()
+                or not backup_workflow.is_file()
+                or sha256_file(backup_workflow) != event["previous_workflow_sha256"]
+                or event["completion_contract_sha256"] != expected_contract
+            ):
+                raise CwError(f"Plan amendment evidence is inconsistent: {index}", ErrorCode.INVALID_STATE)
     from .completion import audit_completion_history
     from .revisions import audit_revisions
 
