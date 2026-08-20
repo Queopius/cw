@@ -1,5 +1,15 @@
 # Troubleshooting CW by symptom
 
+## Independent approval cannot be satisfied
+
+Run `cw governance diagnose --pr NUMBER`. If the author is the only authorized
+reviewer, configure `solo-maintainer` and inspect `cw governance remote-plan
+--pr NUMBER`. Do not self-approve or enable direct pushes. Neither command
+changes repository settings.
+
+For teams, missing, pending, changes-requested, invalid, and stale approvals are
+reported separately; a new SHA requires a new approval.
+
 Start with local, read-only evidence:
 
 ```bash

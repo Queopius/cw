@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.14.1",
+      "changes": [
+        "Added the standard project-independent cw --version compatibility surface while retaining cw version.",
+        "Named future plugin release assets from the independent Plugin version rather than the Core version.",
+        "Included the verified Core updater archive and release manifest in the automated release artifact set."
+      ]
+    },
+    {
       "version": "0.14.0",
       "changes": [
         "Prepared a portable Render staging web-service deployment for the existing OAuth-protected gateway with exact build identity and bounded environment validation.",

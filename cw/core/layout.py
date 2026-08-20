@@ -7,6 +7,7 @@ from .errors import CwError, ErrorCode
 
 MUTABLE_DIRECTORIES = (
     "runtime", "reviews", "gates", "completion", "validation", "logs", "locks", "backups",
+    "governance",
 )
 STATIC_DIRECTORIES = ("hooks", "schemas", "prompts", "workflow")
 CRITICAL_FILES = (
