@@ -9,7 +9,8 @@ from typing import Callable
 from cw.adapters.github import GitHubReadClient
 from cw.core.errors import CwError, ErrorCode
 from cw.core.governance import (GovernanceMode, authorize_solo_promotion, configure_governance,
-                                governance_diagnosis, load_governance_policy, recommend_mode,
+                                governance_diagnosis, invalidate_governance_authorization,
+                                load_governance_policy, recommend_mode,
                                 remote_protection_plan, validate_promotion_preflight)
 from cw.core.locking import operation_lock
 from cw.core.project import load_project
@@ -88,6 +89,32 @@ def command_governance(args: argparse.Namespace, console: Console, *, root_resol
             console.item("✓", f"Governance configured: {mode.value}")
             console.wrapped("No repository settings were changed.")
         return 0
+    if args.action == "invalidate":
+        pull_request = _required_pr(args)
+        if not args.head_sha:
+            raise CwError("Governance invalidation requires --head-sha", ErrorCode.USAGE_ERROR, exit_code=2)
+        if not args.reason or not args.reason.strip():
+            raise CwError("Governance invalidation requires --reason", ErrorCode.USAGE_ERROR, exit_code=2)
+        if not args.yes:
+            if args.non_interactive or args.json or not sys.stdin.isatty():
+                raise CwError("Governance invalidation requires explicit confirmation",
+                              ErrorCode.AUTHORIZATION_REQUIRED,
+                              "Run again with --yes after reviewing the exact evidence and reason.", exit_code=3)
+            console.header("Authorization invalidation")
+            console.field("PR", f"#{pull_request}"); console.field("Head SHA", args.head_sha)
+            if input("\nInvalidate this authorization evidence? [y/N] ").strip().lower() not in {"y", "yes"}:
+                raise CwError("Governance invalidation cancelled", ErrorCode.AUTHORIZATION_REQUIRED, exit_code=3)
+        with operation_lock(root, "governance-invalidate"):
+            payload, idempotent = invalidate_governance_authorization(
+                root, pull_request=pull_request, head_sha=args.head_sha, base_sha=args.base_sha,
+                reason=args.reason, operator=getpass.getuser(),
+            )
+        result = {**payload, "idempotent": idempotent, "original_evidence_preserved": True}
+        if args.json: emit_json(result)
+        else:
+            console.item("✓", f"Authorization evidence invalidated: {payload['target_sha256']}")
+            console.wrapped("The original evidence was preserved. A new human authorization is required.")
+        return 0
     snapshot = _client(root).snapshot(_required_pr(args)); policy = load_governance_policy(root)
     if args.action == "diagnose":
         payload = governance_diagnosis(snapshot, policy)
@@ -127,6 +154,7 @@ def command_governance(args: argparse.Namespace, console: Console, *, root_resol
     if args.json: emit_json(payload)
     else:
         console.item("✓", f"Promotion authorized for {snapshot.sha}")
+        console.field("Base SHA", snapshot.base_sha)
         console.wrapped("This is CW authorization evidence, not a GitHub review.")
         if evidence["result"] == "AUTHORIZED_REMOTE_BLOCKED":
             console.wrapped("BLOCKED: GitHub still requires an impossible independent approval. Run: cw governance remote-plan --pr " + str(snapshot.number))

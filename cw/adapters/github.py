@@ -38,7 +38,12 @@ class GitHubReadClient:
         user = self._json(["api", "user"])["login"]
         collaborators = self._json(["api", f"repos/{repository}/collaborators?affiliation=direct&per_page=100"])
         pr = self._json(["pr", "view", str(number), "--repo", repository, "--json",
-                         "author,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewRequests,statusCheckRollup"])
+                         "author,baseRefName,baseRefOid,headRefName,headRefOid,mergeable,mergeStateStatus,reviewRequests,statusCheckRollup"])
+        owner, name = str(repository).split("/", 1)
+        thread_data = self._json([
+            "api", "graphql", "-f", f"owner={owner}", "-f", f"name={name}", "-F", f"number={number}",
+            "-f", "query=query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved}pageInfo{hasNextPage}}}}}",
+        ])
         review_data = self._json(["api", f"repos/{repository}/pulls/{number}/reviews?per_page=100"])
         protection = self._json(["api", f"repos/{repository}/branches/{pr['baseRefName']}/protection"], allow_not_found=True) or {}
         review_rule = protection.get("required_pull_request_reviews") or {}
@@ -58,10 +63,16 @@ class GitHubReadClient:
                              item.get("conclusion")) for item in pr.get("statusCheckRollup") or [] if isinstance(item, dict))
         direct = tuple(Collaborator(str(item.get("login") or ""), str(item.get("role_name") or "read"))
                        for item in collaborators if isinstance(item, dict))
+        threads = (((thread_data.get("data") or {}).get("repository") or {}).get("pullRequest") or {}).get("reviewThreads") or {}
+        if (threads.get("pageInfo") or {}).get("hasNextPage"):
+            raise CwError("GitHub conversation discovery exceeded the safe page limit",
+                          ErrorCode.AUTHORIZATION_REQUIRED, "Resolve or reduce PR conversations, then retry.", exit_code=3)
+        unresolved = sum(1 for item in threads.get("nodes") or [] if isinstance(item, dict) and not item.get("isResolved"))
         return PullRequestSnapshot(
             str(repository), number, str((pr.get("author") or {}).get("login") or ""), str(user),
             str(pr.get("baseRefName") or ""), str(pr.get("headRefName") or ""), str(pr.get("headRefOid") or ""),
             pr.get("mergeable") == "MERGEABLE", str(pr.get("mergeStateStatus") or "UNKNOWN"), direct, requested,
             tuple(reviews), tuple(dict.fromkeys(value for value in required_checks if value)), checks,
             int(review_rule.get("required_approving_review_count") or 0),
+            str(pr.get("baseRefOid") or ""), unresolved,
         )
