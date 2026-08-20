@@ -16,7 +16,6 @@ from cw.core.recovery import mark_infrastructure_error
 from cw.core.reviews import validate_reviewer_result
 from cw.core.revisions import artifact_revision_metadata
 from cw.core.schema import SCHEMA_VERSION
-from cw.core.severity import CriterionSeverity
 from cw.core.session import finish_session, readiness_path
 from cw.core.state import advance_after_approval, save_state, transition
 from cw.core.utils import atomic_json_new, utc_now

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import io
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -151,7 +150,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertFalse(effective.is_complete)
 
     def test_satisfied_review_creates_distinct_completion_evidence(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         backend = CompletionBackend(self.completion_result())
         report = run_completion_review(self.repo.root, self.repo.workflow, self.repo.state(), backend)
         self.assertEqual("SATISFIED", report["decision"])
@@ -162,7 +162,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual(0, backend.planner_calls)
 
     def test_extension_requires_human_authorization_and_preserves_old_gates(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         old_gates = {path.name: path.read_bytes() for path in (self.repo.root / ".cw/gates").glob("*.json")}
         missing = self.repo.workflow.completion_target.requirements[0].id
         backend = CompletionBackend(
@@ -187,7 +188,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual(old_gates, {path.name: path.read_bytes() for path in (self.repo.root / ".cw/gates").glob("*.json")})
 
     def test_rejected_extension_does_not_mutate_phases(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         missing = self.repo.workflow.completion_target.requirements[0].id
         run_completion_review(
             self.repo.root, self.repo.workflow, self.repo.state(),
@@ -202,7 +204,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual("PLANNED_COMPLETE", self.repo.state()["status"])
 
     def test_extension_phase_uses_normal_gate_flow_then_reviews_again(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         missing = self.repo.workflow.completion_target.requirements[0].id
         run_completion_review(
             self.repo.root, self.repo.workflow, self.repo.state(),
@@ -243,7 +246,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual(2, self.repo.state()["completion_cycle"])
 
     def test_completion_reviewer_infrastructure_failure_is_retryable_blocked(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         backend = CompletionBackend(error=CwError("offline", ErrorCode.REVIEWER_NETWORK_ERROR))
         with self.assertRaises(CwError):
             run_completion_review(self.repo.root, self.repo.workflow, self.repo.state(), backend)
@@ -269,7 +273,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual(["review"], calls)
 
     def test_malformed_completion_schema_fails_closed(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         with self.assertRaises(CwError):
             run_completion_review(
                 self.repo.root, self.repo.workflow, self.repo.state(),
@@ -278,7 +283,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual("COMPLETION_BLOCKED", self.repo.state()["status"])
 
     def test_repair_recovers_stale_completed_metadata_to_extension_proposed(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         missing = self.repo.workflow.completion_target.requirements[0].id
         run_completion_review(
             self.repo.root, self.repo.workflow, self.repo.state(),
@@ -294,7 +300,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertIsNotNone(repaired["extension_proposal"])
 
     def test_repair_recovers_valid_completion_evidence_from_stale_state(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         run_completion_review(
             self.repo.root, self.repo.workflow, self.repo.state(),
             CompletionBackend(self.completion_result()),
@@ -309,7 +316,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual(".cw/completion/completion.satisfied.json", repaired["last_completion_gate"])
 
     def test_repair_finishes_durably_authorized_extension_after_interruption(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         document = _read_document(self.repo.root / ".codex/workflow/phases.yaml")
         revision = revision_payload(
             self.repo.root, document, parent_revision_id=None,

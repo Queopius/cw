@@ -31,13 +31,12 @@ from cw.core.revisions import (
     audit_revisions,
     authorization_resource,
     create_rebaseline_proposal,
-    load_proposal,
     recover_rebaseline_transaction,
 )
 from cw.core.initialize import backup_metadata
 from cw.core.state import load_state, save_state, transition
 from cw.core.utils import atomic_json, load_json
-from cw.core.workflow import _read_document, load_workflow, write_workflow, workflow_hash
+from cw.core.workflow import _read_document, load_workflow, write_workflow
 from cw.cli.main import main
 from cw.application import CWApplication
 from cw.application.actions import validate_current_phase
@@ -291,10 +290,14 @@ class PlanRevisionIntegrityTests(unittest.TestCase):
                         path.write_bytes(path.read_bytes() + b"\n")
                     elif mutation == "old_revision":
                         path = case.repo.root / ".cw/plan-revisions" / f"{outcome['old_plan_revision_id']}.json"
-                        payload = load_json(path); payload["goal"] = "tampered"; atomic_json(path, payload)
+                        payload = load_json(path)
+                        payload["goal"] = "tampered"
+                        atomic_json(path, payload)
                     elif mutation == "supersession":
                         path = case.repo.root / outcome["supersession"]
-                        payload = load_json(path); payload["reason"] = "laundered"; atomic_json(path, payload)
+                        payload = load_json(path)
+                        payload["reason"] = "laundered"
+                        atomic_json(path, payload)
                     else:
                         (case.repo.root / ".cw/plan-revisions" / f"{outcome['old_plan_revision_id']}.json").unlink()
                     with self.assertRaises(CwError):
@@ -305,16 +308,22 @@ class PlanRevisionIntegrityTests(unittest.TestCase):
     def test_candidate_and_revision_mismatch_invalidate_gate(self) -> None:
         case = RebaselineCase()
         try:
-            proposal = case.preview(); case.apply(proposal)
-            workflow = load_workflow(case.repo.root); state = load_state(case.repo.root)
+            proposal = case.preview()
+            case.apply(proposal)
+            workflow = load_workflow(case.repo.root)
+            state = load_state(case.repo.root)
             transition(case.repo.root, state, WorkflowState.IN_PROGRESS)
-            case.repo.workflow = workflow; case.repo.artifact(content="fixed\n"); case.repo.ready()
+            case.repo.workflow = workflow
+            case.repo.artifact(content="fixed\n")
+            case.repo.ready()
             run_review(
                 case.repo.root, workflow, workflow.phases[0], load_state(case.repo.root),
                 FakeAdapter(result(1, "APPROVE", "PASS", criterion="ARCH-001")),
             )
             gate_path = case.repo.root / ".cw/gates/01-phase-1.approved.json"
-            gate = load_json(gate_path); gate["candidate_sha"] = "0" * 40; atomic_json(gate_path, gate)
+            gate = load_json(gate_path)
+            gate["candidate_sha"] = "0" * 40
+            atomic_json(gate_path, gate)
             with self.assertRaises(CwError):
                 validate_gate(case.repo.root, workflow, "01-phase-1")
         finally:
@@ -323,7 +332,8 @@ class PlanRevisionIntegrityTests(unittest.TestCase):
     def test_orphan_revision_snapshot_fails_audit(self) -> None:
         case = RebaselineCase()
         try:
-            proposal = case.preview(); outcome = case.apply(proposal)
+            proposal = case.preview()
+            outcome = case.apply(proposal)
             source = case.repo.root / ".cw/plan-revisions" / f"{outcome['old_plan_revision_id']}.json"
             payload = load_json(source)
             alternate = copy.deepcopy(payload["workflow"])
@@ -344,10 +354,14 @@ class PlanRevisionIntegrityTests(unittest.TestCase):
     def test_embedded_validation_revision_mismatch_invalidates_gate(self) -> None:
         case = RebaselineCase()
         try:
-            proposal = case.preview(); case.apply(proposal)
-            workflow = load_workflow(case.repo.root); state = load_state(case.repo.root)
+            proposal = case.preview()
+            case.apply(proposal)
+            workflow = load_workflow(case.repo.root)
+            state = load_state(case.repo.root)
             transition(case.repo.root, state, WorkflowState.IN_PROGRESS)
-            case.repo.workflow = workflow; case.repo.artifact(content="fixed\n"); case.repo.ready()
+            case.repo.workflow = workflow
+            case.repo.artifact(content="fixed\n")
+            case.repo.ready()
             report = run_review(
                 case.repo.root, workflow, workflow.phases[0], load_state(case.repo.root),
                 FakeAdapter(result(1, "APPROVE", "PASS", criterion="ARCH-001")),
@@ -365,8 +379,10 @@ class PlanRevisionIntegrityTests(unittest.TestCase):
     def test_duplicate_active_revision_state_fails(self) -> None:
         case = RebaselineCase()
         try:
-            proposal = case.preview(); outcome = case.apply(proposal)
-            workflow = load_workflow(case.repo.root); state = load_state(case.repo.root)
+            proposal = case.preview()
+            outcome = case.apply(proposal)
+            workflow = load_workflow(case.repo.root)
+            state = load_state(case.repo.root)
             state["superseded_plan_revisions"].append(state["active_plan_revision"])
             save_state(case.repo.root, state)
             with self.assertRaises(CwError):
@@ -387,7 +403,8 @@ class PlanRevisionIntegrityTests(unittest.TestCase):
             with self.subTest(action=action, field=field):
                 case = RebaselineCase(phases=phases)
                 try:
-                    proposal = case.preview(); case.apply(proposal, operation_id=f"history-{field}")
+                    proposal = case.preview()
+                    case.apply(proposal, operation_id=f"history-{field}")
                     state = load_state(case.repo.root)
                     event = next(item for item in state["history"] if item.get("action") == action)
                     event[field] = value
@@ -444,7 +461,8 @@ class PlanRevisionTransactionTests(unittest.TestCase):
                 "created_at": "2026-08-20T00:00:00Z",
             }
             _write_transaction(case.repo.root, journal)
-            changed = copy.deepcopy(plan); changed["workflow"]["goal"] = "partial"
+            changed = copy.deepcopy(plan)
+            changed["workflow"]["goal"] = "partial"
             write_workflow(case.repo.root / ".codex/workflow/phases.yaml", changed)
             recovered = recover_rebaseline_transaction(case.repo.root)
             self.assertTrue(recovered["recovered"])

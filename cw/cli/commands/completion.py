@@ -9,7 +9,6 @@ from cw.adapters.codex import CodexAdapter
 from cw.application.facade import CWApplication
 from cw.core.authorization import Actor, ActorOrigin, OperationContext, issue_user_authorization
 from cw.core.completion import (
-    authorize_extension,
     completion_gate_path,
     contract_payload,
     latest_completion_review,
