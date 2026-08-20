@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "milestone_version": "0.11.0",
+  "submission_in_scope": false,
+  "completion_target": {
+    "id": "cw-chatgpt-development-acceptance",
+    "name": "ChatGPT Development Acceptance",
+    "description": "Prove the existing governed CW plugin against the supported ChatGPT developer connection without deploying a permanent hosted service or expanding CW capabilities.",
+    "target_type": "chatgpt-development-acceptance",
+    "requirements": [
+      {
+        "id": "official-development-model",
+        "description": "Use the current official ChatGPT Developer Mode and Secure MCP Tunnel model.",
+        "severity": "blocking",
+        "evidence_expectations": ["Dated official-document review and transport decision."],
+        "project_specific": true
+      },
+      {
+        "id": "real-chatgpt-connection",
+        "description": "Establish a real supported ChatGPT developer-mode connection to a disposable, explicitly granted CW project.",
+        "severity": "blocking",
+        "evidence_expectations": ["Recorded ChatGPT workspace, tunnel, discovery, and read-tool acceptance without secrets."],
+        "project_specific": true
+      },
+      {
+        "id": "project-scoping",
+        "description": "Expose only startup-granted projects through opaque handles and reject path/cross-project substitution.",
+        "severity": "blocking",
+        "evidence_expectations": ["Deterministic grant and scope tests plus real connection inspection."],
+        "project_specific": true
+      },
+      {
+        "id": "read-acceptance",
+        "description": "Prove real ChatGPT reads use normalized CW evidence as authority.",
+        "severity": "blocking",
+        "evidence_expectations": ["Status, phase, gate, planned-scope, Completion Contract, and blocker prompts."],
+        "project_specific": true
+      },
+      {
+        "id": "surface-classification",
+        "description": "Represent CW capability separately from the capabilities enabled on the tested ChatGPT surface.",
+        "severity": "blocking",
+        "evidence_expectations": ["Read-only and controlled-action profile discovery plus PLATFORM_CAPABILITY_UNAVAILABLE evidence."],
+        "project_specific": true
+      },
+      {
+        "id": "controlled-action-acceptance",
+        "description": "When the tested ChatGPT workspace supports write actions, prove the existing controlled surface and confirmation behavior; otherwise record it as platform unavailable without changing CW.",
+        "severity": "advisory",
+        "evidence_expectations": ["Real controlled-action prompts or an evidence-backed platform restriction classification."],
+        "project_specific": true
+      },
+      {
+        "id": "high-consequence-exclusion",
+        "description": "Keep high-consequence authorization and generic host access absent regardless of ChatGPT confirmation.",
+        "severity": "blocking",
+        "evidence_expectations": ["Exact tool discovery and malicious-call rejection."],
+        "project_specific": true
+      },
+      {
+        "id": "security-privacy",
+        "description": "Prove prompt-injection resistance, typed remote origin, minimum disclosure, and no arbitrary source/environment exposure.",
+        "severity": "blocking",
+        "evidence_expectations": ["Hostile repository, actor forgery, redaction, and boundary payload tests."],
+        "project_specific": true
+      },
+      {
+        "id": "replay-recovery",
+        "description": "Preserve idempotency, project isolation, and authoritative .cw recovery through remote disconnect/replay.",
+        "severity": "blocking",
+        "evidence_expectations": ["Restart/replay, payload conflict, cross-project, and malformed-request evidence."],
+        "project_specific": true
+      },
+      {
+        "id": "development-documentation",
+        "description": "Document supported setup, permissions, grants, privacy, revocation, troubleshooting, and development-only limitations.",
+        "severity": "blocking",
+        "evidence_expectations": ["Strict documentation build and link/policy validation."],
+        "project_specific": true
+      },
+      {
+        "id": "future-auth-architecture",
+        "description": "Define the smallest public remote/authentication architecture without implementing it.",
+        "severity": "blocking",
+        "evidence_expectations": ["ADR covering identity, device pairing, project grants, revocation, least privilege, and source-local operation."],
+        "project_specific": true
+      }
+    ]
+  }
+}

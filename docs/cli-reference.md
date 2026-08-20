@@ -29,6 +29,7 @@ returns `3`; and an interrupted foreground operation returns `130`.
 | `cw` / `cw start` | Start or resume the canonical current phase. |
 | `cw init` | Initialize CW in the current Git repository. |
 | `cw plan` | Propose, inspect, approve, or rebuild a development plan. |
+| `cw completion` | Inspect/review the Completion Contract or authorize an extension. |
 | `cw status` | Show canonical progress derived from validated evidence. |
 | `cw run` | Execute a bounded multi-phase batch. |
 | `cw validate` | Run current-phase deterministic validation. |
@@ -36,6 +37,7 @@ returns `3`; and an interrupted foreground operation returns `130`.
 | `cw retry` | Retry the classified retryable operation. |
 | `cw history` / `cw explain` | Inspect audit history or a current blocker. |
 | `cw inspect` / `cw logs` | Inspect managed executions and structured events. |
+| `cw mcp` | Serve the optional governed local MCP adapter over stdio. |
 | `cw doctor` / `cw error` | Diagnose the environment or the latest failure. |
 | `cw repair` | Reconcile CW metadata from validated evidence. |
 | `cw config` / `cw integrations` | Inspect policy and integration state. |
@@ -98,6 +100,29 @@ cw plan approve
 
 Planner infrastructure failures preserve the pending goal for `cw retry`; an
 invalid or partial plan is never installed.
+
+## cw completion
+
+**Syntax:** `cw completion [show|review|approve|reject|adopt] [--target TYPE]`
+
+- `show` is the default and displays the contract, latest review, coverage, and pending proposal.
+- `review` runs the independent read-only system completion reviewer.
+- `approve` explicitly authorizes and appends the current extension proposal.
+- `reject` records rejection without changing phases.
+- `adopt` with `--target TYPE` explicitly adds a contract to a legacy workflow.
+
+Supported adoption templates are `proof-of-concept`, `functional-prototype`,
+`internal-tool`, `controlled-pilot`, `production`, and `public-release`.
+
+```bash
+cw completion show
+cw completion review
+cw completion approve
+cw completion adopt --target controlled-pilot
+```
+
+`approve` is a supervisor-level human authorization boundary. A completion
+reviewer or extension planner cannot invoke it or start proposed work.
 
 ## cw status
 
@@ -194,15 +219,84 @@ Explains why the workflow is blocked and names a safe recovery without writing.
 cw explain
 ```
 
+## cw mcp
+
+**Syntax:** `cw mcp [serve|chatgpt-dev] [--project PATH] [--allowed-root PATH] [--surface read-only|controlled-actions]`
+
+Starts the optional governed local MCP runtime over stdio. `--project`
+authorizes an initialized CW project and may be repeated. `--allowed-root`
+constrains configured projects to a canonical local boundary and may also be
+repeated. With neither option, the current project is the only allowed root.
+
+```bash
+cw mcp serve --project /absolute/path/to/project
+```
+
+Project paths are startup configuration supplied by the local operator; MCP
+tool calls use opaque handles. Stdout is reserved for protocol messages and
+diagnostics go to stderr. The closed surface adds only authorized phase start,
+configured validation, independent review request, narrow retry, and operation
+poll/cancel to the read tools. It exposes no arbitrary shell/filesystem/Git,
+gate, repair, rebaseline, or extension-authorization operation. Install the optional
+`codex-workflow[mcp]` dependency before serving.
+
+`cw mcp chatgpt-dev` is the Secure MCP Tunnel development bootstrap. It
+requires at least one explicit `--project`, fixes the typed origin to
+`chatgpt_app`, and defaults `--surface` to `read-only`. Select
+`--surface controlled-actions` only when the tested ChatGPT workspace permits
+write actions. A blocked known tool returns
+`PLATFORM_CAPABILITY_UNAVAILABLE`; high-consequence actions remain absent.
+
+## cw remote
+
+**Syntax:** `cw remote gateway|pair|grant|agent [OPTIONS]`
+
+Starts or configures the optional CW Remote implementation candidate:
+
+- `gateway` serves the OAuth-protected Streamable HTTP MCP resource and the
+  signed agent control endpoints. A public deployment must terminate TLS and
+  use canonical HTTPS issuer, resource, and JWKS URLs.
+- `pair` creates a local asymmetric device credential and requests a
+  short-lived, single-use pairing challenge. It prints the gateway pairing page
+  URL and a human-readable code; browser OAuth login and explicit Approve or
+  Reject complete the ceremony.
+- `grant` explicitly maps one canonical local CW project to a remotely opaque
+  handle after the device has been paired.
+- `agent` starts the outbound-only long-poll client for the locally stored
+  project grants.
+
+```bash
+cw remote gateway --issuer-url https://identity.example.invalid \
+  --resource-url https://gateway.example.invalid/mcp \
+  --jwks-url https://identity.example.invalid/jwks.json
+cw remote pair --gateway-url https://gateway.example.invalid
+cw remote grant --gateway-url https://gateway.example.invalid --project .
+cw remote agent --gateway-url https://gateway.example.invalid
+```
+
+The examples are non-routable placeholders, not deployed CW services. Remote
+support requires `codex-workflow[remote]`. The command never grants a path
+received from a remote caller, and no high-consequence authorization is
+discoverable through the gateway.
+
+Gateway options are `--issuer-url`, `--resource-url`, `--jwks-url`,
+`--database`, `--host`, and `--port`. Agent/operator options are
+`--gateway-url`, `--credentials`, `--state`, `--device-name`, `--project`, and
+`--allowed-root`. Credentials and state default to the cross-platform CW global
+configuration directory; secrets are never printed by the gateway or agent.
+
 ## cw inspect
 
-**Syntax:** `cw inspect [session|run] [RUN_ID]`
+**Syntax:** `cw inspect [session|run|completion] [RUN_ID]`
 
 `session` inspects the active/latest execution. `run RUN_ID` selects one record.
+`completion` emits normalized Completion Contract, review, proposal, and cycle
+evidence suitable for automation.
 
 ```bash
 cw inspect session
 cw inspect run run_0123456789abcdef0123456789abcdef --verbose
+cw inspect completion --json
 ```
 
 ## cw logs

@@ -50,7 +50,7 @@ def command_init(args: argparse.Namespace, console: Console, *, root_resolver: R
 
 
 def _plan_payload(workflow: Any) -> dict[str, Any]:
-    return {
+    payload = {
         "workflow": workflow.id,
         "status": workflow.status,
         "goal": workflow.goal,
@@ -75,6 +75,13 @@ def _plan_payload(workflow: Any) -> dict[str, Any]:
             for phase in workflow.phases
         ],
     }
+    if workflow.completion_target is not None:
+        from cw.core.completion import contract_payload
+
+        payload["completion_target"] = contract_payload(workflow.completion_target)
+    else:
+        payload["completion_target"] = None
+    return payload
 
 
 def _show_plan(
@@ -101,6 +108,8 @@ def _show_plan(
         console.field("Project", workflow.id)
         console.field("Status", workflow.status)
         console.field("Phases", len(workflow.phases))
+        if workflow.completion_target is not None:
+            console.field("Completion target", workflow.completion_target.name)
         if args.verbose:
             console.field("Goal", workflow.goal or "NOT DEFINED")
         console.line()
@@ -208,7 +217,10 @@ def command_plan(
         workflow = load_workflow(root)
         bind_plan(root, state, workflow)
         transition(root, state, WorkflowState.PLAN_PROPOSED)
-    output = {"status": "PROPOSED", "goal": workflow.goal, "phases": len(workflow.phases)}
+    output = {
+        "status": "PROPOSED", "goal": workflow.goal, "phases": len(workflow.phases),
+        "completion_target": workflow.completion_target.name if workflow.completion_target else None,
+    }
     if args.json:
         emit_json(output)
     else:
@@ -216,6 +228,8 @@ def command_plan(
         console.item("✓", "Plan proposed")
         console.field("Goal", workflow.goal)
         console.field("Phases", len(workflow.phases))
+        if workflow.completion_target is not None:
+            console.field("Completion target", workflow.completion_target.name)
         console.run("cw plan show\n    cw plan approve")
         if args.verbose and planner.last_stderr.strip():
             console.line()

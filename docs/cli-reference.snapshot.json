@@ -1,26 +1,387 @@
 {
   "schema_version": 1,
   "commands": [
-    {"name": "init", "options": ["--json", "--no-color", "--quiet", "--verbose"], "positionals": []},
-    {"name": "start", "options": ["--json", "--no-color", "--quiet", "--verbose"], "positionals": []},
-    {"name": "status", "options": ["--json", "--no-color", "--quiet", "--verbose"], "positionals": []},
-    {"name": "validate", "options": ["--json", "--no-color", "--quiet", "--verbose"], "positionals": []},
-    {"name": "retry", "options": ["--json", "--no-color", "--quiet", "--verbose"], "positionals": []},
-    {"name": "version", "options": ["--json", "--no-color", "--quiet", "--verbose"], "positionals": []},
-    {"name": "help", "options": ["--json", "--no-color", "--quiet", "--verbose"], "positionals": []},
-    {"name": "changelog", "options": ["--json", "--no-color", "--quiet", "--verbose"], "positionals": []},
-    {"name": "explain", "options": ["--json", "--no-color", "--quiet", "--verbose"], "positionals": []},
-    {"name": "plan", "options": ["--goal", "--json", "--no-color", "--quiet", "--verbose"], "positionals": [{"name": "action", "choices": ["show", "approve", "rebuild"], "required": false}]},
-    {"name": "review", "options": ["--human-approve", "--json", "--no-color", "--quiet", "--verbose"], "positionals": []},
-    {"name": "history", "options": ["--json", "--no-color", "--phase", "--quiet", "--verbose"], "positionals": []},
-    {"name": "doctor", "options": ["--codex", "--integrations", "--json", "--no-color", "--performance", "--processes", "--quiet", "--reviewer", "--verbose"], "positionals": []},
-    {"name": "error", "options": ["--json", "--no-color", "--quiet", "--raw", "--verbose"], "positionals": []},
-    {"name": "repair", "options": ["--json", "--no-color", "--quiet", "--reopen", "--verbose"], "positionals": []},
-    {"name": "config", "options": ["--json", "--no-color", "--quiet", "--verbose"], "positionals": [{"name": "action", "choices": ["set"], "required": false}, {"name": "key", "choices": [], "required": false}, {"name": "value", "choices": [], "required": false}]},
-    {"name": "update", "options": ["--channel", "--check", "--info", "--json", "--no-color", "--quiet", "--verbose", "--version"], "positionals": [{"name": "action", "choices": ["rollback"], "required": false}]},
-    {"name": "integrations", "options": ["--json", "--no-color", "--quiet", "--verbose"], "positionals": [{"name": "action", "choices": ["status", "check", "info"], "required": false}, {"name": "name", "choices": [], "required": false}]},
-    {"name": "inspect", "options": ["--json", "--no-color", "--quiet", "--verbose"], "positionals": [{"name": "action", "choices": ["run", "session"], "required": false}, {"name": "run_id", "choices": [], "required": false}]},
-    {"name": "logs", "options": ["--json", "--no-color", "--quiet", "--run", "--verbose"], "positionals": []},
-    {"name": "run", "options": ["--dry-run", "--json", "--max-time", "--no-color", "--non-interactive", "--phases", "--quiet", "--resume", "--until", "--verbose", "--yes"], "positionals": [{"name": "phase_count", "choices": [], "required": false}]}
+    {
+      "name": "init",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "start",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "status",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "validate",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "retry",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "version",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "help",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "changelog",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "explain",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "plan",
+      "options": [
+        "--goal",
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "show",
+            "approve",
+            "rebuild"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "completion",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--target",
+        "--verbose"
+      ],
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "show",
+            "review",
+            "approve",
+            "reject",
+            "adopt"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "review",
+      "options": [
+        "--human-approve",
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "history",
+      "options": [
+        "--json",
+        "--no-color",
+        "--phase",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "doctor",
+      "options": [
+        "--codex",
+        "--integrations",
+        "--json",
+        "--no-color",
+        "--performance",
+        "--processes",
+        "--quiet",
+        "--reviewer",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "error",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--raw",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "repair",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--reopen",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "config",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "set"
+          ],
+          "required": false
+        },
+        {
+          "name": "key",
+          "choices": [],
+          "required": false
+        },
+        {
+          "name": "value",
+          "choices": [],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "options": [
+        "--channel",
+        "--check",
+        "--info",
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose",
+        "--version"
+      ],
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "rollback"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "integrations",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "status",
+            "check",
+            "info"
+          ],
+          "required": false
+        },
+        {
+          "name": "name",
+          "choices": [],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "inspect",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "run",
+            "session",
+            "completion"
+          ],
+          "required": false
+        },
+        {
+          "name": "run_id",
+          "choices": [],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "logs",
+      "options": [
+        "--json",
+        "--no-color",
+        "--quiet",
+        "--run",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "mcp",
+      "options": [
+        "--allowed-root",
+        "--json",
+        "--no-color",
+        "--project",
+        "--quiet",
+        "--surface",
+        "--verbose"
+      ],
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "serve",
+            "chatgpt-dev"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "remote",
+      "options": [
+        "--allowed-root",
+        "--credentials",
+        "--database",
+        "--device-name",
+        "--gateway-url",
+        "--host",
+        "--issuer-url",
+        "--json",
+        "--jwks-url",
+        "--no-color",
+        "--port",
+        "--project",
+        "--quiet",
+        "--resource-url",
+        "--state",
+        "--verbose"
+      ],
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "gateway",
+            "pair",
+            "grant",
+            "agent"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "options": [
+        "--dry-run",
+        "--json",
+        "--max-time",
+        "--no-color",
+        "--non-interactive",
+        "--phases",
+        "--quiet",
+        "--resume",
+        "--until",
+        "--verbose",
+        "--yes"
+      ],
+      "positionals": [
+        {
+          "name": "phase_count",
+          "choices": [],
+          "required": false
+        }
+      ]
+    }
   ]
 }

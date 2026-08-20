@@ -1,0 +1,14 @@
+interface:
+  display_name: "CW Workflow"
+  short_description: "Govern software delivery with evidence"
+  default_prompt: "Use $cw-workflow to inspect this project’s CW status and explain the next governed step."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "cw"
+      description: "Governed CW project status, evidence, and controlled actions"
+      transport: "stdio"
+
+policy:
+  allow_implicit_invocation: true

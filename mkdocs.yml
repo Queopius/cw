@@ -41,6 +41,7 @@ nav:
       - CLI Reference: cli-reference.md
   - Core Workflow:
       - Gates and Reviews: gates-and-reviews.md
+      - Completion Contracts: completion-contracts.md
       - Batch Execution: batch-execution.md
       - Live Execution: live-execution.md
       - Integrations: integrations.md
@@ -51,6 +52,50 @@ nav:
       - Error Reference: errors.md
   - Engineering:
       - Architecture: architecture.md
+      - Plugin Readiness: plugin-readiness.md
+      - MCP Runtime: mcp-runtime.md
+      - MCP Tool Contract: mcp-tool-contract.md
+      - Plugin / App Candidate: plugin-app-candidate.md
+      - ChatGPT Development: chatgpt-development.md
+      - ChatGPT 0.11 Acceptance: acceptance/chatgpt-development-0.11.md
+      - Plugin Production Readiness: plugin-production-readiness.md
+      - Plugin Authentication: plugin-auth.md
+      - Plugin Deployment: plugin-deployment.md
+      - Plugin Submission: plugin-submission.md
+      - ChatGPT Plugin 0.12 Acceptance: acceptance/chatgpt-plugin-0.12.md
+      - Remote Gateway: remote-gateway.md
+      - Remote Agent: remote-agent.md
+      - Remote Authentication: remote-auth.md
+      - Remote Pairing: remote-pairing.md
+      - Remote Project Grants: remote-project-grants.md
+      - Remote Security: remote-security.md
+      - Remote Privacy: remote-privacy.md
+      - Remote Operations: remote-operations.md
+      - Remote Gateway 0.13 Acceptance: acceptance/remote-gateway-0.13.md
+      - Staging Environment: staging-environment.md
+      - Auth0 Staging: auth0-staging.md
+      - Staging Bootstrap 0.14: acceptance/staging-bootstrap-0.14.md
+      - Staging Deployment Runbook: operations/staging-deploy.md
+      - Gateway Runbook: operations/gateway-runbook.md
+      - Local Agent Runbook: operations/agent-runbook.md
+      - OAuth Runbook: operations/oauth-runbook.md
+      - Incident Response: operations/incident-response.md
+      - Backup and Restore: operations/backup-restore.md
+      - Key Rotation: operations/key-rotation.md
+      - Plugin Listing Draft: plugin-listing-draft.md
+      - Plugin Privacy Draft: plugin-privacy.md
+      - Plugin Support: plugin-support.md
+      - Plugin Security Review: plugin-security.md
+      - ADR — Multi-adapter Engine: adr/0001-multi-adapter-engine.md
+      - ADR — MCP Transport: adr/0002-mcp-transport.md
+      - ADR — Plugin Candidate: adr/0003-plugin-candidate.md
+      - ADR — ChatGPT Development: adr/0004-chatgpt-development-and-public-runtime.md
+      - ADR — Production MCP Relay: adr/0005-production-mcp-relay.md
+      - ADR — Gateway Agent Transport: adr/0006-gateway-agent-long-poll.md
+      - ADR — Remote Identity Provider: adr/0007-remote-identity-provider.md
+      - ADR — Device Identity and Pairing: adr/0008-device-identity-pairing.md
+      - ADR — Remote Persistence: adr/0009-remote-persistence.md
+      - ADR — Render Staging Hosting: adr/0010-render-staging-hosting.md
       - Project Layout: project-layout.md
       - Platform Support: testing/platform-support.md
       - Windows VM Acceptance: testing/windows-vm-acceptance.md

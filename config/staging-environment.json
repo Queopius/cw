@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "environment": "staging",
+  "provider": "Render",
+  "identity_provider": "Auth0",
+  "variables": [
+    {
+      "name": "CW_DEPLOYMENT_ENV",
+      "group": "gateway",
+      "purpose": "Sanitized deployment environment label",
+      "required": true,
+      "secret": false,
+      "example": "staging",
+      "owner": "CW deployment"
+    },
+    {
+      "name": "RENDER_GIT_COMMIT",
+      "group": "gateway",
+      "purpose": "Exact deployed Git SHA supplied automatically by Render",
+      "required": true,
+      "secret": false,
+      "example": "<40-character-git-sha>",
+      "owner": "Render"
+    },
+    {
+      "name": "PORT",
+      "group": "gateway",
+      "purpose": "Render-assigned public web-service bind port",
+      "required": false,
+      "secret": false,
+      "example": "10000",
+      "owner": "Render"
+    },
+    {
+      "name": "CW_GATEWAY_RESOURCE_URL",
+      "group": "gateway",
+      "purpose": "Canonical OAuth protected-resource and public MCP URL",
+      "required": true,
+      "secret": false,
+      "example": "https://staging-mcp.cwcli.dev/mcp",
+      "owner": "CW deployment"
+    },
+    {
+      "name": "CW_GATEWAY_DATABASE",
+      "group": "persistence",
+      "purpose": "Absolute SQLite path on the attached staging disk",
+      "required": true,
+      "secret": false,
+      "example": "/var/lib/cw/gateway.sqlite3",
+      "owner": "CW deployment"
+    },
+    {
+      "name": "CW_GATEWAY_HOST",
+      "group": "gateway",
+      "purpose": "Container bind address",
+      "required": false,
+      "secret": false,
+      "example": "0.0.0.0",
+      "owner": "CW deployment"
+    },
+    {
+      "name": "CW_GATEWAY_ALLOWED_HOSTS",
+      "group": "security",
+      "purpose": "DNS-rebinding allowlist for canonical and Render staging hosts",
+      "required": true,
+      "secret": false,
+      "example": "staging-mcp.cwcli.dev,cw-staging-mcp.onrender.com",
+      "owner": "CW deployment"
+    },
+    {
+      "name": "CW_GATEWAY_DOCUMENTATION_URL",
+      "group": "gateway",
+      "purpose": "Public resource documentation advertised to MCP clients",
+      "required": false,
+      "secret": false,
+      "example": "https://docs.cwcli.dev/remote-auth/",
+      "owner": "CW deployment"
+    },
+    {
+      "name": "CW_OAUTH_ISSUER_URL",
+      "group": "oauth_auth0",
+      "purpose": "Exact HTTPS Auth0 tenant issuer",
+      "required": true,
+      "secret": false,
+      "example": "https://<tenant>.<region>.auth0.com/",
+      "owner": "Auth0 tenant administrator"
+    },
+    {
+      "name": "CW_OAUTH_JWKS_URL",
+      "group": "oauth_auth0",
+      "purpose": "Auth0 HTTPS JSON Web Key Set endpoint",
+      "required": true,
+      "secret": false,
+      "example": "https://<tenant>.<region>.auth0.com/.well-known/jwks.json",
+      "owner": "Auth0 tenant administrator"
+    },
+    {
+      "name": "CW_OAUTH_WORKSPACE_CLAIM",
+      "group": "oauth_auth0",
+      "purpose": "Namespaced token claim containing the CW workspace identifier",
+      "required": true,
+      "secret": false,
+      "example": "https://cwcli.dev/claims/workspace",
+      "owner": "CW/Auth0 configuration"
+    },
+    {
+      "name": "CW_OAUTH_ALGORITHMS",
+      "group": "oauth_auth0",
+      "purpose": "Explicit asymmetric JWT verification algorithms",
+      "required": true,
+      "secret": false,
+      "example": "RS256",
+      "owner": "CW/Auth0 configuration"
+    },
+    {
+      "name": "CW_PAIRING_WEB_CLIENT_ID",
+      "group": "pairing_web",
+      "purpose": "Auth0 public application client identifier for browser pairing confirmation",
+      "required": true,
+      "secret": false,
+      "example": "<auth0-public-client-id>",
+      "owner": "Auth0 tenant administrator"
+    },
+    {
+      "name": "CW_PAIRING_WEB_REDIRECT_URI",
+      "group": "pairing_web",
+      "purpose": "OAuth callback URL for the gateway-hosted pairing page",
+      "required": true,
+      "secret": false,
+      "example": "https://staging-mcp.cwcli.dev/remote/pair/callback",
+      "owner": "CW deployment"
+    },
+    {
+      "name": "CW_PAIRING_SESSION_SECRET",
+      "group": "pairing_web",
+      "purpose": "Gateway-only HMAC secret for short-lived browser pairing session cookies",
+      "required": true,
+      "secret": true,
+      "example": "<provider-managed-random-secret>",
+      "owner": "Render secret"
+    },
+    {
+      "name": "CW_LIMIT_REQUESTS_PER_MINUTE",
+      "group": "rate_limits",
+      "purpose": "Maximum requests per authenticated principal per minute",
+      "required": false,
+      "secret": false,
+      "example": "120",
+      "owner": "CW operations"
+    },
+    {
+      "name": "CW_LIMIT_DEVICE_REQUESTS_PER_MINUTE",
+      "group": "rate_limits",
+      "purpose": "Maximum requests routed to one paired device per minute",
+      "required": false,
+      "secret": false,
+      "example": "240",
+      "owner": "CW operations"
+    },
+    {
+      "name": "CW_LIMIT_PAIRING_REQUESTS_PER_MINUTE",
+      "group": "rate_limits",
+      "purpose": "Maximum public pairing requests per source and device per minute",
+      "required": false,
+      "secret": false,
+      "example": "20",
+      "owner": "CW operations"
+    },
+    {
+      "name": "CW_LIMIT_CONCURRENT_PER_DEVICE",
+      "group": "rate_limits",
+      "purpose": "Maximum in-flight routed operations per local device",
+      "required": false,
+      "secret": false,
+      "example": "4",
+      "owner": "CW operations"
+    },
+    {
+      "name": "CW_LIMIT_REQUEST_BYTES",
+      "group": "resource_limits",
+      "purpose": "Maximum public MCP or pairing request size",
+      "required": false,
+      "secret": false,
+      "example": "65536",
+      "owner": "CW operations"
+    },
+    {
+      "name": "CW_LIMIT_AGENT_MESSAGE_BYTES",
+      "group": "resource_limits",
+      "purpose": "Maximum signed local-agent message size",
+      "required": false,
+      "secret": false,
+      "example": "524288",
+      "owner": "CW operations"
+    },
+    {
+      "name": "CW_LIMIT_OPERATION_TIMEOUT_SECONDS",
+      "group": "resource_limits",
+      "purpose": "Gateway wait deadline for one routed operation",
+      "required": false,
+      "secret": false,
+      "example": "30",
+      "owner": "CW operations"
+    },
+    {
+      "name": "CW_LIMIT_AGENT_IDLE_SECONDS",
+      "group": "resource_limits",
+      "purpose": "Agent availability threshold",
+      "required": false,
+      "secret": false,
+      "example": "45",
+      "owner": "CW operations"
+    },
+    {
+      "name": "CW_LIMIT_COMPLETED_CACHE",
+      "group": "resource_limits",
+      "purpose": "Bounded in-memory completed response replay cache",
+      "required": false,
+      "secret": false,
+      "example": "1024",
+      "owner": "CW operations"
+    }
+  ],
+  "gateway_secrets": [
+    "CW_PAIRING_SESSION_SECRET"
+  ],
+  "prohibited": [
+    "OAuth access or refresh tokens",
+    "Auth0 Management API credentials",
+    "device private keys",
+    "repository credentials",
+    "source code or raw .cw state"
+  ]
+}

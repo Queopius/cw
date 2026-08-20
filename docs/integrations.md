@@ -1,5 +1,10 @@
 # Integration-aware workflows
 
+CW's own optional governed MCP server is documented separately in
+[MCP runtime](mcp-runtime.md). It is an adapter for inspecting CW state, not a
+project dependency checked by `cw integrations` and not an arbitrary gateway to
+other configured MCP servers.
+
 CW distinguishes core requirements (Git, Python, Codex, project metadata and
 required CW hooks) from optional Codex integrations such as deployment, design,
 or browser MCP servers. An optional server failure has no workflow impact unless

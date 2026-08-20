@@ -25,6 +25,9 @@ from cw.planning.planner import Planner
 from tests.helpers import TempRepo, result
 
 
+HAS_REMOTE_CRYPTO = __import__("importlib").util.find_spec("cryptography") is not None
+
+
 class Tty(io.StringIO):
     def isatty(self): return True
 
@@ -533,6 +536,31 @@ class CliTests(unittest.TestCase):
         self.assertFalse(session.exists())
         self.assertFalse(ready.exists())
         self.assertTrue(list((self.repo.root / ".cw/backups").glob("*/runtime/implementer-session.json")))
+
+    @unittest.skipUnless(HAS_REMOTE_CRYPTO, "remote cryptography dependency unavailable")
+    def test_remote_pair_command_prints_verification_url_without_secrets(self) -> None:
+        payload = {
+            "device_id": "cwd_remotepair00000000000000",
+            "user_code": "ABCD-EFGH",
+            "challenge_id": "pairing-test",
+            "expires_at": "2030-01-01T00:00:00Z",
+            "access_token": "remote-access-token-should-not-leak",
+            "authorization_code": "oauth-authorization-code-should-not-leak",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            remote_root = Path(temporary)
+            with patch("cw.core.platform.global_config_dir", return_value=remote_root), \
+                    patch("cw.remote.agent.request_pairing", return_value=payload):
+                code, output = self.invoke(
+                    "remote", "pair", "--gateway-url", "https://staging-mcp.cwcli.dev/",
+                )
+        self.assertEqual(0, code)
+        self.assertIn("Open: https://staging-mcp.cwcli.dev/remote/pair", output)
+        self.assertIn("Enter code: ABCD-EFGH", output)
+        self.assertNotIn("/remote/pair/callback", output)
+        self.assertNotIn("remote-access-token-should-not-leak", output)
+        self.assertNotIn("oauth-authorization-code-should-not-leak", output)
+        self.assertNotIn("Bearer ", output)
 
 
 if __name__ == "__main__":

@@ -347,11 +347,22 @@ def record_real_workflow(
             raise HeroDemoError("Plan approval did not make the workflow ready")
         events.append(public_event("success", "Plan approved"))
 
-        invoke(["start", "--json"], "CW implementation", "cw start")
+        started = invoke(["start", "--json"], "CW implementation", "cw start")
+        completion_results = [
+            value for value in started.json_objects()
+            if value.get("event_type") == "COMPLETION_REVIEW_COMPLETED"
+        ]
         start_events = _normalize_execution_events(
             _read_run_events(project), private_root=project, allowed_commands=allowed_commands,
         )
         events.extend(start_events)
+        if completion_results:
+            if len(completion_results) != 1 or completion_results[0].get("decision") != "SATISFIED":
+                raise HeroDemoError("Completion review did not satisfy the declared target")
+            events.extend([
+                public_event("review", "Completion review satisfied", result="SATISFIED"),
+                public_event("complete", "Completion target satisfied"),
+            ])
         status_result = _run(
             [str(executable), "status", "--json"], cwd=project,
             environment=environment, timeout=60,
@@ -364,9 +375,13 @@ def record_real_workflow(
             if not (
                 review_payload.get("decision") == "APPROVE"
                 and isinstance(review_payload.get("gate"), str)
-                and review_payload.get("workflow_completed") is True
+                and review_payload.get("planned_scope_complete") is True
+                and isinstance(review_payload.get("completion_review"), dict)
+                and review_payload["completion_review"].get("decision") == "SATISFIED"
             ):
-                raise HeroDemoError("Independent reviewer did not approve and complete the one-phase workflow")
+                raise HeroDemoError(
+                    "Phase and completion reviewers did not prove the one-phase workflow target"
+                )
             all_run_events = _normalize_execution_events(
                 _read_run_events(project), private_root=project, allowed_commands=allowed_commands,
             )
@@ -387,7 +402,8 @@ def record_real_workflow(
                 public_event("validation", "Deterministic validation passed", result="passed"),
                 public_event("review", "Independent review approved", result="APPROVE"),
                 public_event("gate", "Approval gate verified", result="verified"),
-                public_event("complete", "Workflow complete"),
+                public_event("review", "Completion review satisfied", result="SATISFIED"),
+                public_event("complete", "Completion target satisfied"),
             ])
 
         final_status_result = _run(

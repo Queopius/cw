@@ -19,6 +19,7 @@ CORE_PROTECTED_PATHS = (
     ".cw/config.toml",
     ".cw/gates",
     ".cw/reviews",
+    ".cw/completion",
     ".codex/workflow/phases.yaml",
 )
 

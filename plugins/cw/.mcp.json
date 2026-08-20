@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "cw": {
+      "command": "cw",
+      "args": [
+        "mcp",
+        "serve",
+        "--allowed-root",
+        ".",
+        "--project",
+        "."
+      ]
+    }
+  }
+}

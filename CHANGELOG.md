@@ -4,6 +4,167 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.14.0 — 2026-08-16
+
+- Prepare a portable, non-root Render staging image and Blueprint for the
+  existing remote gateway, with exact deploy identity, readiness checks,
+  bounded runtime configuration, managed TLS/custom-domain intent, and no
+  provider SDK in CW.
+- Introduce independent component versioning: Core/CLI remains
+  `0.14.0` while the plugin candidate adopts `0.1.0`, with an explicit
+  machine-readable plugin→Core→protocol compatibility contract and runtime
+  readiness/build metadata reporting that keeps these versions separated.
+- Retain the transactional SQLite backend on a single-instance encrypted
+  staging disk, explicitly documenting deploy downtime and postponing a shared
+  PostgreSQL backend until scale or availability evidence requires it.
+- Add a real Auth0 staging contract for issuer/JWKS/resource validation, PKCE
+  S256, preferred CIMD, guarded DCR fallback, narrow scopes, namespaced
+  workspace identity, and independent device/project revocation.
+- Add a local-agent staging profile, coherent environment contract, deployment
+  and security runbooks, staging acceptance evidence, container/config
+  validators, and sanitized build diagnostics without deploying or storing a
+  credential.
+- Preserve the exact remote tool surface, outbound-only agent, local source and
+  `.cw`, provider-neutral Core/Application, and complete high-consequence
+  authorization exclusion.
+
+## 0.13.0 — 2026-08-15
+
+- Add a hosting-neutral Streamable HTTP MCP gateway that exposes the accepted
+  CW registry through `CWApplication`, with health/readiness endpoints,
+  structured remote errors, limits, and no remote workflow engine.
+- Add OAuth 2.1 protected-resource enforcement with issuer, signature,
+  audience/resource, expiry, revocation, and least-privilege scope checks;
+  validate PKCE S256 and CIMD/DCR authorization-server contracts without
+  implementing an identity provider.
+- Add an outbound-only, signed local CW agent using the versioned
+  `cw.remote.v1` protocol, explicit single-use device pairing, opaque
+  tenant-bound project grants, revocation, reconnect, and idempotent delivery.
+- Prove all six reads and the six accepted controlled operations through the
+  remote path while retaining local locks, independent review, gate policy,
+  Completion Contracts, redaction, and the complete high-consequence denial.
+- Add a transactional SQLite reference store for minimum routing/audit
+  metadata, remote security/privacy/operations documentation, deterministic
+  HTTP E2E tests, and native CI coverage via the optional `remote` extra.
+
+## 0.12.0 — 2026-08-15
+
+- Validate the CW plugin package against the current OpenAI Plugins model and
+  preserve the exact accepted MCP surface, official assets, deterministic
+  archive, and OpenAI-independent engine.
+- Select a production architecture with a public HTTPS MCP gateway/relay and a
+  paired outbound-only local CW agent so source and `.cw` remain local by
+  default.
+- Define OAuth 2.1 MCP authentication, least-privilege scopes, explicit project
+  grants, revocation, replay protection, and a separate high-consequence human
+  authorization ceremony.
+- Add production threat, privacy/data-flow, observability, deployment,
+  submission, and acceptance contracts without deploying a public service,
+  adding OAuth code, or submitting the plugin.
+- Keep ChatGPT Pro read-only by default and make controlled actions dependent
+  on actual platform discovery; Business/Enterprise additionally requires
+  workspace-admin opt-in and the same server-side CW policy.
+
+## 0.11.0 — 2026-08-15
+
+- Add a Secure MCP Tunnel-compatible ChatGPT development bootstrap over the
+  existing stdio runtime, with no HTTP server, hosted service, or new CW tool.
+- Add explicit startup project grants, fixed `chatgpt_app` origin, and separate
+  read-only/controlled-action surface profiles with structured platform
+  capability errors.
+- Add deterministic ChatGPT-boundary tests for discovery, scope, privacy,
+  prompt injection, actor forgery, replay/restart, and exact capability parity.
+- Document current Developer Mode/tunnel permissions, setup, revocation,
+  transmitted data, manual acceptance state, and the future authenticated
+  relay contract without deploying or submitting anything.
+- Close the external read-only acceptance gate with real ChatGPT Pro and
+  Secure MCP Tunnel evidence, including structured project inspection,
+  `HUMAN_REVIEW_REQUIRED` interpretation, project scoping, and refusal to turn
+  conversational intent into human gate approval.
+
+## 0.10.0 — 2026-08-15
+
+- Package the accepted CW 0.9 engine and exact MCP capability surface as a
+  current-format, repo-local OpenAI plugin candidate with no new workflow
+  capabilities, hosted runtime, submission, or Apps SDK dependency.
+- Add the production CW workflow skill, official brand assets, scoped stdio MCP
+  definition, explicit capability mapping, and installable development
+  marketplace metadata.
+- Add deterministic plugin, skill, permission, security, privacy, semantic
+  parity, archive, and official Codex CLI discovery/installation validation.
+- Document the accurate surface split: local Codex and ChatGPT desktop can use
+  the stdio candidate, while ChatGPT web/public distribution requires a future
+  HTTPS remote runtime and authentication milestone.
+- Add a milestone Completion Contract, listing draft, support/privacy/security
+  drafts, transport/auth boundary, and CI package checks without submitting or
+  publishing the candidate.
+
+## 0.9.0 — 2026-08-15
+
+- Add four narrow MCP controlled actions—authorized phase start, configured
+  validation, independent review request, and engine-classified retry—through
+  `CWApplication`, with no CLI subprocess or direct `.cw` editing.
+- Add persistent project-scoped operation lifecycle, polling, idempotent replay,
+  safe queued cancellation, stale-supervisor detection, structured progress,
+  and cross-platform hashed operation records.
+- Preserve review/gate/Completion Contract governance: clients cannot select a
+  phase or validation command, supply review decisions, create gates, approve
+  extensions, repair/rebaseline state, or invoke generic shell/filesystem/Git.
+- Extend typed capability/origin enforcement, privacy redaction, expected
+  mutation-set checks, cross-project isolation, concurrent CLI/MCP locking,
+  fake-Codex controlled-flow acceptance, and MCP protocol/platform tests.
+- Update local MCP, security, skill, contract, and transport documentation while
+  retaining optional packaging and making no hosted/public plugin claim.
+
+## 0.8.0 — 2026-08-15
+
+- Add an optional local stdio MCP runtime whose six narrow read-only tools call
+  `CWApplication` directly and share the CLI's workflow, gate, completion,
+  history, and repair-derived semantics.
+- Expose normalized project, phase, gate, Completion Contract, completion
+  review, and extension-proposal resources using opaque project handles and a
+  minimum-disclosure projection that removes private roots and secrets.
+- Enforce a closed READ capability allowlist with typed `mcp_client` origin;
+  arbitrary commands, shell, filesystem, Git, state mutation, review execution,
+  repair, and extension authorization are absent and rejected.
+- Add optional `codex-workflow[mcp]` packaging, `cw mcp serve`, clean stdio
+  lifecycle/diagnostics, protocol/security tests, semantic-parity tests, and
+  mutation-absence evidence across Linux, Windows, and macOS CI.
+- Document local Codex configuration, privacy/scoping, the draft read-only CW
+  skill, and the controlled-actions next milestone without claiming hosted or
+  public ChatGPT support.
+
+## 0.7.0 — 2026-08-15
+
+- Add an OpenAI-independent application facade with structured operation
+  results, stable errors, explicit project handles, and reusable status,
+  explain, history, completion, repair, and completion-review operations.
+- Make the CLI status/context path delegate to the same application semantics
+  future adapters consume while preserving terminal UX and shared `.cw` state.
+- Add a machine-readable capability model, cross-adapter operation lifecycle,
+  canonical project scoping, shared locking, and idempotent operation identity.
+- Enforce short-lived, proposal-bound explicit human authorization for workflow
+  extensions; internal planner/reviewer origins and prompt-injected repository
+  text cannot self-approve.
+- Document the future narrow MCP tool/resource contract, plugin skill boundary,
+  local runtime threat model, package isolation, and stdio-first transport ADR
+  without shipping an MCP server or public plugin.
+
+## 0.6.0 — 2026-08-15
+
+- Add goal-derived Completion Contracts with extensible readiness templates and
+  explicit requirement/evidence/severity semantics.
+- Separate phase completion, planned-scope completion, and semantic product
+  completion while preserving unchanged legacy completion behavior.
+- Add independent read-only system completion review, strict normalized results,
+  repository snapshot binding, and a distinct completion evidence gate.
+- Add coherent extension proposals with explicit human approve/reject commands;
+  proposed work cannot start automatically and previous phase evidence remains
+  immutable.
+- Extend canonical state derivation, repair, status, explain, inspect, history,
+  fake-Codex acceptance, security guidance, and CLI drift protection across
+  repeated completion cycles.
+
 - Add native Windows user-local installation, centralized process/path/runtime
   activation portability boundaries, and UTF-8-safe subprocess and persistence
   behavior without changing workflow or gate schemas.
