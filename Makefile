@@ -1,7 +1,7 @@
 .PHONY: test install check docs-check plugin-check production-readiness-check acceptance-local demo demo-hero demo-check public-version-sync docs-sync-stable
 
 RTD_PROJECT_SLUG ?= cw-codex-workflow
-RTD_STABLE_REF ?= prod
+RTD_STABLE_VERSION ?= v$(shell tr -d '\n' < VERSION)
 
 test:
 	python3 -m unittest discover -s tests -v
@@ -41,7 +41,8 @@ docs-sync-stable:
 	python3 scripts/sync_readthedocs_stable.py \
 		--project $(RTD_PROJECT_SLUG) \
 		--alias stable \
-		--ref $(RTD_STABLE_REF)
+		--version $(RTD_STABLE_VERSION) \
+		--trigger-build
 
 public-version-sync:
 	python3 scripts/sync_public_version.py

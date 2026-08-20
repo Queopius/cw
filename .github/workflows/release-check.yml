@@ -42,3 +42,15 @@ jobs:
           name: cw-${{ github.ref_name }}
           path: dist/*
           if-no-files-found: error
+      - name: Publish tagged documentation as stable
+        env:
+          READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+        run: |
+          if [ -z "${READTHEDOCS_TOKEN:-}" ]; then
+            echo "READTHEDOCS_TOKEN secret is required." >&2
+            exit 1
+          fi
+          python3 scripts/sync_readthedocs_stable.py \
+            --project cw-codex-workflow \
+            --version "$GITHUB_REF_NAME" \
+            --trigger-build
