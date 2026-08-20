@@ -232,6 +232,36 @@
       ]
     },
     {
+      "name": "governance",
+      "options": [
+        "--base-sha",
+        "--head-sha",
+        "--json",
+        "--mode",
+        "--no-color",
+        "--non-interactive",
+        "--pr",
+        "--quiet",
+        "--reason",
+        "--replace",
+        "--verbose",
+        "--yes"
+      ],
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "configure",
+            "diagnose",
+            "authorize",
+            "invalidate",
+            "remote-plan"
+          ],
+          "required": false
+        }
+      ]
+    },
+    {
       "name": "update",
       "options": [
         "--channel",

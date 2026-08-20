@@ -1,5 +1,32 @@
 # Troubleshooting CW by symptom
 
+## Independent approval cannot be satisfied
+
+Run `cw governance diagnose --pr NUMBER`. If the author is the only authorized
+reviewer, configure `solo-maintainer` and inspect `cw governance remote-plan
+--pr NUMBER`. Do not self-approve or enable direct pushes. Neither command
+changes repository settings.
+
+For teams, missing, pending, changes-requested, invalid, and stale approvals are
+reported separately; a new SHA requires a new approval.
+
+## Governance authorization evidence is incomplete
+
+**Symptom:** `Incomplete governance authorization evidence` or a legacy
+authorization without `base_sha` blocks promotion.
+
+Preserve the original and invalidate it through CW:
+
+```bash
+cw governance invalidate --pr NUMBER --head-sha SHA \
+  --reason incomplete-base-sha-evidence
+cw governance authorize --pr NUMBER
+```
+
+Invalidation and authorization are deliberately separate confirmations. Never
+edit, delete, overwrite, or reconstruct `base_sha` from the current PR because
+the current base may differ from the historical authorization state.
+
 Start with local, read-only evidence:
 
 ```bash

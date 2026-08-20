@@ -22,6 +22,15 @@ All notable changes to CW are documented here.
   not create a gate, inherit validation, approve a review, or start another
   phase.
 
+## 0.14.1 — 2026-08-20
+
+- Add the standard project-independent `cw --version` surface while retaining
+  `cw version` and the single Core version source of truth.
+- Name future plugin release assets from the independent Plugin version and
+  include the verified Core updater archive and manifest in release artifacts.
+- Add explicit `solo-maintainer` and `team-reviewed` release governance with
+  GitHub preflight, SHA-bound authorization evidence, and read-only remote plans.
+
 ## 0.14.0 — 2026-08-16
 
 - Prepare a portable, non-root Render staging image and Blueprint for the

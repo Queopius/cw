@@ -47,11 +47,13 @@ jobs:
         run: |
           python -m pip install --upgrade build
           python -m build
-          python scripts/build_plugin_candidate.py --output "dist/cw-plugin-$(cat VERSION).zip"
+          python scripts/build_release.py --output dist --channel stable
+          python scripts/build_plugin_candidate.py --output "dist/cw-plugin-$(cat plugins/cw/VERSION).zip"
       - name: Verify installed wheel
         run: |
           python -m pip install --force-reinstall dist/*.whl
           cw version --json
+          cw --version
           python -c "import sys; import cw.core, cw.application; assert 'mcp' not in sys.modules"
           wheel=$(ls dist/*.whl)
           python -m pip install --force-reinstall "${wheel}[mcp]"

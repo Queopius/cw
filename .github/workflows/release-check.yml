@@ -37,7 +37,8 @@ jobs:
         run: |
           python -m pip install --upgrade build
           python -m build
-          python scripts/build_plugin_candidate.py --output "dist/cw-plugin-$(cat VERSION).zip"
+          python scripts/build_release.py --output dist --channel stable
+          python scripts/build_plugin_candidate.py --output "dist/cw-plugin-$(cat plugins/cw/VERSION).zip"
       - name: Upload release distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

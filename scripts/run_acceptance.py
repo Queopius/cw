@@ -431,7 +431,12 @@ def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
                 raise AcceptanceFailure(
                     f"source/install version mismatch: {source_version} != {version.get('version')}"
                 )
-            tests["cli_smoke"] = _result("PASS", f"installed CW {source_version}")
+            version_flag = _run([str(cw), "--version"], cwd=base, environment=environment).stdout.strip()
+            if version_flag != f"CW {source_version}":
+                raise AcceptanceFailure(
+                    f"installed --version mismatch: CW {source_version} != {version_flag}"
+                )
+            tests["cli_smoke"] = _result("PASS", f"installed CW {source_version}; both version surfaces")
             installed_python = _python_bin(runtime)
             _run(
                 [

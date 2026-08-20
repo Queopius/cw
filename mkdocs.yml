@@ -48,6 +48,7 @@ nav:
       - Integrations: integrations.md
   - Operations:
       - Configuration: configuration.md
+      - Release Governance: governance.md
       - Updating: updating.md
       - Troubleshooting: troubleshooting.md
       - Error Reference: errors.md
