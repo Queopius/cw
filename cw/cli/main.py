@@ -13,6 +13,7 @@ from cw.agents.reviewer import human_approve, run_review
 from cw.cli.commands import config as config_commands
 from cw.cli.commands import completion as completion_commands
 from cw.cli.commands import execution as execution_commands
+from cw.cli.commands import governance as governance_commands
 from cw.cli.commands import lifecycle as lifecycle_commands
 from cw.cli.commands import read as read_commands
 from cw.cli.commands import update as update_commands
@@ -181,6 +182,10 @@ def command_repair(args: argparse.Namespace, console: Console) -> int:
 
 def command_config(args: argparse.Namespace, console: Console) -> int:
     return config_commands.command_config(args, console, root_resolver=_root)
+
+
+def command_governance(args: argparse.Namespace, console: Console) -> int:
+    return governance_commands.command_governance(args, console, root_resolver=_root)
 
 
 def command_version(args: argparse.Namespace, console: Console) -> int:
@@ -407,7 +412,8 @@ COMMANDS = {
     "start": command_start, "status": command_status,
     "validate": command_validate, "review": command_review, "retry": command_retry,
     "history": command_history, "doctor": command_doctor, "error": command_error,
-    "repair": command_repair, "config": command_config, "version": command_version,
+    "repair": command_repair, "config": command_config, "governance": command_governance,
+    "version": command_version,
     "update": command_update, "changelog": command_changelog,
     "integrations": command_integrations,
     "explain": command_explain,
