@@ -13,7 +13,7 @@ from cw import __version__
 
 from .authorization import OperationContext, validate_authorization
 from .errors import CwError, ErrorCode
-from .layout import safe_directory, safe_file
+from .layout import safe_directory, safe_file, validate_tree
 from .models import ReviewDecision, Workflow, WorkflowState
 from .reviews import validate_reviewer_result
 from .schema import SCHEMA_VERSION, schema_version
@@ -377,13 +377,68 @@ def _transaction_path(root: Path) -> Path:
     return root / TRANSACTION
 
 
+def _write_transaction(root: Path, journal: dict[str, Any]) -> None:
+    journal.pop("journal_sha256", None)
+    journal["journal_sha256"] = sha256_bytes(_canonical_bytes(journal))
+    atomic_json(_transaction_path(root), journal)
+
+
+def _validate_transaction(root: Path, journal: dict[str, Any]) -> None:
+    required = {
+        "schema_version", "kind", "status", "stage", "operation_id", "proposal_id",
+        "old_plan_revision_id", "new_plan_revision_id", "supersession_id",
+        "old_workflow", "old_state", "created_files", "backup", "created_at",
+        "journal_sha256",
+    }
+    unhashed = {key: value for key, value in journal.items() if key != "journal_sha256"}
+    old_state = journal.get("old_state")
+    old_workflow = journal.get("old_workflow")
+    if (
+        set(journal) != required
+        or journal.get("kind") != "plan_rebaseline_transaction"
+        or journal.get("status") not in {"PREPARED", "COMMITTED"}
+        or not isinstance(journal.get("stage"), str)
+        or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", str(journal.get("operation_id")))
+        or PROPOSAL_ID.fullmatch(str(journal.get("proposal_id"))) is None
+        or REVISION_ID.fullmatch(str(journal.get("old_plan_revision_id"))) is None
+        or REVISION_ID.fullmatch(str(journal.get("new_plan_revision_id"))) is None
+        or SUPERSESSION_ID.fullmatch(str(journal.get("supersession_id"))) is None
+        or not isinstance(old_state, dict)
+        or not isinstance(old_workflow, dict)
+        or not isinstance(journal.get("created_at"), str)
+        or journal.get("journal_sha256") != sha256_bytes(_canonical_bytes(unhashed))
+    ):
+        raise CwError("Rebaseline transaction journal is corrupt", ErrorCode.TRANSACTION_RECOVERY_REQUIRED)
+    restored_workflow = workflow_from_document(root, old_workflow)
+    if old_state.get("workflow_id") != restored_workflow.id:
+        raise CwError("Rebaseline transaction project identity is invalid", ErrorCode.TRANSACTION_RECOVERY_REQUIRED)
+    backup = journal.get("backup")
+    if not isinstance(backup, str) or re.fullmatch(r"\.cw/backups/[A-Za-z0-9._-]+", backup) is None:
+        raise CwError("Rebaseline transaction backup is invalid", ErrorCode.TRANSACTION_RECOVERY_REQUIRED)
+    backup_path = safe_project_path(root, backup, must_exist=True)
+    if backup_path.is_symlink() or not backup_path.is_dir():
+        raise CwError("Rebaseline transaction backup is invalid", ErrorCode.TRANSACTION_RECOVERY_REQUIRED)
+    validate_tree(backup_path, "Rebaseline transaction backup")
+    allowed = {
+        revision_path(root, str(journal["old_plan_revision_id"])).relative_to(root).as_posix(),
+        revision_path(root, str(journal["new_plan_revision_id"])).relative_to(root).as_posix(),
+        supersession_path(root, str(journal["supersession_id"])).relative_to(root).as_posix(),
+    }
+    created = journal.get("created_files")
+    if (
+        not isinstance(created, list)
+        or len(created) != len(set(created))
+        or any(not isinstance(reference, str) or reference not in allowed for reference in created)
+    ):
+        raise CwError("Rebaseline transaction targets are invalid", ErrorCode.TRANSACTION_RECOVERY_REQUIRED)
+
+
 def recover_rebaseline_transaction(root: Path) -> dict[str, Any] | None:
     path = _transaction_path(root)
     if not path.exists():
         return None
     journal = load_json(safe_file(path, "Plan rebaseline transaction", required=True))
-    if journal.get("kind") != "plan_rebaseline_transaction":
-        raise CwError("Rebaseline transaction journal is corrupt", ErrorCode.TRANSACTION_RECOVERY_REQUIRED)
+    _validate_transaction(root, journal)
     if journal.get("status") == "COMMITTED":
         path.unlink()
         return {"recovered": False, "committed": True, "operation_id": journal.get("operation_id")}
@@ -528,7 +583,12 @@ def apply_rebaseline(
         "schema_version": SCHEMA_VERSION,
         "kind": "plan_rebaseline_transaction",
         "status": "PREPARED",
+        "stage": "prepared",
         "operation_id": context.operation_id,
+        "proposal_id": proposal_identifier,
+        "old_plan_revision_id": old_id,
+        "new_plan_revision_id": proposal["new_plan_revision_id"],
+        "supersession_id": identifier,
         "old_workflow": old_document,
         "old_state": old_state,
         # Record every absent target before the first append-only write. A
@@ -538,11 +598,11 @@ def apply_rebaseline(
         "backup": backup.relative_to(root).as_posix(),
         "created_at": utc_now(),
     }
-    atomic_json(_transaction_path(root), journal)
+    _write_transaction(root, journal)
 
     def step(name: str) -> None:
         journal["stage"] = name
-        atomic_json(_transaction_path(root), journal)
+        _write_transaction(root, journal)
         if failure_injector is not None:
             failure_injector(name)
 
@@ -596,7 +656,7 @@ def apply_rebaseline(
         step("audit_completed")
         journal["status"] = "COMMITTED"
         journal["stage"] = "committed"
-        atomic_json(_transaction_path(root), journal)
+        _write_transaction(root, journal)
         _transaction_path(root).unlink()
         return result
     except BaseException:
@@ -788,6 +848,8 @@ def audit_revisions(root: Path, workflow: Workflow, state: dict[str, Any]) -> di
             and event.get("action") == "plan_rebaseline_authorized"
             and event.get("operation_id") == record.get("operation_id")
             and event.get("authorization_nonce") == record.get("authorization", {}).get("authorization_nonce")
+            and event.get("proposal") == proposal_path(root, str(record.get("proposal_id"))).relative_to(root).as_posix()
+            and event.get("actor_id") == record.get("actor", {}).get("actor_id")
             for event in history
         )
         superseded_event = any(
@@ -795,6 +857,8 @@ def audit_revisions(root: Path, workflow: Workflow, state: dict[str, Any]) -> di
             and event.get("action") == "review_superseded"
             and event.get("review") == review_reference
             and event.get("supersession") == supersession_reference
+            and event.get("old_plan_revision_id") == record.get("old_plan_revision_id")
+            and event.get("new_plan_revision_id") == record.get("new_plan_revision_id")
             for event in history
         )
         activated = any(

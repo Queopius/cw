@@ -12,7 +12,8 @@
     "phase.start": {"classification": "CONTROLLED_STATE_MUTATION", "mutation": true, "human_authorization_required": false, "long_running": false},
     "retry.run": {"classification": "CONTROLLED_STATE_MUTATION", "mutation": true, "human_authorization_required": false, "long_running": true},
     "project.repair": {"classification": "STATE_MUTATION", "mutation": true, "human_authorization_required": false, "long_running": false},
-    "extension.authorize": {"classification": "HIGH_CONSEQUENCE_AUTHORIZATION", "mutation": true, "human_authorization_required": true, "long_running": false}
+    "extension.authorize": {"classification": "HIGH_CONSEQUENCE_AUTHORIZATION", "mutation": true, "human_authorization_required": true, "long_running": false},
+    "plan.rebaseline": {"classification": "HIGH_CONSEQUENCE_AUTHORIZATION", "mutation": true, "human_authorization_required": true, "long_running": false}
   },
   "invariants": [
     "no_arbitrary_shell",

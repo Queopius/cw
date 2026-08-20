@@ -19,9 +19,11 @@ from cw.core.completion import (
 )
 from cw.core.errors import CwError, ErrorCode
 from cw.core.initialize import repair
+from cw.core.audit import audit_history
+from cw.core.revisions import persist_revision, revision_payload
 from cw.core.progress import derive_effective_workflow_state
 from cw.core.state import load_state, save_state
-from cw.core.workflow import load_workflow, write_workflow, workflow_hash
+from cw.core.workflow import _read_document, load_workflow, write_workflow, workflow_hash
 from cw.planning.planner import Planner
 from cw.ui.console import Console
 from tests.helpers import FakeAdapter, TempRepo, result
@@ -308,21 +310,36 @@ class CompletionContractTests(unittest.TestCase):
 
     def test_repair_finishes_durably_authorized_extension_after_interruption(self) -> None:
         self.adopt(); self.approve_phases()
+        document = _read_document(self.repo.root / ".codex/workflow/phases.yaml")
+        revision = revision_payload(
+            self.repo.root, document, parent_revision_id=None,
+            actor_id="local-operator", actor_origin="human_cli",
+        )
+        persist_revision(self.repo.root, revision)
+        state = self.repo.state()
+        state["active_plan_revision"] = revision["plan_revision_id"]
+        state["active_plan_revision_sha256"] = revision["canonical_workflow_sha256"]
+        save_state(self.repo.root, state)
         missing = self.repo.workflow.completion_target.requirements[0].id
         run_completion_review(
             self.repo.root, self.repo.workflow, self.repo.state(),
             CompletionBackend(self.completion_result("EXTENSION_REQUIRED", missing), [self.extension_phase(missing)]),
         )
-        with patch("cw.core.completion.write_workflow", side_effect=OSError("interrupted")):
+        with patch("cw.core.revisions.persist_revision", side_effect=OSError("interrupted")):
             with self.assertRaises(OSError):
                 authorize_extension(
                     self.repo.root, self.repo.workflow, self.repo.state(), approve=True,
                     authorization=self.authorization(),
                 )
-        self.assertEqual(2, len(load_workflow(self.repo.root).phases))
-        repair(self.repo.root)
         self.assertEqual(3, len(load_workflow(self.repo.root).phases))
-        self.assertEqual("03-system-hardening", self.repo.state()["current_phase"])
+        repair(self.repo.root)
+        recovered_workflow = load_workflow(self.repo.root)
+        recovered_state = self.repo.state()
+        self.assertEqual(3, len(recovered_workflow.phases))
+        self.assertEqual("03-system-hardening", recovered_state["current_phase"])
+        self.assertNotEqual(revision["plan_revision_id"], recovered_state["active_plan_revision"])
+        self.assertIn(revision["plan_revision_id"], recovered_state["superseded_plan_revisions"])
+        audit_history(self.repo.root, recovered_workflow, recovered_state)
 
 
 class PlannerCompletionIntentTests(unittest.TestCase):

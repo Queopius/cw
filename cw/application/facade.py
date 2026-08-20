@@ -427,7 +427,7 @@ class CWApplication:
         This capability is intentionally absent from MCP/remote registries. A
         trusted host must create the typed human authorization ceremony.
         """
-        capability_name = "plan.rebaseline"
+        capability_name = CAPABILITIES["plan.rebaseline"].name
         if request.requested_capability != capability_name:
             raise application_error(CwError(
                 "Operation capability does not match", ErrorCode.AUTHORIZATION_REQUIRED,

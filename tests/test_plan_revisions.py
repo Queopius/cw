@@ -25,6 +25,8 @@ from cw.core.history import history_timeline
 from cw.core.models import WorkflowState
 from cw.core.revisions import (
     TRANSACTION,
+    _write_transaction,
+    active_revision,
     apply_rebaseline,
     audit_revisions,
     authorization_resource,
@@ -32,6 +34,7 @@ from cw.core.revisions import (
     load_proposal,
     recover_rebaseline_transaction,
 )
+from cw.core.initialize import backup_metadata
 from cw.core.state import load_state, save_state, transition
 from cw.core.utils import atomic_json, load_json
 from cw.core.workflow import _read_document, load_workflow, write_workflow, workflow_hash
@@ -366,6 +369,26 @@ class PlanRevisionIntegrityTests(unittest.TestCase):
         finally:
             case.close()
 
+    def test_tampered_history_links_fail_audit(self) -> None:
+        mutations = (
+            ("plan_rebaseline_proposed", "old_plan_revision_id"),
+            ("plan_rebaseline_authorized", "actor_id"),
+            ("review_superseded", "new_plan_revision_id"),
+        )
+        for action, field in mutations:
+            with self.subTest(action=action, field=field):
+                case = RebaselineCase()
+                try:
+                    proposal = case.preview(); case.apply(proposal, operation_id=f"history-{field}")
+                    state = load_state(case.repo.root)
+                    event = next(item for item in state["history"] if item.get("action") == action)
+                    event[field] = "tampered"
+                    save_state(case.repo.root, state)
+                    with self.assertRaises(CwError):
+                        audit_history(case.repo.root, load_workflow(case.repo.root), state)
+                finally:
+                    case.close()
+
 
 class PlanRevisionTransactionTests(unittest.TestCase):
     def test_failure_after_each_write_stage_rolls_back_without_lost_evidence(self) -> None:
@@ -401,17 +424,49 @@ class PlanRevisionTransactionTests(unittest.TestCase):
         try:
             plan = _read_document(case.repo.root / ".codex/workflow/phases.yaml")
             state = load_state(case.repo.root)
+            old_id, _ = active_revision(case.repo.root, state, case.repo.workflow)
+            backup = backup_metadata(case.repo.root)
             journal = {
                 "schema_version": 1, "kind": "plan_rebaseline_transaction", "status": "PREPARED",
+                "stage": "prepared", "proposal_id": "pp-" + "0" * 64,
+                "old_plan_revision_id": old_id, "new_plan_revision_id": "pr-" + "0" * 64,
+                "supersession_id": "ps-" + "0" * 64,
                 "operation_id": "crashed", "old_workflow": plan, "old_state": state,
-                "created_files": [], "backup": ".cw/backups/test", "created_at": "2026-08-20T00:00:00Z",
+                "created_files": [], "backup": backup.relative_to(case.repo.root).as_posix(),
+                "created_at": "2026-08-20T00:00:00Z",
             }
-            atomic_json(case.repo.root / TRANSACTION, journal)
+            _write_transaction(case.repo.root, journal)
             changed = copy.deepcopy(plan); changed["workflow"]["goal"] = "partial"
             write_workflow(case.repo.root / ".codex/workflow/phases.yaml", changed)
             recovered = recover_rebaseline_transaction(case.repo.root)
             self.assertTrue(recovered["recovered"])
             self.assertEqual(plan, _read_document(case.repo.root / ".codex/workflow/phases.yaml"))
+        finally:
+            case.close()
+
+    def test_recovery_rejects_journal_with_arbitrary_delete_target(self) -> None:
+        case = RebaselineCase()
+        try:
+            plan = _read_document(case.repo.root / ".codex/workflow/phases.yaml")
+            state = load_state(case.repo.root)
+            old_id, _ = active_revision(case.repo.root, state, case.repo.workflow)
+            backup = backup_metadata(case.repo.root)
+            readme = case.repo.root / "README.md"
+            readme.write_text("must survive\n", encoding="utf-8")
+            journal = {
+                "schema_version": 1, "kind": "plan_rebaseline_transaction", "status": "PREPARED",
+                "stage": "prepared", "proposal_id": "pp-" + "0" * 64,
+                "old_plan_revision_id": old_id, "new_plan_revision_id": "pr-" + "0" * 64,
+                "supersession_id": "ps-" + "0" * 64, "operation_id": "malicious",
+                "old_workflow": plan, "old_state": state, "created_files": ["README.md"],
+                "backup": backup.relative_to(case.repo.root).as_posix(),
+                "created_at": "2026-08-20T00:00:00Z",
+            }
+            _write_transaction(case.repo.root, journal)
+            with self.assertRaises(CwError) as raised:
+                recover_rebaseline_transaction(case.repo.root)
+            self.assertEqual(ErrorCode.TRANSACTION_RECOVERY_REQUIRED, raised.exception.code)
+            self.assertEqual(b"must survive\n", readme.read_bytes())
         finally:
             case.close()
 
@@ -467,6 +522,9 @@ class PlanRevisionPortabilityTests(unittest.TestCase):
                 code, payload = invoke(*command)
                 self.assertEqual(0, code)
                 self.assertIn("active_plan_revision" if command[0] != "history" else "phases", payload)
+            code, payload = invoke("plan", "show", "--authorize", "--json")
+            self.assertEqual(2, code)
+            self.assertEqual("USAGE_ERROR", payload["error"]["code"])
         finally:
             os.chdir(previous)
             case.close()

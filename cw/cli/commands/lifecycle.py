@@ -180,6 +180,16 @@ def command_plan(
 ) -> int:
     root = root_resolver()
     project, state, workflow = context(root)
+    rebaseline_options = tuple(
+        getattr(args, name, None)
+        for name in ("reason", "proposal", "apply", "authorize", "operation_id")
+    )
+    if args.action != "rebaseline" and any(value not in {None, False} for value in rebaseline_options):
+        raise CwError(
+            "Rebaseline options require 'cw plan rebaseline'",
+            ErrorCode.USAGE_ERROR,
+            exit_code=2,
+        )
     if args.action == "show":
         return _show_plan(args, console, root, state, workflow)
     if args.action == "approve":

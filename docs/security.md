@@ -101,7 +101,7 @@ server. The corresponding controls are:
 | Authorization bypass | Typed origin, explicit intent, exact proposal/action binding, expiry, nonce, supervisor validation |
 | Forged or replayed review supersession | Exact old/new revision and review hashes, human-origin grant, expiry, single-use nonce, operation ID, append-only record, lock, backup and audit cross-links |
 | Review or gate laundering across revisions | Validation, review and gate revision/candidate equality; prior gates survive only for byte-equivalent earlier phase contracts |
-| Partial rebaseline writes | Recoverable transaction journal, atomic individual writes, backup-before-activation and deterministic rollback/recovery |
+| Partial rebaseline writes | Protected, closed-schema, integrity-hashed transaction journal with an exact deletion allowlist; atomic individual writes, backup-before-activation and deterministic rollback/recovery |
 | Revision collision or hash confusion | Full SHA-256-derived identifiers plus canonical JSON hashing and collision-content equality checks |
 | Concurrent CLI and adapter writes | The same cross-platform project operation lock |
 | Secret leakage | Minimum-disclosure projection, path/credential redaction, no raw environment/log/source response |

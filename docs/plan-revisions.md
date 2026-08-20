@@ -70,6 +70,10 @@ state and normalized result. Unknown kinds, unsafe paths, missing revisions,
 hash mismatches, ambiguous operations/nonces and cross-project references fail
 closed.
 
+`plan.rebaseline` is classified centrally as a high-consequence authorization
+capability. It is available only to trusted local host code and intentionally
+excluded from MCP and remote capability profiles.
+
 ## Worked `cw-dashboard` case
 
 The regression fixture records review attempt 1 at SHA-256

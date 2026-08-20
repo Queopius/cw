@@ -4,6 +4,13 @@ Rebaseline writes a verified backup before activation and records a transaction
 journal at `.cw/runtime/plan-rebaseline-transaction.json`. Individual evidence
 files are append-only; active workflow/state writes are atomic.
 
+The journal is a protected Core path with a closed, integrity-hashed schema. It
+binds the operation, proposal, old/new revision and supersession IDs, backup,
+old workflow/state, and the only three append-only paths recovery may remove.
+Unknown fields, altered hashes, unsafe targets, missing backups, symlinks, or
+cross-project workflow identity fail with `TRANSACTION_RECOVERY_REQUIRED`
+before any restore or deletion.
+
 If apply fails in-process, CW restores the old workflow/state, removes only
 files created by the uncommitted transaction, preserves the backup and original
 review, and returns the stage-specific error. An exact replay of a committed

@@ -182,7 +182,11 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
             if not isinstance(proposal, str) or not proposal.startswith(".cw/plan-proposals/"):
                 raise CwError(f"Plan rebaseline proposal event is invalid: {index}", ErrorCode.INVALID_STATE)
             loaded = load_proposal(root, Path(proposal).stem)
-            if loaded.get("phase") != phase or loaded.get("new_plan_revision_id") != event.get("new_plan_revision_id"):
+            if (
+                loaded.get("phase") != phase
+                or loaded.get("old_plan_revision_id") != event.get("old_plan_revision_id")
+                or loaded.get("new_plan_revision_id") != event.get("new_plan_revision_id")
+            ):
                 raise CwError(f"Plan rebaseline proposal event is inconsistent: {index}", ErrorCode.INVALID_STATE)
         if action == "plan_rebaseline_authorized" and (
             not isinstance(event.get("proposal"), str)
