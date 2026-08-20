@@ -22,6 +22,12 @@ def _errors() -> list[str]:
     if "img.shields.io/github/v/release/Queopius/cw?display_name=tag&sort=semver" not in docs_index:
         errors.append("docs/index.md missing dynamic GitHub latest-release badge URL.")
 
+    release_workflow = (ROOT / ".github" / "workflows" / "release-check.yml").read_text(
+        encoding="utf-8"
+    )
+    if "gh release create" not in release_workflow or "gh release upload" not in release_workflow:
+        errors.append("Release workflow does not publish an idempotent GitHub Release.")
+
     versioning = (ROOT / "docs" / "versioning.md").read_text(encoding="utf-8")
     core_match = re.search(r"(?m)^- \*\*CW Core / CLI\*\*: `([^`]+)`\s*$", versioning)
     if not core_match:
