@@ -20,6 +20,9 @@ CORE_PROTECTED_PATHS = (
     ".cw/gates",
     ".cw/reviews",
     ".cw/completion",
+    ".cw/plan-revisions",
+    ".cw/plan-proposals",
+    ".cw/supersessions",
     ".codex/workflow/phases.yaml",
 )
 

@@ -13,6 +13,9 @@ project/
 │   ├── gates/
 │   ├── reviews/
 │   ├── validation/
+│   ├── plan-revisions/
+│   ├── plan-proposals/
+│   ├── supersessions/
 │   ├── completion/
 │   │   ├── reviews/
 │   │   ├── proposals/
@@ -41,6 +44,13 @@ Controlled adapter actions retain normalized validation evidence under
 cross-platform hashed filenames prevent protocol IDs becoming local paths.
 These receipts never replace workflow state, gates, reviews, or completion
 evidence as sources of truth.
+
+`plan-revisions/` contains immutable canonical workflow snapshots.
+`plan-proposals/` contains non-authoritative previews bound to an old revision,
+review hash, exact corrected workflow hash, reason, and actor. `supersessions/`
+contains the separate append-only record that changes active contractual
+authority without modifying the historical review. All three trees are
+protected, backup-covered, symlink-rejected, and audited.
 
 Contract-aware completion evidence is also mutable only through the CW
 supervisor. Reviews, extension proposals, and human authorizations are

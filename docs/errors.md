@@ -110,6 +110,10 @@ with the expected structured result.
 | `AUTHORIZATION_REQUIRED` | A high-consequence mutation lacks matching, current, explicit human authorization | New confirmation | Ask the operator to confirm the exact current proposal and action |
 | `OPERATION_CONFLICT` | An operation identifier was reused for a different request or another adapter holds the project lock | Context | Reuse the original request exactly, or wait and issue a new operation ID |
 | `PROJECT_SCOPE_VIOLATION` | A requested path or project handle is outside the adapter's authorized roots | No | Select an explicitly authorized CW repository |
+| `PLAN_REBASELINE_REQUIRED` | Reviewed workflow correction requires the explicit rebaseline ceremony | Human boundary | Create and inspect an exact proposal with a reason, then authorize it |
+| `PLAN_REVISION_INVALID` | Active or historical plan revision identity/hash/contract is invalid | No | Stop; inspect revision evidence and recover from the verified backup |
+| `SUPERSESSION_INVALID` | Review supersession, its authorization, or its historical links are invalid | No | Stop; preserve evidence and investigate tampering or incomplete migration |
+| `TRANSACTION_RECOVERY_REQUIRED` | A rebaseline transaction journal cannot be recovered deterministically | Operator | Do not edit state; restore the recorded backup or repair Core first |
 | `PROJECT_COMPLETED` | A controlled action targeted a semantically completed project | No | Inspect completion evidence; do not reopen implicitly |
 | `PHASE_NOT_STARTABLE` | Current state/readiness/session does not permit phase start | Context | Inspect status and finish or reconcile the current operation |
 | `OPERATION_IN_PROGRESS` | A conflicting/running operation cannot be replaced or cancelled safely | Later | Poll the active operation; do not assume rollback |

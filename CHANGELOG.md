@@ -4,6 +4,15 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+- Add explicit, human-authorized plan rebaseline proposals with immutable plan
+  revision snapshots, append-only review supersession records, revision-bound
+  validation/review/gate evidence, monotonic global attempts, and deterministic
+  crash recovery. Historical `REVISE` evidence remains byte-identical and is
+  audited against the exact contract it evaluated.
+- Make generic `cw plan rebuild` refuse reviewed workflows. A rebaseline does
+  not create a gate, inherit validation, approve a review, or start another
+  phase.
+
 ## 0.14.0 — 2026-08-16
 
 - Prepare a portable, non-root Render staging image and Blueprint for the

@@ -41,6 +41,7 @@ nav:
       - CLI Reference: cli-reference.md
   - Core Workflow:
       - Gates and Reviews: gates-and-reviews.md
+      - Plan Revisions: plan-revisions.md
       - Completion Contracts: completion-contracts.md
       - Batch Execution: batch-execution.md
       - Live Execution: live-execution.md
@@ -96,6 +97,9 @@ nav:
       - ADR — Device Identity and Pairing: adr/0008-device-identity-pairing.md
       - ADR — Remote Persistence: adr/0009-remote-persistence.md
       - ADR — Render Staging Hosting: adr/0010-render-staging-hosting.md
+      - ADR — Plan Revision Identity: adr/0011-plan-revision-identity.md
+      - ADR — Review Supersession: adr/0012-review-supersession.md
+      - Plan Rebaseline Recovery: operations/plan-rebaseline-recovery.md
       - Project Layout: project-layout.md
       - Platform Support: testing/platform-support.md
       - Windows VM Acceptance: testing/windows-vm-acceptance.md

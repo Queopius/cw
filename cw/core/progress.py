@@ -207,6 +207,10 @@ def derive_effective_workflow_state(
         and state.get("status") == WorkflowState.IN_PROGRESS.value
         and state.get("last_review") == latest_review
         and state.get("attempt") != 0
+        and not (
+            state.get("superseded_plan_revisions")
+            and state.get("revision_attempt", state.get("attempt")) == 0
+        )
     ):
         issues.append("attempt must reset to 0 after phase advancement")
     if resolved_cw_metadata_error(state):
@@ -424,6 +428,10 @@ def normalize_legacy_progress(
         and state.get("status") == WorkflowState.IN_PROGRESS.value
         and state.get("last_review") == latest_review
         and state.get("attempt") != 0
+        and not (
+            state.get("superseded_plan_revisions")
+            and state.get("revision_attempt", state.get("attempt")) == 0
+        )
     )
     position_stale = (
         current != expected_current
@@ -459,10 +467,12 @@ def normalize_legacy_progress(
                 if isinstance(gate_data, dict) and isinstance(gate_data.get("cycle"), int):
                     state["completion_cycle"] = gate_data["cycle"]
             state["attempt"] = 0
+            state["revision_attempt"] = 0
         else:
             state["current_phase"] = workflow.phases[len(approved)].id
             state["status"] = WorkflowState.IN_PROGRESS.value
             state["attempt"] = 0
+            state["revision_attempt"] = 0
         readiness_path(root).unlink(missing_ok=True)
         finish_session(root)
         changed = True

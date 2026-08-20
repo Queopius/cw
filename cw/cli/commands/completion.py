@@ -97,9 +97,23 @@ def _adopt(root: Path, workflow: Any, state: dict[str, Any], target: str | None)
         raise CwError("Create a workflow plan before adopting a Completion Contract", ErrorCode.PLAN_REQUIRED)
     contract = Planner.completion_contract(workflow.goal or "Complete the declared project goal", target_type=target)
     document = _read_document(root / ".codex/workflow/phases.yaml")
+    old_revision_id = state.get("active_plan_revision")
     document["completion_target"] = contract
     write_workflow(root / ".codex/workflow/phases.yaml", document)
     updated = load_workflow(root)
+    if isinstance(old_revision_id, str):
+        from cw.core.revisions import persist_revision, revision_payload
+
+        revision = revision_payload(
+            root, document, parent_revision_id=old_revision_id,
+            actor_id="local-operator", actor_origin=ActorOrigin.HUMAN_CLI.value,
+        )
+        persist_revision(root, revision)
+        state["active_plan_revision"] = revision["plan_revision_id"]
+        state["active_plan_revision_sha256"] = revision["canonical_workflow_sha256"]
+        state["superseded_plan_revisions"] = [
+            *state.get("superseded_plan_revisions", []), old_revision_id,
+        ]
     state["workflow_sha256"] = workflow_hash(root / ".codex/workflow/phases.yaml")
     state.update({
         "completion_cycle": 0, "last_completion_review": None,
@@ -112,6 +126,13 @@ def _adopt(root: Path, workflow: Any, state: dict[str, Any], target: str | None)
         "timestamp": utc_now(), "phase": state.get("current_phase"),
         "action": "completion_contract_adopted", "target": contract["id"],
     })
+    if isinstance(old_revision_id, str):
+        state["history"].append({
+            "timestamp": utc_now(), "phase": state.get("current_phase"),
+            "action": "plan_revision_activated",
+            "plan_revision_id": state["active_plan_revision"],
+            "parent_plan_revision_id": old_revision_id,
+        })
     save_state(root, state)
     return {"adopted": True, "contract": contract, "state": state["status"]}
 

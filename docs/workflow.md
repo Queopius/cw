@@ -29,6 +29,7 @@ CW uses explicit states and rejects transitions outside the state graph:
 UNINITIALIZED → INITIALIZED → PLANNING → PLAN_PROPOSED → READY → IN_PROGRESS
 IN_PROGRESS → READY_FOR_REVIEW → REVIEWING
 REVIEWING → REVISION_REQUIRED | APPROVED | HUMAN_REVIEW_REQUIRED | ERROR
+REVISION_REQUIRED → authorized plan rebaseline → READY
 APPROVED → IN_PROGRESS | COMPLETED
 ```
 
@@ -128,6 +129,12 @@ Every retained review, gate, and history event remains part of the workflow's
 audit surface. `cw doctor` checks the entire surface, including records from
 earlier phases, so tampering with old evidence cannot remain hidden behind a
 healthy current state.
+
+Reviewed plan correction uses immutable plan revision identities. Global phase
+attempts remain monotonic across revisions; `revision_attempt` restarts at zero
+when the corrected revision activates. Thus the first review under revision B
+can be global attempt 2 and revision attempt 1. Only active-revision evidence
+governs current state, while superseded evidence remains fully audited.
 
 `cw status` reports `Position` (the current configured phase index) separately
 from `Approved` (the number of gates that currently validate). `cw history`

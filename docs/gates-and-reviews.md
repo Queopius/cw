@@ -36,6 +36,8 @@ validation requires:
 - a consistent approval decision and no blocking issues;
 - the complete declared artifact set and current SHA-256 values;
 - explicit human approval when the phase requires it.
+- matching plan revision, canonical workflow hash, candidate SHA, and embedded
+  validation context for current-format revision-bound evidence.
 
 Changed artifacts, review evidence, or dependencies invalidate the gate. CW
 never recreates it silently.
@@ -122,6 +124,15 @@ previous review cycle.
 
 Use `cw history` for the phase audit view and `cw history --phase PHASE` to
 focus on one phase.
+
+## Correcting a reviewed plan
+
+A `REVISE` may expose a defect in the plan contract itself rather than in the
+implementation. Generic rebuild is unsafe because an old review cannot be
+reinterpreted against new criteria. Use [Plan revisions and review
+supersession](plan-revisions.md). Supersession does not delete, edit, reverse,
+or approve the old review. It selects a new active plan revision, returns the
+phase to `READY`, and requires a new validation/review/gate cycle.
 
 ## Phase gate versus completion evidence
 

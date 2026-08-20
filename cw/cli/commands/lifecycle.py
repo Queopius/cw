@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -13,8 +14,17 @@ from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
 from cw.core.recovery import mark_infrastructure_error
 from cw.core.state import bind_plan, initial_state, save_state, transition
-from cw.core.utils import utc_now
-from cw.core.workflow import load_workflow, set_plan_status, write_workflow, workflow_hash
+from cw.core.utils import safe_project_path, utc_now
+from cw.core.workflow import _read_document, load_workflow, set_plan_status, write_workflow, workflow_hash
+from cw.core.authorization import Actor, ActorOrigin, OperationContext, issue_user_authorization
+from cw.core.revisions import (
+    apply_rebaseline,
+    authorization_resource,
+    create_rebaseline_proposal,
+    load_proposal,
+    persist_revision,
+    revision_payload,
+)
 from cw.planning.planner import Planner
 from cw.ui.console import Console, emit_json
 
@@ -140,7 +150,15 @@ def _approve_plan(
     with operation_lock(root, "plan-approve"):
         set_plan_status(root, "APPROVED")
         workflow = load_workflow(root)
+        document = _read_document(root / ".codex/workflow/phases.yaml")
+        revision = revision_payload(
+            root, document, parent_revision_id=None,
+            actor_id="local-operator", actor_origin=ActorOrigin.HUMAN_CLI.value,
+        )
+        persist_revision(root, revision)
         state["workflow_sha256"] = workflow_hash(root / ".codex" / "workflow" / "phases.yaml")
+        state["active_plan_revision"] = revision["plan_revision_id"]
+        state["active_plan_revision_sha256"] = revision["canonical_workflow_sha256"]
         transition(root, state, WorkflowState.READY)
     payload = {"status": "READY", "phases": len(workflow.phases)}
     if args.json:
@@ -166,8 +184,87 @@ def command_plan(
         return _show_plan(args, console, root, state, workflow)
     if args.action == "approve":
         return _approve_plan(args, console, root, state, workflow)
+    if args.action == "rebaseline":
+        actor = Actor("local-operator", ActorOrigin.HUMAN_CLI, explicit_user_intent=True)
+        if args.apply:
+            if not args.authorize:
+                raise CwError(
+                    "Plan rebaseline requires explicit --authorize",
+                    ErrorCode.AUTHORIZATION_REQUIRED,
+                    "Inspect the proposal, then repeat with --authorize.",
+                    exit_code=3,
+                )
+            proposal = load_proposal(root, args.apply)
+            operation_id = args.operation_id or uuid.uuid4().hex
+            grant = issue_user_authorization(
+                action="plan.rebaseline",
+                resource_id=authorization_resource(proposal),
+                operation_id=operation_id,
+                actor=actor,
+            )
+            with operation_lock(root, "plan-rebaseline"):
+                payload = apply_rebaseline(
+                    root, workflow, state, args.apply,
+                    OperationContext(operation_id, actor, "plan.rebaseline", grant),
+                )
+        else:
+            if not args.reason or not args.reason.strip():
+                raise CwError("Plan rebaseline requires --reason", ErrorCode.USAGE_ERROR, exit_code=2)
+            if bool(args.goal) == bool(args.proposal):
+                raise CwError(
+                    "Plan rebaseline preview requires exactly one of --goal or --proposal",
+                    ErrorCode.USAGE_ERROR,
+                    exit_code=2,
+                )
+            if args.proposal:
+                proposal_file = safe_project_path(root, args.proposal, must_exist=True)
+                if not proposal_file.is_file() or proposal_file.is_symlink():
+                    raise CwError("Rebaseline proposal path is unsafe", ErrorCode.USAGE_ERROR, exit_code=2)
+                proposed_document = _read_document(proposal_file)
+            else:
+                planner = Planner(
+                    workflow.human_gate_categories,
+                    backend=CodexAdapter(),
+                    timeout=workflow.review_timeout,
+                )
+                proposed_document = planner.propose_plan(root, project.project_id, args.goal)
+            with operation_lock(root, "plan-rebaseline-proposal"):
+                payload = create_rebaseline_proposal(
+                    root, workflow, state, proposed_document,
+                    reason=args.reason, actor_id=actor.actor_id,
+                    actor_origin=actor.origin.value,
+                )
+            payload = {
+                "status": "PROPOSED",
+                "proposal_id": payload["proposal_id"],
+                "proposal_sha256": payload["proposal_sha256"],
+                "old_plan_revision_id": payload["old_plan_revision_id"],
+                "new_plan_revision_id": payload["new_plan_revision_id"],
+                "phase": payload["phase"],
+                "reason": payload["reason"],
+                "authorization_required": True,
+                "apply_command": f"cw plan rebaseline --apply {payload['proposal_id']} --authorize",
+            }
+        if args.json:
+            emit_json(payload)
+        else:
+            console.header("Plan rebaseline")
+            console.field("Status", payload["status"])
+            console.field("Proposal", payload.get("proposal_id", args.apply))
+            console.field("Old revision", payload.get("old_plan_revision_id"))
+            console.field("New revision", payload.get("new_plan_revision_id"))
+            if payload.get("authorization_required"):
+                console.wrapped("Human authorization is required for this exact proposal hash.", 2)
+                console.action(payload["apply_command"], "Authorize and activate the corrected plan")
+        return 0
     with operation_lock(root, "plan"):
         if args.action == "rebuild":
+            if state.get("status") == WorkflowState.REVISION_REQUIRED.value or any((root / ".cw/reviews").glob("*.json")):
+                raise CwError(
+                    "Reviewed workflows must use an auditable plan rebaseline",
+                    ErrorCode.PLAN_REBASELINE_REQUIRED,
+                    'Run: cw plan rebaseline --goal "..." --reason "..."',
+                )
             backup_metadata(root)
             state = initial_state(project.project_id)
             save_state(root, state)

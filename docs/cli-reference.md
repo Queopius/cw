@@ -85,21 +85,39 @@ not silently launch a mutating agent.
 
 ## cw plan
 
-**Syntax:** `cw plan [show|approve|rebuild] [--goal TEXT]`
+**Syntax:** `cw plan [show|approve|rebuild|rebaseline] [--goal TEXT] [--proposal PATH] [--reason TEXT] [--apply ID] [--authorize] [--operation-id ID]`
 
 - `--goal TEXT` supplies an explicit planning goal.
 - `show` displays the proposed or approved plan.
 - `approve` approves the current proposal without rewriting it.
-- `rebuild` discards an unapproved proposal and plans again from bounded evidence.
+- `rebuild` replaces only an unreviewed workflow proposal. Once review evidence
+  exists, CW requires the auditable `rebaseline` ceremony.
+- `rebaseline --goal ... --reason ...` asks the planner for a corrected proposal.
+- `rebaseline --proposal PATH --reason ...` validates a supplied repository-local proposal.
+- `rebaseline --apply ID --authorize` binds explicit human authority to the exact immutable proposal hash.
+- `--operation-id ID` supplies replay-safe operation identity for apply.
+
+The public options `--reason`, `--proposal`, `--apply`, `--authorize`, and
+`--operation-id` are valid only in the `rebaseline` combinations described
+above.
 
 ```bash
 cw plan --goal "Add subscription billing"
 cw plan show
 cw plan approve
+cw plan rebaseline --proposal corrected-plan.json --reason "Remove circular criteria" --json
+cw plan rebaseline --apply pp-... --authorize --operation-id operator-change-42 --json
 ```
 
 Planner infrastructure failures preserve the pending goal for `cw retry`; an
 invalid or partial plan is never installed.
+
+A rebaseline is permitted only in `REVISION_REQUIRED` with an active `REVISE`
+review and no gate for the current phase. Preview creates no active revision.
+Apply preserves the old plan and review, records a human authorization and
+supersession, activates the corrected revision as `READY`, and still requires
+normal start, validation, independent review, and gate creation. It never uses
+`--human-approve` to overturn `REVISE`.
 
 ## cw completion
 
