@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "milestone_version": "0.12.0",
+  "submission_in_scope": false,
+  "completion_target": {
+    "id": "cw-plugin-production-readiness",
+    "name": "ChatGPT Plugin Acceptance and Production Readiness",
+    "description": "Prepare a current-format CW plugin, production MCP architecture, authentication and authorization contracts, security and privacy controls, and submission artifacts without deploying or submitting the service.",
+    "target_type": "plugin-production-readiness",
+    "requirements": [
+      {
+        "id": "official-platform-model",
+        "description": "Verify the current OpenAI Plugins, MCP, authentication, tunnel, and submission model using official documentation.",
+        "severity": "blocking",
+        "evidence_expectations": ["Dated official-document URLs and current requirement summary."],
+        "project_specific": true
+      },
+      {
+        "id": "plugin-package",
+        "description": "Keep canonical metadata, skill, MCP wiring, capabilities, assets, and deterministic packaging valid and free of private data.",
+        "severity": "blocking",
+        "evidence_expectations": ["Official validator, skill validator, archive digest, and package contract tests."],
+        "project_specific": true
+      },
+      {
+        "id": "production-topology",
+        "description": "Select a production HTTPS MCP topology that preserves local repository ownership and explicit trust boundaries.",
+        "severity": "blocking",
+        "evidence_expectations": ["Accepted ADR comparing four deployment models and documenting data flow and failure modes."],
+        "project_specific": true
+      },
+      {
+        "id": "authentication",
+        "description": "Define OAuth 2.1 MCP authentication, client registration, PKCE, token validation, rotation, expiry, and revocation.",
+        "severity": "blocking",
+        "evidence_expectations": ["Authentication contract and deterministic policy validation."],
+        "project_specific": true
+      },
+      {
+        "id": "authorization",
+        "description": "Define least-privilege scopes, user/workspace/project grants, and a separate high-consequence human authorization ceremony.",
+        "severity": "blocking",
+        "evidence_expectations": ["Capability mapping and nonce/expiry/action/project/evidence binding contract."],
+        "project_specific": true
+      },
+      {
+        "id": "controlled-actions",
+        "description": "Preserve the accepted narrow controlled-action schemas and classify actual surface availability independently of CW support.",
+        "severity": "blocking",
+        "evidence_expectations": ["Registry parity, forbidden-tool absence, idempotency, cancellation, and platform-classification tests."],
+        "project_specific": true
+      },
+      {
+        "id": "security",
+        "description": "Threat-model prompt injection, request forgery, scope escape, confused deputy, token theft, replay, authorization impersonation, tenant isolation, leakage, and supply chain.",
+        "severity": "blocking",
+        "evidence_expectations": ["Threat-control matrix and deterministic boundary tests."],
+        "project_specific": true
+      },
+      {
+        "id": "privacy-data-flow",
+        "description": "Document exactly which source, .cw, evidence, identity, and operational data stays local or crosses each trust boundary.",
+        "severity": "blocking",
+        "evidence_expectations": ["Per-deployment-model data-flow matrix and redaction policy."],
+        "project_specific": true
+      },
+      {
+        "id": "operations",
+        "description": "Define safe observability, correlations, availability, recovery, incident, key rotation, and local-agent ownership boundaries.",
+        "severity": "blocking",
+        "evidence_expectations": ["Deployment and operational runbook contract."],
+        "project_specific": true
+      },
+      {
+        "id": "submission-artifacts",
+        "description": "Prepare truthful metadata, support, privacy, security, reviewer notes, test cases, and a submission checklist without submitting.",
+        "severity": "blocking",
+        "evidence_expectations": ["Submission-readiness document with explicit technical and human blockers."],
+        "project_specific": true
+      },
+      {
+        "id": "compatibility",
+        "description": "Preserve CLI, local stdio, Codex plugin, Secure MCP Tunnel development, gates, Completion Contracts, and .cw semantics.",
+        "severity": "blocking",
+        "evidence_expectations": ["Full deterministic, MCP, plugin, wheel, docs, and feasible local platform suite."],
+        "project_specific": true
+      },
+      {
+        "id": "external-production-acceptance",
+        "description": "Truthfully classify public HTTPS, OAuth, production operations, and real submission acceptance that cannot run before implementation and human approval.",
+        "severity": "advisory",
+        "evidence_expectations": ["Explicit BLOCKED status and exact next-stage exit criteria."],
+        "project_specific": true
+      }
+    ]
+  }
+}

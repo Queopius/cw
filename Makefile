@@ -1,4 +1,4 @@
-.PHONY: test install check docs-check acceptance-local demo demo-hero demo-check public-version-sync docs-sync-stable
+.PHONY: test install check docs-check plugin-check production-readiness-check acceptance-local demo demo-hero demo-check public-version-sync docs-sync-stable
 
 RTD_PROJECT_SLUG ?= cw-codex-workflow
 RTD_STABLE_VERSION ?= v$(shell tr -d '\n' < VERSION)
@@ -15,6 +15,19 @@ check:
 	python3 scripts/check_docs_policy.py
 	python3 scripts/check_public_version.py
 	python3 scripts/validate_hero_demo.py
+	python3 scripts/validate_plugin_candidate.py
+	python3 scripts/validate_plugin_production_readiness.py
+	python3 scripts/validate_remote_candidate.py
+	python3 scripts/validate_staging_bootstrap.py
+	python3 scripts/build_plugin_candidate.py --check
+
+plugin-check:
+	python3 scripts/validate_plugin_candidate.py
+	python3 scripts/validate_plugin_production_readiness.py
+	python3 scripts/build_plugin_candidate.py --check
+	python3 -m unittest tests.test_plugin_candidate tests.test_chatgpt_development tests.test_plugin_production_readiness
+
+production-readiness-check: plugin-check
 
 docs-check:
 	python3 scripts/check_cli_docs.py

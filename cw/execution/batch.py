@@ -63,6 +63,11 @@ class BatchRunner:
                 "COMPLETED", 0, budget.max_phases, 0,
                 "workflow_complete", None, 0,
             )
+        if effective.planned_scope_complete:
+            return BatchOutcome(
+                "PLANNED_COMPLETE", 0, budget.max_phases, 0,
+                "completion_review_required", None, 3,
+            )
         if not workflow.phases or not state.get("current_phase"):
             raise CwError("An approved development plan is required", ErrorCode.PLAN_REQUIRED, "Run: cw plan")
         if session is None:

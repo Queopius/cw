@@ -14,17 +14,20 @@ width handling, `NO_COLOR`, non-TTY fallbacks, and stable test fixtures rather
 than animation or a full-screen terminal UI. The canvas caps at 88 columns and
 adapts to narrower terminals.
 
-CW is a standard-library Python package with a console entry point.
+CW's engine and normal CLI use the Python standard library. The optional local
+MCP adapter adds its SDK only through the `mcp` packaging extra.
 
 ```text
 cw.cli      argument parsing and thin command orchestration
 cw.cli.commands  independently testable command implementations
+cw.application UI-independent project scope, capabilities, operation results,
+               authorization context, and stable adapter facade
 cw.ui       text/ANSI/JSON presentation
-cw.core     project identity, workflow, state, locks, config, gates, persistence
+cw.core     project identity, workflow, state, locks, gates, completion, persistence
 cw.planning repository inspection and plan proposal
 cw.checks   deterministic validation
 cw.agents   independent review policy and consistency checks
-cw.adapters isolated Codex subprocess integration
+cw.adapters isolated Codex subprocess integration and optional governed MCP
 cw.execution normalized events, live state, run identity, profiles, clocks
 cw.integrations optional/required capability health and diagnostic normalization
 cw.update    release providers, cache, verification, transactions, and rollback
@@ -45,6 +48,17 @@ to be extracted and tested without turning the entry point back into a monolith.
 Mutable configuration has its own command module; read-oriented status and
 diagnostic commands never acquire responsibility for configuration writes.
 
+`CWApplication` is the stable internal multi-adapter boundary. The CLI delegates
+context loading and canonical status construction to it; the MCP adapter calls
+the same Python operations rather than spawning `cw`. See
+[Plugin readiness architecture](plugin-readiness.md).
+
+`cw.adapters.mcp.runtime` is transport-independent and owns the closed tool
+allowlist, typed MCP origin, opaque-handle resolution, privacy projection, and
+structured error mapping. `cw.adapters.mcp.server` is the only MCP SDK binding
+and runs stdio. Neither core nor application imports the optional SDK. See
+[MCP runtime](mcp-runtime.md).
+
 `cw.ui.theme`, `cw.ui.symbols`, and `cw.ui.renderers` form the presentation
 boundary. Commands pass structured status, history, and diagnostic data to that
 layer; domain code never emits ANSI and JSON is serialized directly from domain
@@ -62,6 +76,13 @@ position. It validates the contiguous dependency/gate chain and exposes
 completion, current phase, approved/remaining/active counts, and final
 gate/review references. Status, repair, start, retry, and batch execution consume
 this result; persisted `current_phase` can never override completed evidence.
+
+For a contract-aware workflow, `EffectiveWorkflowState` derives planned-scope
+completion separately from semantic completion. `.cw/completion` contains
+append-only system reviews, extension proposals, human authorizations, and a
+distinct completion gate. The completion reviewer and extension planner are
+read-only sibling Codex processes; only the supervisor writes evidence or
+authorizes state transitions.
 
 `cw.core.layout` defines the trusted project filesystem topology. Validation is
 performed before init writes, lock acquisition, normal context loading, repair,

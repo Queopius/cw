@@ -83,6 +83,7 @@ def _validate_completed_work(root: Path, workflow: Workflow, phase: Phase, resul
         completed = subprocess.run(
             arguments, cwd=root, shell=False, text=True, encoding="utf-8", errors="replace",
             capture_output=True, timeout=timeout, env=_redacted_environment(), check=False,
+            stdin=subprocess.DEVNULL,
         )
         if sink is not None:
             sink(ExecutionEvent(

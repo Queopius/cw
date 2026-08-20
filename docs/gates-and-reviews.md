@@ -122,3 +122,11 @@ previous review cycle.
 
 Use `cw history` for the phase audit view and `cw history --phase PHASE` to
 focus on one phase.
+
+## Phase gate versus completion evidence
+
+A phase gate proves one bounded milestone. It never claims that the composed
+product meets its declared readiness target. Contract-aware projects therefore
+use a separate read-only [completion review](completion-contracts.md) and a
+distinct completion evidence artifact. Later system findings do not rewrite or
+invalidate an honestly earned phase gate.

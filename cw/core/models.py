@@ -21,6 +21,10 @@ class WorkflowState(str, Enum):
     HUMAN_REVIEW_REQUIRED = "HUMAN_REVIEW_REQUIRED"
     ERROR = "ERROR"
     PAUSED = "PAUSED"
+    PLANNED_COMPLETE = "PLANNED_COMPLETE"
+    COMPLETION_REVIEW = "COMPLETION_REVIEW"
+    EXTENSION_PROPOSED = "EXTENSION_PROPOSED"
+    COMPLETION_BLOCKED = "COMPLETION_BLOCKED"
     COMPLETED = "COMPLETED"
 
 
@@ -37,6 +41,19 @@ class PlanStatus(str, Enum):
     PROPOSED = "PROPOSED"
     APPROVED = "APPROVED"
     COMPLETED = "COMPLETED"
+
+
+class CompletionDecision(str, Enum):
+    SATISFIED = "SATISFIED"
+    EXTENSION_REQUIRED = "EXTENSION_REQUIRED"
+    BLOCKED = "BLOCKED"
+
+
+class CompletionResultStatus(str, Enum):
+    VERIFIED = "VERIFIED"
+    INFERRED = "INFERRED"
+    NOT_VERIFIED = "NOT_VERIFIED"
+    MISSING = "MISSING"
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +96,8 @@ class Phase:
     blocking_criteria: tuple[str, ...] = ()
     requires_human_approval: bool = False
     required_integrations: tuple[str, ...] = ()
+    expected_evidence: tuple[str, ...] = ()
+    completion_requirements: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Phase":
@@ -93,6 +112,46 @@ class Phase:
             blocking_criteria=tuple(map(str, data.get("blocking_criteria", []))),
             requires_human_approval=bool(data.get("requires_human_approval", False)),
             required_integrations=tuple(map(str, data.get("required_integrations", []))),
+            expected_evidence=tuple(map(str, data.get("expected_evidence", []))),
+            completion_requirements=tuple(map(str, data.get("completion_requirements", []))),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionRequirement:
+    id: str
+    description: str
+    severity: CriterionSeverity = CriterionSeverity.BLOCKING
+    evidence_expectations: tuple[str, ...] = ()
+    project_specific: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CompletionRequirement":
+        return cls(
+            id=str(data["id"]),
+            description=str(data["description"]),
+            severity=CriterionSeverity(str(data.get("severity", CriterionSeverity.BLOCKING.value))),
+            evidence_expectations=tuple(map(str, data.get("evidence_expectations", []))),
+            project_specific=bool(data.get("project_specific", False)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionContract:
+    id: str
+    name: str
+    description: str
+    target_type: str
+    requirements: tuple[CompletionRequirement, ...]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CompletionContract":
+        return cls(
+            id=str(data["id"]),
+            name=str(data["name"]),
+            description=str(data["description"]),
+            target_type=str(data["target_type"]),
+            requirements=tuple(CompletionRequirement.from_dict(item) for item in data.get("requirements", [])),
         )
 
 
@@ -110,6 +169,7 @@ class Workflow:
     allow_network: bool = False
     protected_paths: tuple[str, ...] = ()
     human_gate_categories: tuple[str, ...] = ()
+    completion_target: CompletionContract | None = None
 
     def phase(self, phase_id: str) -> Phase:
         for phase in self.phases:

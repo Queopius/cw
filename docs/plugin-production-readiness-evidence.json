@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "milestone": "CW 0.12 · ChatGPT Plugin Acceptance & Production Readiness",
+  "recorded_at": "2026-08-15",
+  "version": "0.12.0",
+  "official_docs_reviewed": [
+    "https://developers.openai.com/plugins/concepts/plugins",
+    "https://developers.openai.com/plugins/build/plugins",
+    "https://developers.openai.com/plugins/build/auth",
+    "https://developers.openai.com/plugins/deploy/connect-chatgpt",
+    "https://developers.openai.com/plugins/deploy/submission",
+    "https://developers.openai.com/plugins/guides/security-privacy",
+    "https://developers.openai.com/api/docs/guides/secure-mcp-tunnels"
+  ],
+  "decisions": {
+    "production_mcp": "managed public HTTPS MCP gateway and relay paired with an outbound-only user-run local CW agent",
+    "authentication": "OAuth 2.1 MCP authorization with PKCE and CIMD preferred, DCR supported when required",
+    "project_authorization": "explicit principal/workspace/device/project grants using opaque project handles",
+    "high_consequence": "separate typed single-use ceremony; ordinary OAuth scope or conversation is insufficient",
+    "chatgpt_pro": "read-only default; controlled actions require actual surface discovery",
+    "business_enterprise": "workspace-admin opt-in and least-privilege scopes; no policy bypass",
+    "plugin_package": "current plugin.json plus skill and local MCP; remote .app.json deferred until a real registered endpoint exists",
+    "privacy": "source and .cw remain local; only normalized minimum-disclosure CW envelopes cross the relay",
+    "operations": "Queopius owns gateway policy and service operations; operator owns local agent and grants",
+    "submission": "BLOCKED pending implementation, public HTTPS, OAuth, domain verification, legal/business approval, and external acceptance"
+  },
+  "implemented_in_0_12": {
+    "public_https_gateway": false,
+    "oauth_server": false,
+    "local_pairing_agent": false,
+    "public_submission": false,
+    "new_mcp_tools": false,
+    "high_consequence_tools": false
+  },
+  "technical_acceptance": {
+    "status": "ACCEPTED",
+    "accepted_candidate_sha": "45f89472a0d61effc6e1860960c3d3facf6f03cb",
+    "branch": "dev",
+    "local_validation": {
+      "unit": "551 passed; 4 expected optional skips",
+      "mcp_plugin_chatgpt_security": "80 passed",
+      "installed_normal_wheel": "PASS",
+      "installed_mcp_wheel": "PASS",
+      "strict_docs": "PASS",
+      "acceptance_harness": "PASS; real Codex not configured"
+    },
+    "plugin_archive_sha256": "c2551fa172fdebd4b7e7bb18997c60cbfa1b55f22995d7d3afe453a90d8754b6",
+    "github": {
+      "ci": {
+        "run_id": 31896686105,
+        "url": "https://github.com/Queopius/cw/actions/runs/31896686105",
+        "sha": "45f89472a0d61effc6e1860960c3d3facf6f03cb",
+        "status": "PASS"
+      },
+      "platform_acceptance": {
+        "run_id": 31896686084,
+        "url": "https://github.com/Queopius/cw/actions/runs/31896686084",
+        "sha": "45f89472a0d61effc6e1860960c3d3facf6f03cb",
+        "status": "PASS"
+      }
+    },
+    "native_matrix": {
+      "linux_x86_64": "PASS",
+      "windows_x86_64": "PASS",
+      "macos_arm64": "PASS",
+      "macos_intel": "PASS"
+    },
+    "inherited_external_evidence": "CW 0.11 real ChatGPT Pro read-only acceptance through Secure MCP Tunnel: PASS",
+    "not_externally_validated_in_0_12": [
+      "public HTTPS MCP gateway or relay",
+      "production OAuth, pairing, tenant isolation, or revocation runtime",
+      "production ChatGPT controlled actions",
+      "Plugin Directory submission"
+    ]
+  },
+  "production_readiness": "NOT_READY",
+  "plugin_submission_readiness": "BLOCKED",
+  "secrets_recorded": false
+}

@@ -25,6 +25,10 @@ phase at a time.
 
 > **No valid gate. No next phase.**
 
+For new contract-aware workflows, planned work finished is not the same as the
+declared goal proven. A separate independent completion review must satisfy the
+goal-derived Completion Contract before CW records semantic completion.
+
 CW derives progress from the highest contiguous chain of validated gates. If
 cached state, readiness, history, and gate evidence disagree, read commands
 fail closed with an integrity explanation; `cw repair` performs backup-first
@@ -37,6 +41,26 @@ records SHA-256 approval gates before allowing another phase to begin.
 
 CW is designed for local Git repositories and offers bounded—not unlimited—
 autonomy. Use `cw version --verbose` for the installed build identity.
+
+CW includes an optional local stdio MCP adapter over the same UI-independent
+application boundary used by the CLI. Alongside normalized inspection, it
+offers four governed actions: start the current authorized phase, run configured
+validation, request independent review, and retry an engine-approved failure.
+It exposes no arbitrary shell/filesystem/Git command, gate operation, repair,
+rebaseline, or extension authorization. The repository packages that accepted
+surface and a workflow skill as a reviewable, repo-local
+[OpenAI plugin candidate](docs/plugin-app-candidate.md). It is not a hosted MCP
+service, public ChatGPT web app, or submitted directory plugin. The same
+explicitly scoped stdio server passed real ChatGPT Pro read-only acceptance
+through Secure MCP Tunnel without uploading the repository. CW 0.13 also adds
+a production-oriented, hosting-neutral remote implementation candidate: an
+OAuth-protected Streamable HTTP MCP gateway and an outbound-only paired local
+agent. Repository source and raw `.cw` remain local by default. It is not a
+deployed public service and is not submitted to OpenAI. CW 0.12 defined a
+future public HTTPS gateway/relay, OAuth, project grants, and production
+security boundary while intentionally shipping no hosted service. See
+[MCP runtime](docs/mcp-runtime.md), [ChatGPT development](docs/chatgpt-development.md),
+and [plugin production readiness](docs/plugin-production-readiness.md).
 
 ## Quick start
 
@@ -182,8 +206,9 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
 - Required commands run before AI review and come only from `phases.yaml`.
 - Reviewers run independently with `read-only`, ephemeral sessions, and hooks disabled.
 - Approved artifact hashes are rechecked before every dependent phase.
-- A verified non-final gate advances state immediately to the next configured
-  phase; the final gate completes the workflow.
+- A verified non-final gate advances state immediately to the next authorized
+  phase. The final gate completes planned scope; a contract-aware workflow then
+  requires independent system completion evidence.
 - Payment, cryptography, production, destructive migration, and similar goals can require a human gate.
 
 ## Commands
@@ -194,6 +219,7 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
 | `cw run N` | Run up to N phases within explicit safety budgets |
 | `cw init` | Initialize the current Git repository |
 | `cw plan [show\|approve\|rebuild]` | Manage the plan lifecycle |
+| `cw completion [show\|review\|approve\|reject\|adopt]` | Prove the target or authorize proposed extensions |
 | `cw status` | Show concise workflow progress |
 | `cw validate` | Run deterministic checks only |
 | `cw review` | Run independent review after readiness |

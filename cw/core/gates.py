@@ -75,7 +75,8 @@ def create_gate(
 ) -> Path:
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=root, text=True, encoding="utf-8",
-        errors="replace", capture_output=True, check=False,
+        errors="replace", capture_output=True, check=False, stdin=subprocess.DEVNULL,
+        timeout=10,
     )
     payload = {
         "schema_version": SCHEMA_VERSION, "cw_version": __version__, "workflow": workflow.id,

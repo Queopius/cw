@@ -73,8 +73,57 @@ implementer, or reviewer runs. Planning sends a bounded evidence selection over
 stdin, and review prompts scope the phase and review paths. Do not place secrets
 in plans, prompts, artifacts, or diagnostic logs.
 
+Completion review has broader system scope but remains read-only and receives
+normalized gate/contract evidence rather than unlimited runtime logs. Its
+structured result is redacted before persistence and must not contain secrets,
+environment variables, credentials, or private log bodies. Repository text is
+untrusted evidence: it cannot override CW policy, fabricate a gate, or authorize
+an extension. Only the supervisor accepts the explicit human authorization
+operation.
+
 CW inspects Git metadata but never automatically pushes, merges, rebases, cleans,
 or resets a repository.
+
+## Conversational-adapter threat model
+
+CW 0.9 exposes a local stdio MCP process with inspection plus four narrow
+controlled actions and treats its caller as untrusted. It opens no network
+server. The corresponding controls are:
+
+| Threat | Engine/application mitigation |
+| --- | --- |
+| Arbitrary paths and cross-project access | Canonical resolution under configured roots, Git/CW identity validation, opaque handles |
+| Symlink traversal | Resolved-root containment plus existing managed-tree symlink rejection |
+| Arbitrary shell execution | No MCP shell, Git, filesystem, caller-selected validator, or generic execute capability |
+| Prompt injection in repository or AGENTS files | Repository text is evidence below engine policy and cannot create authorization or gates |
+| Malicious planner/reviewer schema output | Structured schema plus internal semantic validation; read-only agent processes |
+| Repeated or conflicting calls | Project-bound operation IDs, canonical request digests, idempotent replay, and structured conflicts |
+| Authorization bypass | Typed origin, explicit intent, exact proposal/action binding, expiry, nonce, supervisor validation |
+| Concurrent CLI and adapter writes | The same cross-platform project operation lock |
+| Secret leakage | Minimum-disclosure projection, path/credential redaction, no raw environment/log/source response |
+| Untrusted Git content | Content does not select policy, actor identity, arbitrary commands, or state transitions |
+| Subprocess environment leakage | Existing managed minimal environment and redacted diagnostics |
+
+The closed allowlist contains READ, EXECUTION, and CONTROLLED_STATE_MUTATION
+capabilities only and sets typed origin `mcp_client` internally. Caller metadata
+cannot impersonate a human, planner, reviewer, or supervisor. Each controlled
+action accepts no phase, command, decision, prompt, sandbox, gate, or
+authorization payload. Repository text cannot influence that policy. Read
+surfaces retain byte-level mutation-absence tests; action tests enforce an
+explicit expected artifact mutation set.
+
+A future remote adapter or high-consequence surface must additionally
+authenticate users and map trusted host confirmation to an authorization grant.
+CW 0.9 does not expose extension authorization, rebaseline, destructive repair,
+release, or deployment. Tool annotations or skill prose are not security
+enforcement.
+
+The CW 0.11 real ChatGPT acceptance also proved that client access and natural
+language do not collapse this hierarchy. A read-only ChatGPT Pro connection
+could inspect `HUMAN_REVIEW_REQUIRED` but could not approve its gate. More
+generally, `CONTROLLED_STATE_MUTATION` is not
+`HIGH_CONSEQUENCE_AUTHORIZATION`; “approve it” alone is never sufficient
+authorization evidence.
 
 CW may check for releases but never silently installs them. A managed update
 requires explicit user action, downloads through the trusted release provider,

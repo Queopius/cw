@@ -1,0 +1,62 @@
+services:
+  - type: web
+    name: cw-staging-mcp
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    branch: dev
+    region: frankfurt
+    plan: starter
+    numInstances: 1
+    autoDeployTrigger: checksPass
+    healthCheckPath: /readyz
+    domains:
+      - staging-mcp.cwcli.dev
+    disk:
+      name: cw-staging-data
+      mountPath: /var/lib/cw
+      sizeGB: 1
+    envVars:
+      - key: CW_DEPLOYMENT_ENV
+        value: staging
+      - key: CW_GATEWAY_RESOURCE_URL
+        value: https://staging-mcp.cwcli.dev/mcp
+      - key: CW_GATEWAY_DATABASE
+        value: /var/lib/cw/gateway.sqlite3
+      - key: CW_GATEWAY_HOST
+        value: 0.0.0.0
+      - key: CW_GATEWAY_ALLOWED_HOSTS
+        value: staging-mcp.cwcli.dev,cw-staging-mcp.onrender.com
+      - key: CW_GATEWAY_DOCUMENTATION_URL
+        value: https://docs.cwcli.dev/remote-auth/
+      - key: CW_OAUTH_WORKSPACE_CLAIM
+        value: https://cwcli.dev/claims/workspace
+      - key: CW_OAUTH_ALGORITHMS
+        value: RS256
+      - key: CW_LIMIT_REQUESTS_PER_MINUTE
+        value: "120"
+      - key: CW_LIMIT_DEVICE_REQUESTS_PER_MINUTE
+        value: "240"
+      - key: CW_LIMIT_PAIRING_REQUESTS_PER_MINUTE
+        value: "20"
+      - key: CW_LIMIT_CONCURRENT_PER_DEVICE
+        value: "4"
+      - key: CW_LIMIT_REQUEST_BYTES
+        value: "65536"
+      - key: CW_LIMIT_AGENT_MESSAGE_BYTES
+        value: "524288"
+      - key: CW_LIMIT_OPERATION_TIMEOUT_SECONDS
+        value: "30"
+      - key: CW_LIMIT_AGENT_IDLE_SECONDS
+        value: "45"
+      - key: CW_LIMIT_COMPLETED_CACHE
+        value: "1024"
+      - key: CW_OAUTH_ISSUER_URL
+        sync: false
+      - key: CW_OAUTH_JWKS_URL
+        sync: false
+      - key: CW_PAIRING_WEB_CLIENT_ID
+        sync: false
+      - key: CW_PAIRING_WEB_REDIRECT_URI
+        value: https://staging-mcp.cwcli.dev/remote/pair/callback
+      - key: CW_PAIRING_SESSION_SECRET
+        sync: false

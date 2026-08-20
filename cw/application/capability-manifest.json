@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "capabilities": {
+    "project.read": {"classification": "READ", "mutation": false, "human_authorization_required": false, "long_running": false},
+    "gate.read": {"classification": "READ", "mutation": false, "human_authorization_required": false, "long_running": false},
+    "history.read": {"classification": "READ", "mutation": false, "human_authorization_required": false, "long_running": false},
+    "completion.read": {"classification": "READ", "mutation": false, "human_authorization_required": false, "long_running": false},
+    "operation.read": {"classification": "READ", "mutation": false, "human_authorization_required": false, "long_running": false},
+    "operation.cancel": {"classification": "CONTROLLED_STATE_MUTATION", "mutation": true, "human_authorization_required": false, "long_running": false},
+    "validation.run": {"classification": "EXECUTION", "mutation": true, "human_authorization_required": false, "long_running": true},
+    "review.run": {"classification": "EXECUTION", "mutation": true, "human_authorization_required": false, "long_running": true},
+    "phase.start": {"classification": "CONTROLLED_STATE_MUTATION", "mutation": true, "human_authorization_required": false, "long_running": false},
+    "retry.run": {"classification": "CONTROLLED_STATE_MUTATION", "mutation": true, "human_authorization_required": false, "long_running": true},
+    "project.repair": {"classification": "STATE_MUTATION", "mutation": true, "human_authorization_required": false, "long_running": false},
+    "extension.authorize": {"classification": "HIGH_CONSEQUENCE_AUTHORIZATION", "mutation": true, "human_authorization_required": true, "long_running": false}
+  },
+  "invariants": [
+    "no_arbitrary_shell",
+    "shared_cw_state",
+    "human_authorization_for_high_consequence_mutations",
+    "controlled_actions_cannot_authorize_high_consequence_mutations"
+  ]
+}
