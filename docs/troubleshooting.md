@@ -10,6 +10,23 @@ changes repository settings.
 For teams, missing, pending, changes-requested, invalid, and stale approvals are
 reported separately; a new SHA requires a new approval.
 
+## Governance authorization evidence is incomplete
+
+**Symptom:** `Incomplete governance authorization evidence` or a legacy
+authorization without `base_sha` blocks promotion.
+
+Preserve the original and invalidate it through CW:
+
+```bash
+cw governance invalidate --pr NUMBER --head-sha SHA \
+  --reason incomplete-base-sha-evidence
+cw governance authorize --pr NUMBER
+```
+
+Invalidation and authorization are deliberately separate confirmations. Never
+edit, delete, overwrite, or reconstruct `base_sha` from the current PR because
+the current base may differ from the historical authorization state.
+
 Start with local, read-only evidence:
 
 ```bash

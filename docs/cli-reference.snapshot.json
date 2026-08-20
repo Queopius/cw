@@ -225,12 +225,15 @@
     {
       "name": "governance",
       "options": [
+        "--base-sha",
+        "--head-sha",
         "--json",
         "--mode",
         "--no-color",
         "--non-interactive",
         "--pr",
         "--quiet",
+        "--reason",
         "--replace",
         "--verbose",
         "--yes"
@@ -242,6 +245,7 @@
             "configure",
             "diagnose",
             "authorize",
+            "invalidate",
             "remote-plan"
           ],
           "required": false

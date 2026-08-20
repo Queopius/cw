@@ -63,11 +63,14 @@ def build_parser() -> argparse.ArgumentParser:
     governance = subcommands.add_parser("governance", add_help=True)
     _common(governance, suppress_defaults=True)
     governance.add_argument(
-        "action", nargs="?", choices=("configure", "diagnose", "authorize", "remote-plan"),
+        "action", nargs="?", choices=("configure", "diagnose", "authorize", "invalidate", "remote-plan"),
         default="diagnose",
     )
     governance.add_argument("--mode", choices=("solo-maintainer", "team-reviewed", "detect"))
     governance.add_argument("--pr", type=int, help="GitHub pull request number")
+    governance.add_argument("--head-sha", help="Exact authorization head SHA to invalidate")
+    governance.add_argument("--base-sha", help="Exact authorization base SHA when disambiguation is required")
+    governance.add_argument("--reason", help="Auditable invalidation reason")
     governance.add_argument("--yes", action="store_true", help="Confirm this exact governance action")
     governance.add_argument("--non-interactive", action="store_true", help="Disable prompts")
     governance.add_argument("--replace", action="store_true", help="Replace an existing explicit governance mode")

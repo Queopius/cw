@@ -38,9 +38,24 @@ cw governance authorize --pr 34
 
 For CI, `--yes --non-interactive` is the only prompt-free authorization form.
 Evidence under `.cw/governance/authorizations/` records repository, PR,
-base/head branches, SHA, authenticated owner, timestamp, checks, mode, and
-outcome. It is not a GitHub review and becomes stale after a SHA or branch
-change. Tokens and secrets are never recorded.
+base/head branches and their exact SHAs, authenticated owner, timestamp,
+required and observed checks, unresolved conversations, policy fingerprint,
+mode, and outcome. It is not a GitHub review. Changing either SHA, checks, or
+policy requires a new authorization. Tokens and secrets are never recorded.
+
+Schema 1 evidence without `base_sha` remains readable historical evidence but
+is never merge-valid and is never reused. Do not edit, overwrite, delete, or
+guess a historical base SHA. Invalidate it explicitly, preserving the original:
+
+```bash
+cw governance invalidate --pr 37 \
+  --head-sha 8bb0b24094df80ce2d048b558f3a493b143e8d16 \
+  --reason incomplete-base-sha-evidence
+```
+
+Non-interactive invalidation additionally requires `--yes --non-interactive`.
+CW writes append-only invalidation evidence containing a hash of the original,
+then requires a separate fresh human `cw governance authorize` operation.
 
 If GitHub still requires another approval, generate a plan:
 
@@ -64,5 +79,7 @@ reviewer or presents authorization evidence as a GitHub review.
 
 Projects without `.cw/governance/policy.json` remain valid and are diagnosed as
 unconfigured. Existing explicit policies are unchanged. Repeated configuration
-and authorization are idempotent. No migration changes gates, reviews,
+and complete current-schema authorization are idempotent only while head, base,
+checks, policy, and live PR state match. Legacy incomplete authorization is
+classified fail-closed and requires supported invalidation. No migration changes gates, reviews,
 Completion Contracts, Plugin metadata, or remote protocol state.
