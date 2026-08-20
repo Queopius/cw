@@ -19,8 +19,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from cw.core.diagnostics import redact
-from cw.core.platform import popen_process_group_kwargs, process_is_alive
+from cw.core.diagnostics import redact  # noqa: E402
+from cw.core.platform import popen_process_group_kwargs, process_is_alive  # noqa: E402
 
 FAKE_CODEX = ROOT / "tests/fixtures/fake_codex/fake_codex.py"
 STATUSES = {"PASS", "FAIL", "SKIPPED", "NOT_CONFIGURED"}

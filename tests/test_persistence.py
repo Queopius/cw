@@ -15,7 +15,8 @@ from cw.core.utils import atomic_write, atomic_write_new
 class PersistenceTests(unittest.TestCase):
     def test_concurrent_operation_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); (root / ".cw/locks").mkdir(parents=True)
+            root = Path(temporary)
+            (root / ".cw/locks").mkdir(parents=True)
             with operation_lock(root, "first"):
                 with self.assertRaises(CwError):
                     with operation_lock(root, "second"):
