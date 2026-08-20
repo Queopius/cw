@@ -242,6 +242,12 @@ class PlanRevisionAuthorizationTests(unittest.TestCase):
             OperationContext("different-operation", self.case.actor, "plan.rebaseline", context.authorization),
         )
 
+    def test_invalid_operation_identity_is_rejected_before_apply(self) -> None:
+        with self.assertRaises(CwError) as raised:
+            self.case.context(self.proposal, "operator change 42")
+        self.assertEqual(ErrorCode.OPERATION_CONFLICT, raised.exception.code)
+        self.assertFalse((self.case.repo.root / TRANSACTION).exists())
+
     def test_reason_and_contract_change_are_mandatory(self) -> None:
         case = RebaselineCase()
         try:
@@ -371,18 +377,20 @@ class PlanRevisionIntegrityTests(unittest.TestCase):
 
     def test_tampered_history_links_fail_audit(self) -> None:
         mutations = (
-            ("plan_rebaseline_proposed", "old_plan_revision_id"),
-            ("plan_rebaseline_authorized", "actor_id"),
-            ("review_superseded", "new_plan_revision_id"),
+            ("plan_rebaseline_proposed", "old_plan_revision_id", "tampered", 1),
+            ("plan_rebaseline_authorized", "actor_id", "tampered", 1),
+            ("review_superseded", "new_plan_revision_id", "tampered", 1),
+            ("plan_rebaseline_authorized", "phase", "01-phase-1", 2),
+            ("review_superseded", "timestamp", "2026-01-01T00:00:00Z", 1),
         )
-        for action, field in mutations:
+        for action, field, value, phases in mutations:
             with self.subTest(action=action, field=field):
-                case = RebaselineCase()
+                case = RebaselineCase(phases=phases)
                 try:
                     proposal = case.preview(); case.apply(proposal, operation_id=f"history-{field}")
                     state = load_state(case.repo.root)
                     event = next(item for item in state["history"] if item.get("action") == action)
-                    event[field] = "tampered"
+                    event[field] = value
                     save_state(case.repo.root, state)
                     with self.assertRaises(CwError):
                         audit_history(case.repo.root, load_workflow(case.repo.root), state)
@@ -506,12 +514,24 @@ class PlanRevisionPortabilityTests(unittest.TestCase):
                     code = main(arguments)
                 return code, json.loads(output.getvalue())
 
+            code, error = invoke(
+                "plan", "rebaseline", "--proposal", "corrected-plan.json",
+                "--reason", "Correct Phase 00 contract", "--authorize", "--json",
+            )
+            self.assertEqual(2, code)
+            self.assertEqual("USAGE_ERROR", error["error"]["code"])
             code, preview = invoke(
                 "plan", "rebaseline", "--proposal", "corrected-plan.json",
                 "--reason", "Correct Phase 00 contract", "--json",
             )
             self.assertEqual(0, code)
             self.assertTrue(preview["authorization_required"])
+            code, error = invoke(
+                "plan", "rebaseline", "--apply", preview["proposal_id"],
+                "--authorize", "--reason", "ignored", "--json",
+            )
+            self.assertEqual(2, code)
+            self.assertEqual("USAGE_ERROR", error["error"]["code"])
             code, applied = invoke(
                 "plan", "rebaseline", "--apply", preview["proposal_id"],
                 "--authorize", "--operation-id", "cli-rebaseline", "--json",

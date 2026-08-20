@@ -39,6 +39,10 @@ unused nonce, stable proposal/review hashes, and the project operation lock.
 Already approved earlier phases must remain byte-equivalent and retain their
 gates.
 
+Operation IDs are 1–128 ASCII letters, digits, `.`, `_`, `:`, or `-`. Preview
+does not accept authorization/apply options; apply does not accept planning,
+proposal-file, or reason options.
+
 ## Evidence and attempts
 
 The original review is never edited. A separate `.cw/supersessions/*.json`

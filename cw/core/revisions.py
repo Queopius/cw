@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from cw import __version__
 
-from .authorization import OperationContext, validate_authorization
+from .authorization import OperationContext, validate_authorization, validate_operation_id
 from .errors import CwError, ErrorCode
 from .layout import safe_directory, safe_file, validate_tree
 from .models import ReviewDecision, Workflow, WorkflowState
@@ -398,7 +398,7 @@ def _validate_transaction(root: Path, journal: dict[str, Any]) -> None:
         or journal.get("kind") != "plan_rebaseline_transaction"
         or journal.get("status") not in {"PREPARED", "COMMITTED"}
         or not isinstance(journal.get("stage"), str)
-        or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", str(journal.get("operation_id")))
+        or not isinstance(journal.get("operation_id"), str)
         or PROPOSAL_ID.fullmatch(str(journal.get("proposal_id"))) is None
         or REVISION_ID.fullmatch(str(journal.get("old_plan_revision_id"))) is None
         or REVISION_ID.fullmatch(str(journal.get("new_plan_revision_id"))) is None
@@ -409,6 +409,10 @@ def _validate_transaction(root: Path, journal: dict[str, Any]) -> None:
         or journal.get("journal_sha256") != sha256_bytes(_canonical_bytes(unhashed))
     ):
         raise CwError("Rebaseline transaction journal is corrupt", ErrorCode.TRANSACTION_RECOVERY_REQUIRED)
+    try:
+        validate_operation_id(journal["operation_id"])
+    except CwError as exc:
+        raise CwError("Rebaseline transaction journal is corrupt", ErrorCode.TRANSACTION_RECOVERY_REQUIRED) from exc
     restored_workflow = workflow_from_document(root, old_workflow)
     if old_state.get("workflow_id") != restored_workflow.id:
         raise CwError("Rebaseline transaction project identity is invalid", ErrorCode.TRANSACTION_RECOVERY_REQUIRED)
@@ -850,6 +854,8 @@ def audit_revisions(root: Path, workflow: Workflow, state: dict[str, Any]) -> di
             and event.get("authorization_nonce") == record.get("authorization", {}).get("authorization_nonce")
             and event.get("proposal") == proposal_path(root, str(record.get("proposal_id"))).relative_to(root).as_posix()
             and event.get("actor_id") == record.get("actor", {}).get("actor_id")
+            and event.get("phase") == record.get("phase")
+            and event.get("timestamp") == record.get("created_at")
             for event in history
         )
         superseded_event = any(
@@ -859,6 +865,8 @@ def audit_revisions(root: Path, workflow: Workflow, state: dict[str, Any]) -> di
             and event.get("supersession") == supersession_reference
             and event.get("old_plan_revision_id") == record.get("old_plan_revision_id")
             and event.get("new_plan_revision_id") == record.get("new_plan_revision_id")
+            and event.get("phase") == record.get("phase")
+            and event.get("timestamp") == record.get("created_at")
             for event in history
         )
         activated = any(
@@ -866,6 +874,8 @@ def audit_revisions(root: Path, workflow: Workflow, state: dict[str, Any]) -> di
             and event.get("action") == "plan_revision_activated"
             and event.get("plan_revision_id") == record.get("new_plan_revision_id")
             and event.get("parent_plan_revision_id") == record.get("old_plan_revision_id")
+            and event.get("phase") == record.get("phase")
+            and event.get("timestamp") == record.get("created_at")
             for event in history
         )
         if not (authorized and superseded_event and activated):

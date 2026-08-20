@@ -197,6 +197,12 @@ def command_plan(
     if args.action == "rebaseline":
         actor = Actor("local-operator", ActorOrigin.HUMAN_CLI, explicit_user_intent=True)
         if args.apply:
+            if args.goal or args.proposal or args.reason:
+                raise CwError(
+                    "Rebaseline apply accepts only --apply, --authorize, and --operation-id",
+                    ErrorCode.USAGE_ERROR,
+                    exit_code=2,
+                )
             if not args.authorize:
                 raise CwError(
                     "Plan rebaseline requires explicit --authorize",
@@ -218,6 +224,12 @@ def command_plan(
                     OperationContext(operation_id, actor, "plan.rebaseline", grant),
                 )
         else:
+            if args.authorize or args.operation_id:
+                raise CwError(
+                    "Rebaseline preview cannot authorize or select an operation ID",
+                    ErrorCode.USAGE_ERROR,
+                    exit_code=2,
+                )
             if not args.reason or not args.reason.strip():
                 raise CwError("Plan rebaseline requires --reason", ErrorCode.USAGE_ERROR, exit_code=2)
             if bool(args.goal) == bool(args.proposal):
