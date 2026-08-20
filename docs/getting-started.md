@@ -1,5 +1,10 @@
 # Getting started with CW
 
+Before protected release promotion, select governance explicitly with
+`cw governance configure --pr NUMBER`. Choose `solo-maintainer` when the owner
+is the only authorized reviewer, or `team-reviewed` when another authorized
+account can approve. See [Release governance](governance.md).
+
 This guide takes a new Git repository from installation to its first controlled
 implementation phase.
 
