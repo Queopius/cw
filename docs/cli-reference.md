@@ -42,7 +42,7 @@ returns `3`; and an interrupted foreground operation returns `130`.
 | `cw repair` | Reconcile CW metadata from validated evidence. |
 | `cw config` / `cw integrations` | Inspect policy and integration state. |
 | `cw update` / `cw changelog` | Manage verified CW releases and release history. |
-| `cw version` / `cw help` | Inspect the build or command index. |
+| `cw version` / `cw --version` / `cw help` | Inspect the build or command index. |
 
 ## cw
 
@@ -407,13 +407,16 @@ cw changelog
 
 ## cw version
 
-**Syntax:** `cw version`
+**Syntax:** `cw version` or `cw --version`
 
-Shows the installed version. Verbose mode adds installation paths, build/source
-fingerprints, and stale-install detection.
+Both forms show the same installed Core / CLI version. `cw --version` is the
+project-independent compatibility form; `cw version` retains verbose and JSON
+diagnostics for installation paths, build/source fingerprints, and
+stale-install detection.
 
 ```bash
 cw version --verbose
+cw --version
 ```
 
 ## cw help

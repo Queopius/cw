@@ -4,6 +4,8 @@ import argparse
 import sys
 from collections.abc import Sequence
 
+from cw import __version__
+
 
 def _common(parser: argparse.ArgumentParser, *, suppress_defaults: bool = False) -> None:
     default = argparse.SUPPRESS if suppress_defaults else False
@@ -16,6 +18,7 @@ def _common(parser: argparse.ArgumentParser, *, suppress_defaults: bool = False)
 def build_parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="cw", add_help=False)
     _common(root)
+    root.add_argument("--version", action="version", version=f"CW {__version__}")
     subcommands = root.add_subparsers(dest="command")
     for name in ("init", "start", "status", "validate", "retry", "version", "help", "changelog", "explain"):
         command = subcommands.add_parser(name, add_help=True)

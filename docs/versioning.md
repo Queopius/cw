@@ -14,7 +14,7 @@ small surface-level changes.
 
 ## Current versions
 
-- **CW Core / CLI**: `0.14.0`
+- **CW Core / CLI**: `0.14.1`
 - **CW Plugin**: `0.1.0` (candidate)
 - **Remote protocol**: `cw.remote.v1`
 
