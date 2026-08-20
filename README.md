@@ -234,7 +234,7 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
 | `cw update [--check\|--info\|rollback]` | Check, inspect, install, or roll back CW releases |
 | `cw changelog` | Show trusted bundled release history |
 | `cw error` | Show the complete stored failure |
-| `cw version` | Show the installed version |
+| `cw version` / `cw --version` | Show the installed Core / CLI version |
 
 Important read commands support `--json`; daily output respects `NO_COLOR` and
 automatically removes ANSI escapes when stdout is not a TTY.

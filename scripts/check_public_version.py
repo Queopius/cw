@@ -27,6 +27,13 @@ def _errors() -> list[str]:
     )
     if "gh release create" not in release_workflow or "gh release upload" not in release_workflow:
         errors.append("Release workflow does not publish an idempotent GitHub Release.")
+    if "git fetch origin prod" not in release_workflow or "origin/prod" not in release_workflow:
+        errors.append("Release workflow does not require the tag commit on prod.")
+    if "python scripts/build_release.py --output dist --channel stable" not in release_workflow:
+        errors.append("Release workflow does not build the Core updater archive and manifest.")
+    plugin_asset = 'cw-plugin-$(cat plugins/cw/VERSION).zip'
+    if plugin_asset not in release_workflow or 'cw-plugin-$(cat VERSION).zip' in release_workflow:
+        errors.append("Release workflow does not name the plugin asset from plugins/cw/VERSION.")
 
     versioning = (ROOT / "docs" / "versioning.md").read_text(encoding="utf-8")
     core_match = re.search(r"(?m)^- \*\*CW Core / CLI\*\*: `([^`]+)`\s*$", versioning)

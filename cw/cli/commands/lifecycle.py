@@ -251,6 +251,7 @@ def command_repair(
 ) -> int:
     root = root_resolver()
     reopened = None
+    repair_report: dict[str, Any] = {}
     with operation_lock(root, "repair"):
         if args.reopen:
             _, state, workflow = context(root)
@@ -289,12 +290,12 @@ def command_repair(
             save_state(root, state)
             reopened = target.id
         else:
-            repair_report: dict[str, Any] = {}
             backup = repair_metadata(root, report=repair_report)
     payload = {
         "repaired": reopened is None,
         "reopened": reopened,
         "backup": backup.relative_to(root).as_posix(),
+        "legacy_completion_evidence": repair_report.get("legacy_completion_evidence", []),
     }
     if args.json:
         emit_json(payload)
@@ -305,6 +306,9 @@ def command_repair(
             console.field("Backup", payload["backup"])
         else:
             console.item("✓", "Backup created")
+            for migration in repair_report.get("legacy_completion_evidence", []):
+                console.item("✓", f"Archived {migration['source']}")
+                console.field("Preserved", str(migration["preserved_at"]))
             verified = repair_report.get("gates_verified", [])
             if verified:
                 console.item("✓", f"{len(verified)} approval gates verified")
