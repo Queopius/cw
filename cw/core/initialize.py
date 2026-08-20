@@ -11,7 +11,7 @@ from .project import Project, create_identity, load_project, project_id, reposit
 from .schema import SCHEMA_VERSION, migrate_legacy_document, schema_version
 from .severity import normalize_legacy_workflow_severities
 from .state import initial_state
-from .utils import atomic_json, atomic_write, load_json, utc_now
+from .utils import atomic_json, atomic_write, load_json, sha256_bytes, sha256_file, utc_now
 from .workflow import write_workflow
 
 
@@ -403,6 +403,77 @@ def backup_metadata(root: Path) -> Path:
     return destination
 
 
+LEGACY_COMPLETION_MIGRATION = "legacy-completion-evidence-v1"
+CURRENT_COMPLETION_ENTRIES = {
+    "reviews", "proposals", "authorizations", "completion.satisfied.json",
+}
+LEGACY_COMPLETION_ENTRIES = {"logs", "evidence_manifest.json"}
+
+
+def _tree_digest(path: Path, label: str) -> str:
+    validate_tree(path, label)
+    entries: list[tuple[str, str | None]] = []
+    for entry in sorted(path.rglob("*")):
+        relative = entry.relative_to(path).as_posix()
+        entries.append((f"{relative}/", None) if entry.is_dir() else (relative, sha256_file(entry)))
+    encoded = json.dumps(entries, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return sha256_bytes(encoded)
+
+
+def _migrate_legacy_completion_evidence(root: Path, backup: Path) -> list[dict[str, object]]:
+    """Archive recognized non-authoritative completion artifacts in the repair backup."""
+    completion = root / ".cw" / "completion"
+    present = {entry.name for entry in completion.iterdir()} if completion.is_dir() else set()
+    legacy = present & LEGACY_COMPLETION_ENTRIES
+    if not legacy:
+        return []
+    unknown = present - CURRENT_COMPLETION_ENTRIES - LEGACY_COMPLETION_ENTRIES
+    if unknown:
+        raise CwError("Unexpected completion evidence entry", ErrorCode.SCHEMA_VALIDATION_ERROR)
+
+    records: list[dict[str, object]] = []
+    logs = completion / "logs"
+    if "logs" in legacy:
+        digest = _tree_digest(logs, ".cw/completion/logs")
+        archived = backup / "completion" / "logs"
+        if not archived.is_dir() or archived.is_symlink():
+            raise CwError("Legacy completion logs backup is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        if _tree_digest(archived, "Legacy completion logs backup") != digest:
+            raise CwError("Legacy completion logs backup hash mismatch", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        records.append({
+            "migration": LEGACY_COMPLETION_MIGRATION,
+            "source": ".cw/completion/logs",
+            "classification": "archived_legacy_non_authoritative",
+            "preserved_at": (archived.relative_to(root)).as_posix(),
+            "sha256": digest,
+        })
+
+    manifest = completion / "evidence_manifest.json"
+    if "evidence_manifest.json" in legacy:
+        safe_file(manifest, ".cw/completion/evidence_manifest.json", required=True)
+        payload = load_json(manifest)
+        if not isinstance(payload, dict) or not payload:
+            raise CwError("Legacy completion evidence manifest is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        digest = sha256_file(manifest)
+        archived = backup / "completion" / "evidence_manifest.json"
+        safe_file(archived, "Legacy completion evidence manifest backup", required=True)
+        if sha256_file(archived) != digest:
+            raise CwError("Legacy completion evidence manifest backup hash mismatch", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        records.append({
+            "migration": LEGACY_COMPLETION_MIGRATION,
+            "source": ".cw/completion/evidence_manifest.json",
+            "classification": "archived_legacy_non_authoritative",
+            "preserved_at": (archived.relative_to(root)).as_posix(),
+            "sha256": digest,
+        })
+
+    if logs.exists():
+        shutil.rmtree(logs)
+    if manifest.exists():
+        manifest.unlink()
+    return records
+
+
 def repair(root: Path, *, report: dict | None = None) -> Path:
     validate_project_layout(root, create=True)
     (root / ".cw" / "backups").mkdir(parents=True, exist_ok=True)
@@ -431,6 +502,11 @@ def repair(root: Path, *, report: dict | None = None) -> Path:
             preflight_verified = valid_gate_ids(root, preflight_workflow)
             if report is not None:
                 report["gates_verified"] = preflight_verified
+    legacy_completion_evidence = (
+        _migrate_legacy_completion_evidence(root, backup) if same_repository else []
+    )
+    if report is not None:
+        report["legacy_completion_evidence"] = legacy_completion_evidence
     _migrate_metadata_schemas(root, create_backup=False)
     state_before = load_json(root / ".cw" / "state.json") if (root / ".cw" / "state.json").is_file() else None
     if report is not None and isinstance(state_before, dict):
@@ -601,6 +677,11 @@ def repair(root: Path, *, report: dict | None = None) -> Path:
         from .integrity import snapshot_protected_paths
 
         refreshed_workflow = load_workflow(root)
+        if legacy_completion_evidence:
+            from .audit import audit_history
+
+            audit_history(root, refreshed_workflow, load_json(state_path))
+            report["legacy_completion_evidence_validated"] = True
         report["integrity_baseline"] = snapshot_protected_paths(
             root, refreshed_workflow.protected_paths,
         )

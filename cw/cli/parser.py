@@ -4,6 +4,8 @@ import argparse
 import sys
 from collections.abc import Sequence
 
+from cw import __version__
+
 
 def _common(parser: argparse.ArgumentParser, *, suppress_defaults: bool = False) -> None:
     default = argparse.SUPPRESS if suppress_defaults else False
@@ -16,6 +18,7 @@ def _common(parser: argparse.ArgumentParser, *, suppress_defaults: bool = False)
 def build_parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="cw", add_help=False)
     _common(root)
+    root.add_argument("--version", action="version", version=f"CW {__version__}")
     subcommands = root.add_subparsers(dest="command")
     for name in ("init", "start", "status", "validate", "retry", "version", "help", "changelog", "explain"):
         command = subcommands.add_parser(name, add_help=True)
@@ -57,6 +60,20 @@ def build_parser() -> argparse.ArgumentParser:
     config.add_argument("action", nargs="?", choices=("set",))
     config.add_argument("key", nargs="?")
     config.add_argument("value", nargs="?")
+    governance = subcommands.add_parser("governance", add_help=True)
+    _common(governance, suppress_defaults=True)
+    governance.add_argument(
+        "action", nargs="?", choices=("configure", "diagnose", "authorize", "invalidate", "remote-plan"),
+        default="diagnose",
+    )
+    governance.add_argument("--mode", choices=("solo-maintainer", "team-reviewed", "detect"))
+    governance.add_argument("--pr", type=int, help="GitHub pull request number")
+    governance.add_argument("--head-sha", help="Exact authorization head SHA to invalidate")
+    governance.add_argument("--base-sha", help="Exact authorization base SHA when disambiguation is required")
+    governance.add_argument("--reason", help="Auditable invalidation reason")
+    governance.add_argument("--yes", action="store_true", help="Confirm this exact governance action")
+    governance.add_argument("--non-interactive", action="store_true", help="Disable prompts")
+    governance.add_argument("--replace", action="store_true", help="Replace an existing explicit governance mode")
     update = subcommands.add_parser("update", add_help=True)
     _common(update, suppress_defaults=True)
     update.add_argument("action", nargs="?", choices=("rollback",))

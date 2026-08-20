@@ -22,6 +22,9 @@ class ReleaseHygieneTests(unittest.TestCase):
             self.assertIn(f'"{version}"', workflow)
         self.assertIn("python -m build", workflow)
         self.assertIn("cw version --json", workflow)
+        self.assertIn("cw --version", workflow)
+        self.assertIn("python scripts/build_release.py --output dist --channel stable", workflow)
+        self.assertIn('cw-plugin-$(cat plugins/cw/VERSION).zip', workflow)
 
     def test_actions_are_pinned_to_full_commit_shas(self) -> None:
         for workflow in (ROOT / ".github/workflows").glob("*.yml"):
@@ -33,10 +36,19 @@ class ReleaseHygieneTests(unittest.TestCase):
 
     def test_release_tags_must_come_from_release_and_match_version(self) -> None:
         workflow = (ROOT / ".github/workflows/release-check.yml").read_text(encoding="utf-8")
-        self.assertIn('git fetch origin release', workflow)
-        self.assertIn('origin/release', workflow)
+        self.assertIn('git fetch origin prod', workflow)
+        self.assertIn('origin/prod', workflow)
         self.assertIn('GITHUB_REF_NAME#v', workflow)
         self.assertIn('VERSION', workflow)
+        self.assertIn("python scripts/build_release.py --output dist --channel stable", workflow)
+        self.assertIn('cw-plugin-$(cat plugins/cw/VERSION).zip', workflow)
+        self.assertNotIn('cw-plugin-$(cat VERSION).zip', workflow)
+
+    def test_native_managed_installations_verify_both_version_surfaces(self) -> None:
+        workflow = (ROOT / ".github/workflows/cross-platform.yml").read_text(encoding="utf-8")
+        self.assertIn('"$CW_BIN_DIR/cw" --version', workflow)
+        self.assertIn('& (Join-Path $bin "cw.cmd") --version', workflow)
+        self.assertIn("cw --version", workflow)
 
     def test_version_is_single_sourced_consistently(self) -> None:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
