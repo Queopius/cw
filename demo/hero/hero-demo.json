@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "product": "CW",
-  "cw_version": "0.14.0",
+  "cw_version": "0.14.1",
   "recording_kind": "real-workflow-recording",
   "goal": "Add a deterministic greeting function with automated tests in one development phase using Python 3",
   "brand": {
