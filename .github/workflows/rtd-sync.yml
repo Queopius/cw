@@ -3,12 +3,11 @@ name: Read the Docs stable alias sync
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: VCS ref to repoint stable docs alias (tag/branch)
-        required: true
-        default: prod
+      version:
+        description: Existing stable release tag (defaults to v<VERSION>)
+        required: false
       trigger_build:
-        description: Trigger RTD rebuild after alias update
+        description: Rebuild when the version is already active
         required: false
         default: "true"
       project:
@@ -40,7 +39,11 @@ jobs:
         env:
           READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
         run: |
-          args=(--project "${{ github.event.inputs.project }}" --alias stable --ref "${{ github.event.inputs.ref }}")
+          version="${{ github.event.inputs.version }}"
+          if [ -z "$version" ]; then
+            version="v$(tr -d '\n' < VERSION)"
+          fi
+          args=(--project "${{ github.event.inputs.project }}" --alias stable --version "$version")
           if [ "${{ github.event.inputs.trigger_build }}" = "true" ]; then
             args+=(--trigger-build)
           fi

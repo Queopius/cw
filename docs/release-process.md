@@ -124,17 +124,23 @@ Read the Docs build:
 Do not publish an interim `readthedocs.io` hostname as CW's canonical public
 documentation identity, and do not guess the custom-domain DNS target.
 
-After each promotion, repoint the `stable` RTD alias explicitly:
+Read the Docs manages `stable` from the highest stable semantic Git tag. The
+`Release Check` workflow validates each `v*` tag, synchronizes it to Read the
+Docs, activates and builds that version, and verifies the resulting alias.
+For a manual recovery after the release tag already exists, run:
 
 ```bash
 python3 scripts/sync_readthedocs_stable.py \
   --project cw-codex-workflow \
   --alias stable \
-  --ref prod
+  --version "v$(cat VERSION)" \
+  --trigger-build
 ```
 
-(or run the `Read the Docs stable alias sync` workflow) before treating
-`docs.cwcli.dev` as the canonical documentation home.
+(or run the `Read the Docs stable alias sync` workflow). The command fails if
+the tag does not exist in Git, its documentation does not build, or `stable`
+does not resolve to that exact version. Do not report a release as documented
+until this verification succeeds.
 
 Before promotion, run the offline installation/isolation demonstration:
 
