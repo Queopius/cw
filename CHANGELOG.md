@@ -10,6 +10,8 @@ All notable changes to CW are documented here.
   `cw version` and the single Core version source of truth.
 - Name future plugin release assets from the independent Plugin version and
   include the verified Core updater archive and manifest in release artifacts.
+- Add explicit `solo-maintainer` and `team-reviewed` release governance with
+  GitHub preflight, SHA-bound authorization evidence, and read-only remote plans.
 
 ## 0.14.0 — 2026-08-16
 
