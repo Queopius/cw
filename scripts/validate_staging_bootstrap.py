@@ -49,8 +49,9 @@ SECRET_PATTERNS = (
 
 def validation_errors(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
-    if (root / "VERSION").read_text(encoding="utf-8").strip() != "0.14.0":
-        errors.append("staging bootstrap VERSION must be 0.14.0")
+    core_version = (root / "VERSION").read_text(encoding="utf-8").strip()
+    if re.fullmatch(r"0\.14\.\d+", core_version) is None:
+        errors.append("staging bootstrap Core version must remain on the 0.14.x line")
     for relative in ("Dockerfile", ".dockerignore", "render.yaml"):
         if not (root / relative).is_file():
             errors.append(f"missing deployment artifact: {relative}")

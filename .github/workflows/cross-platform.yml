@@ -61,6 +61,7 @@ jobs:
           export CW_BIN_DIR="$RUNNER_TEMP/cw-bin"
           ./install.sh
           "$CW_BIN_DIR/cw" version --json
+          "$CW_BIN_DIR/cw" --version
           echo "$CW_BIN_DIR" >> "$GITHUB_PATH"
       - name: Test native PowerShell installer in isolation
         if: matrix.installer == 'windows'
@@ -70,10 +71,12 @@ jobs:
           $bin = Join-Path $env:RUNNER_TEMP "cw-bin"
           ./install.ps1 -InstallRoot $root -BinDir $bin -NoPathUpdate
           & (Join-Path $bin "cw.cmd") version --json
+          & (Join-Path $bin "cw.cmd") --version
           Add-Content -Path $env:GITHUB_PATH -Value $bin
       - name: Verify managed command in a fresh step
         run: |
           cw version --verbose
+          cw --version
           cw help
       - name: Run installed-wheel deterministic acceptance
         run: python scripts/run_acceptance.py --output artifacts/compatibility-report.json
