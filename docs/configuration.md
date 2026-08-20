@@ -1,5 +1,10 @@
 # Configuration
 
+Release review policy is stored separately at `.cw/governance/policy.json` so
+it cannot be confused with phase-review policy. Use `cw governance configure`;
+projects without a mode remain compatible and receive a recommendation rather
+than an automatic migration.
+
 ## Precedence and effective policy
 
 Configuration precedence is:
