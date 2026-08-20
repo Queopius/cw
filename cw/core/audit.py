@@ -157,13 +157,13 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
             if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
                 raise CwError(f"Workflow history attempt is invalid: {index}", ErrorCode.INVALID_STATE)
         if action in {"approved", "human_approved"}:
-            gate = event.get("gate")
-            if not isinstance(gate, str) or not gate.startswith(".cw/gates/"):
+            gate_reference = event.get("gate")
+            if not isinstance(gate_reference, str) or not gate_reference.startswith(".cw/gates/"):
                 raise CwError(f"Workflow history gate is invalid: {index}", ErrorCode.INVALID_STATE)
-            gate_file = safe_project_path(root, gate)
+            gate_file = safe_project_path(root, gate_reference)
             # Reopening deliberately removes the live gate while preserving its
             # audit event and backup. If a file remains, it must be a known gate.
-            if gate_file.exists() and gate not in gate_references:
+            if gate_file.exists() and gate_reference not in gate_references:
                 raise CwError(f"Workflow history gate is invalid: {index}", ErrorCode.INVALID_STATE)
         if action == "revision_required" and not isinstance(event.get("issues"), list):
             raise CwError(f"Workflow history issues are invalid: {index}", ErrorCode.INVALID_STATE)
