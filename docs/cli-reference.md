@@ -86,16 +86,25 @@ not silently launch a mutating agent.
 
 ## cw plan
 
-**Syntax:** `cw plan [show|approve|rebuild|rebaseline|amend] [--goal TEXT] [--file PATH] [--expected-workflow-sha256 SHA256] [--proposal PATH] [--reason TEXT] [--apply ID] [--authorize] [--operation-id ID]`
+**Syntax:** `cw plan [show|approve|rebuild|rebaseline|amend] [--goal TEXT] [--file PATH] [--phase ID] [--add-artifact PATH] [--expected-workflow-sha256 SHA256] [--expected-state-sha256 SHA256] [--reason TEXT] [--dry-run|--apply [ID]] [--yes] [--non-interactive] [--proposal PATH] [--authorize] [--operation-id ID]`
 
 - `--goal TEXT` supplies an explicit planning goal.
 - `--file PATH` supplies the repository-relative corrected proposal for `amend`.
 - `--expected-workflow-sha256 SHA256` supplies the mandatory compare-and-swap guard for `amend`.
+- `--expected-state-sha256 SHA256` supplies the second mandatory CAS guard for active amendment.
+- `--phase ID` selects the current phase; `--add-artifact PATH` adds one explicit existing file and is repeatable.
+- `--dry-run` validates without writing. Bare `--apply` selects active amendment; `--apply ID` retains rebaseline apply.
+- `--yes` explicitly confirms the exact active amendment.
+- `--non-interactive` disables prompts and is valid for active apply only when paired with `--yes`.
 - `show` displays the proposed or approved plan.
 - `approve` approves the current proposal without rewriting it.
 - `amend --file PATH --expected-workflow-sha256 SHA256` transactionally
   replaces only the current unapproved `PLAN_PROPOSED` document after complete
   validation and optimistic-concurrency verification.
+- `amend --phase ID --add-artifact PATH ... --expected-workflow-sha256 SHA256
+  --expected-state-sha256 SHA256 --reason TEXT --dry-run|--apply` permits only
+  additions to the current started phase artifact manifest. Apply requires
+  explicit confirmation and returns to `PLAN_PROPOSED`.
 - `rebuild` replaces only an unreviewed workflow proposal. Once review evidence
   exists, CW requires the auditable `rebaseline` ceremony.
 - `rebaseline --goal ... --reason ...` asks the planner for a corrected proposal.
@@ -111,6 +120,7 @@ above.
 cw plan --goal "Add subscription billing"
 cw plan show
 cw plan amend --file corrected-phases.yaml --expected-workflow-sha256 sha256:<current-hash>
+cw plan amend --phase 01-example --add-artifact docs/example.md --expected-workflow-sha256 sha256:<workflow-hash> --expected-state-sha256 sha256:<state-hash> --reason "Declare omitted artifact" --dry-run --json
 cw plan approve
 cw plan rebaseline --proposal corrected-plan.json --reason "Remove circular criteria" --json
 cw plan rebaseline --apply pp-... --authorize --operation-id operator-change-42 --json
@@ -142,9 +152,9 @@ Completion Contract, and it preserves the proposal lifecycle. It differs from
 revision, review, gate, readiness, authorization, or execution, and still
 requires `cw plan approve` as the next human action.
 
-The parser exposes these scoped options as `cw plan --file` and
-`cw plan --expected-workflow-sha256`; both are rejected unless the selected
-action is `amend`, and both are mandatory for that action.
+The file-replacement and active artifact modes are mutually exclusive. Active
+apply requires `--yes --non-interactive` when prompts are disabled. All active
+options, including `cw plan --non-interactive`, are rejected outside `amend`.
 
 Expected amendment failures use stable codes: `STALE_WORKFLOW_SHA` (exit 4),
 invalid file/schema or arguments (exit 2), disallowed state or Completion

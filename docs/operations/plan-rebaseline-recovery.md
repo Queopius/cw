@@ -1,5 +1,13 @@
 # Plan rebaseline recovery
 
+The same backup-first rule applies to active artifact-only `cw plan amend`.
+Its separate `.cw/runtime/plan-amend-transaction.json` binds both pre-change
+hashes, the exact proposal, created append-only records and the closed list of
+evidence paths recoverable from the backup. Recovery restores workflow, state,
+readiness, reviews, validations and a stale session byte-for-byte and removes
+only files created by the incomplete transaction. Do not edit or delete the
+journal manually.
+
 Rebaseline writes a verified backup before activation and records a transaction
 journal at `.cw/runtime/plan-rebaseline-transaction.json`. Individual evidence
 files are append-only; active workflow/state writes are atomic.

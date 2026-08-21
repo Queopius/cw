@@ -1,6 +1,67 @@
 # Plan revisions and review supersession
 
-## Amending an unapproved proposal
+## Governed plan amendment
+
+`cw plan amend` has two mutually exclusive modes. It can replace a complete,
+unapproved `PLAN_PROPOSED` document as described below, or it can add existing
+declarative artifacts to the current started phase without rerunning the
+planner or editing `.cw`.
+
+Inspect both public CAS values first:
+
+```bash
+cw plan show --json
+cw plan amend \
+  --phase 01-example \
+  --add-artifact tests/fixtures/example.graphql \
+  --expected-workflow-sha256 sha256:<workflow-hash> \
+  --expected-state-sha256 sha256:<state-hash> \
+  --reason "Declare an existing artifact omitted from the plan" \
+  --dry-run --json
+```
+
+After reviewing the structured diff, apply the exact request:
+
+```bash
+cw plan amend \
+  --phase 01-example \
+  --add-artifact tests/fixtures/example.graphql \
+  --expected-workflow-sha256 sha256:<workflow-hash> \
+  --expected-state-sha256 sha256:<state-hash> \
+  --reason "Declare an existing artifact omitted from the plan" \
+  --apply --yes --non-interactive --json
+```
+
+`--add-artifact` is repeatable. Active mode permits no removal or other plan
+change. Each path must be an existing, regular, non-linked repository-relative
+POSIX path covered by the current phase's `review_paths`. The current phase
+must be started, incomplete and ungated, with no live implementer, reviewer,
+batch or managed run. A completed or non-current phase cannot be amended.
+
+Apply holds the project mutation lock and rechecks both hashes and artifact
+file identities immediately before its journal becomes authoritative. It
+creates the canonical metadata backup plus a hashed restore inventory,
+immutable old/new plan-revision snapshots, and append-only evidence
+supersessions. Current-phase readiness, reviews, validations and a verified
+stale session leave the active namespace but remain byte-identical in the
+backup. Earlier-phase reviews and gates remain active and byte-identical.
+
+The Completion Contract canonical payload and SHA-256 remain identical. The
+result is always workflow `PROPOSED` and state `PLAN_PROPOSED`, with no active
+readiness, approval, gate, session, validation or review for the amended phase.
+No planner, implementer, reviewer, hook or agent runs. A human must separately
+run `cw plan approve` before execution may continue. An exact replay is
+idempotent; changed hashes, artifacts, operator or reason are a conflict.
+
+Do not manually edit `.cw`, and do not repeat `cw repair` or `cw start` to
+reinterpret evidence against a changed phase contract. If an amendment journal
+remains after interruption, preserve it and its backup and rerun the exact
+supported operation; `cw doctor` verifies the recovered history.
+
+This public CLI addition recommends Core `0.15.0` under SemVer. That version is
+not authorized or applied by this change; the current source remains `0.14.1`.
+
+### Amending an unapproved proposal
 
 Before approval or any implementation starts, a human may replace a planner's
 schema-valid but semantically incomplete proposal through the public,
@@ -34,9 +95,9 @@ run a planner, implementer or reviewer and cannot create a revision, review,
 gate, readiness manifest or authorization. `cw plan approve` remains a
 separate human decision.
 
-Amendment is not rebaseline. Rebaseline changes a reviewed active phase under
-explicit authorization and supersession rules; amendment changes only an
-unapproved proposal and cannot change its Completion Contract.
+Artifact-only amendment is also distinct from rebaseline. Rebaseline permits a
+review-driven phase-contract correction after `REVISE`; active amendment only
+adds existing artifact declarations and always returns to `PLAN_PROPOSED`.
 
 CW identifies every current-format approved plan by a `plan_revision_id`
 derived from the full SHA-256 of its canonical JSON document. The immutable

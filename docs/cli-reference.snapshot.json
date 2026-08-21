@@ -94,18 +94,24 @@
     {
       "name": "plan",
       "options": [
+        "--add-artifact",
         "--apply",
         "--authorize",
+        "--dry-run",
+        "--expected-state-sha256",
         "--expected-workflow-sha256",
         "--file",
         "--goal",
         "--json",
         "--no-color",
+        "--non-interactive",
         "--operation-id",
+        "--phase",
         "--proposal",
         "--quiet",
         "--reason",
-        "--verbose"
+        "--verbose",
+        "--yes"
       ],
       "positionals": [
         {

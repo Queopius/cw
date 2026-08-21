@@ -12,6 +12,11 @@ All notable changes to CW are documented here.
 - Accept raw and canonical SHA-256 compare-and-swap forms without ambiguous
   whitespace, and make safe single-document YAML support a normal runtime
   capability through constrained PyYAML packaging.
+- Generalize `cw plan amend` for a started, ungated current phase. The active
+  mode accepts only explicit additions to `phase.artifacts`, requires workflow
+  and state CAS values plus human confirmation, preserves the Completion
+  Contract and earlier gates, supersedes incompatible current-phase evidence
+  append-only, and returns to an unapproved `PLAN_PROPOSED` state.
 
 - Add explicit, human-authorized plan rebaseline proposals with immutable plan
   revision snapshots, append-only review supersession records, revision-bound

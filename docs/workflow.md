@@ -30,6 +30,9 @@ UNINITIALIZED → INITIALIZED → PLANNING → PLAN_PROPOSED → READY → IN_PR
 IN_PROGRESS → READY_FOR_REVIEW → REVIEWING
 REVIEWING → REVISION_REQUIRED | APPROVED | HUMAN_REVIEW_REQUIRED | ERROR
 REVISION_REQUIRED → authorized plan rebaseline → READY
+IN_PROGRESS | READY_FOR_REVIEW | REVISION_REQUIRED
+  → governed artifact-only plan amendment → PLAN_PROPOSED
+  → human plan approval → READY
 APPROVED → IN_PROGRESS | COMPLETED
 ```
 
@@ -39,6 +42,13 @@ audit event, consumes readiness, and atomically writes the resulting runtime
 state. A non-final phase moves immediately to the next configured phase as
 `IN_PROGRESS` with attempt zero. Approval of the final configured phase writes
 `COMPLETED`; CW never invents a successor.
+
+Artifact-only amendment is the narrow exception for a declarative omission in
+the current, incomplete phase. It preserves prior gates and history, removes
+only incompatible current-phase evidence from the active namespace through
+append-only supersession, and cannot resume execution until a new human plan
+approval. It never changes criteria, commands, review paths, dependencies or
+the Completion Contract.
 
 ## Planned completion and semantic completion
 

@@ -115,6 +115,10 @@ with the expected structured result.
 | `OPERATION_CONFLICT` | An operation identifier was reused for a different request or another adapter holds the project lock | Context | Reuse the original request exactly, or wait and issue a new operation ID |
 | `PROJECT_SCOPE_VIOLATION` | A requested path or project handle is outside the adapter's authorized roots | No | Select an explicitly authorized CW repository |
 | `PLAN_REBASELINE_REQUIRED` | Reviewed workflow correction requires the explicit rebaseline ceremony | Human boundary | Create and inspect an exact proposal with a reason, then authorize it |
+| `STALE_WORKFLOW_SHA` | The workflow changed after an amendment was prepared | New preview | Run `cw plan show --json` and prepare the amendment against the live hash |
+| `STALE_STATE_SHA` | Runtime state changed after an active amendment was prepared | New preview | Stop and prepare against the newly reported state hash |
+| `INVALID_ARTIFACT` | An added artifact is missing, linked, non-regular, non-canonical, duplicated, protected, or outside `review_paths` | No | Correct the explicit path; do not edit `.cw` |
+| `FORBIDDEN_PLAN_CHANGE` | An active amendment would change more than additions to current `phase.artifacts` | No | Use the governed operation appropriate to the intended contract change |
 | `PLAN_REVISION_INVALID` | Active or historical plan revision identity/hash/contract is invalid | No | Stop; inspect revision evidence and recover from the verified backup |
 | `SUPERSESSION_INVALID` | Review supersession, its authorization, or its historical links are invalid | No | Stop; preserve evidence and investigate tampering or incomplete migration |
 | `TRANSACTION_RECOVERY_REQUIRED` | A rebaseline or plan-amend transaction awaits deterministic recovery | Operator | Do not edit state; resume the supported operation or restore its recorded backup |
