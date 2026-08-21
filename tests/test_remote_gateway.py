@@ -24,6 +24,7 @@ from cw.remote.errors import RemoteError, RemoteErrorCode
 from cw.remote.gateway import GatewayLimits, GatewayService
 from cw.remote.persistence import RemoteStore
 from cw.remote.protocol import (
+    HTTPS_READ_ONLY_TOOLS,
     REMOTE_CONTROLLED_TOOLS,
     REMOTE_READ_TOOLS,
     RemoteIdentity,
@@ -167,6 +168,61 @@ class RemoteReadEndToEndTests(RemoteFixture):
             )
             self.assertEqual(local["data"], normalized_remote, tool)
             self.assertEqual(self.grant.project_handle, remote["project_id"])
+
+    async def test_https_router_boundary_rejects_every_non_read_tool_and_alias(self) -> None:
+        for tool in (
+            *sorted(REMOTE_CONTROLLED_TOOLS),
+            "CW_PROJECT_STATUS", "cw-project-status", "cw_project_status\N{ZERO WIDTH JOINER}",
+            "cw_project_status%00", "shell", "git",
+        ):
+            with self.subTest(tool=tool), self.assertRaises(RemoteError) as raised:
+                await self.service.router.dispatch_https_read_only(
+                    self.identity,
+                    project_handle=self.grant.project_handle,
+                    tool=tool,
+                    arguments={"operation_id": "read-boundary"},
+                )
+            self.assertEqual(RemoteErrorCode.AUTHORIZATION_REQUIRED, raised.exception.code)
+
+    async def test_https_request_boundary_applies_backpressure_and_cleans_up(self) -> None:
+        from cw.remote.server import GatewayHTTPSObservability, GatewayHTTPSRequestBoundary
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_app(_scope, _receive, send) -> None:
+            entered.set()
+            await release.wait()
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"{}"})
+
+        telemetry = GatewayHTTPSObservability(maximum_events=8)
+        boundary = GatewayHTTPSRequestBoundary(
+            slow_app, telemetry, maximum_concurrency=1, queue_timeout_seconds=0.01,
+        )
+        scope = {"type": "http", "path": "/mcp"}
+
+        async def receive() -> dict:
+            return {"type": "http.request", "body": b"{}", "more_body": False}
+
+        first_messages: list[dict] = []
+        second_messages: list[dict] = []
+
+        async def first_send(message: dict) -> None:
+            first_messages.append(message)
+
+        async def second_send(message: dict) -> None:
+            second_messages.append(message)
+
+        first = asyncio.create_task(boundary(scope, receive, first_send))
+        await entered.wait()
+        await boundary(scope, receive, second_send)
+        self.assertEqual(429, second_messages[0]["status"])
+        release.set()
+        await first
+        self.assertEqual(0, telemetry.active_requests)
+        self.assertEqual(200, first_messages[0]["status"])
+        self.assertIn("REJECTED", {event["outcome"] for event in telemetry.events()})
 
     async def test_read_payload_is_redacted_and_source_stays_local(self) -> None:
         secret = "remote-secret-must-not-cross"
@@ -632,9 +688,13 @@ class OAuthResourceServerTests(unittest.TestCase):
         from starlette.testclient import TestClient
 
         from cw.remote.gateway import GatewayService
-        from cw.remote.server import create_gateway_app
+        from cw.remote.server import GatewayHTTPSObservability, create_gateway_app
 
-        app = create_gateway_app(GatewayService(self.store, self.verifier), self.config)
+        telemetry = GatewayHTTPSObservability(maximum_events=16)
+        app = create_gateway_app(
+            GatewayService(self.store, self.verifier), self.config,
+            observability=telemetry,
+        )
         with TestClient(app, base_url="http://127.0.0.1") as client:
             health = client.get("/healthz")
             self.assertEqual(200, health.status_code)
@@ -656,6 +716,13 @@ class OAuthResourceServerTests(unittest.TestCase):
                 "accept": "application/json, text/event-stream",
                 "content-type": "application/json",
             }
+            rebound = client.post(
+                "/mcp", headers={**headers, "host": "127.0.0.1.evil.example"}, json={
+                    "jsonrpc": "2.0", "id": 99, "method": "initialize", "params": {},
+                },
+            )
+            self.assertIn(rebound.status_code, {400, 403, 421})
+            self.assertNotIn("Traceback", rebound.text)
             initialized = client.post("/mcp", headers=headers, json={
                 "jsonrpc": "2.0", "id": 2, "method": "initialize",
                 "params": {
@@ -671,16 +738,69 @@ class OAuthResourceServerTests(unittest.TestCase):
             self.assertEqual(200, listed.status_code, listed.text)
             tools = listed.json()["result"]["tools"]
             names = {item["name"] for item in tools}
-            self.assertEqual(set(REMOTE_READ_TOOLS) | set(REMOTE_CONTROLLED_TOOLS), names)
+            self.assertEqual(set(HTTPS_READ_ONLY_TOOLS), names)
             self.assertNotIn("cw_authorize_extension", names)
             self.assertTrue(all(item["inputSchema"]["additionalProperties"] is False for item in tools))
             self.assertTrue(all(item["outputSchema"]["additionalProperties"] is False for item in tools))
             for item in tools:
                 self.assertIn("project_id", item["inputSchema"]["required"])
+                self.assertEqual(1, item["outputSchema"]["properties"]["schema_version"]["const"])
+                self.assertEqual({
+                    "readOnlyHint": True,
+                    "destructiveHint": False,
+                    "idempotentHint": True,
+                    "openWorldHint": False,
+                }, item["annotations"])
+            self.assertEqual(
+                sorted(READ_SCOPES), sorted(metadata.json()["scopes_supported"]),
+            )
+            for request_id, name in enumerate((
+                *sorted(REMOTE_CONTROLLED_TOOLS),
+                "CW_PROJECT_STATUS", "cw-project-status", "cw_project_status\N{ZERO WIDTH JOINER}",
+            ), start=10):
+                rejected = client.post("/mcp", headers=headers, json={
+                    "jsonrpc": "2.0", "id": request_id, "method": "tools/call",
+                    "params": {
+                        "name": name,
+                        "arguments": {"project_id": "cwp_" + "A" * 24},
+                    },
+                })
+                self.assertEqual(200, rejected.status_code)
+                self.assertTrue(rejected.json()["result"]["isError"])
                 self.assertEqual(
-                    item["annotations"]["readOnlyHint"],
-                    item["annotations"]["idempotentHint"],
+                    f"Unknown tool: {name}",
+                    rejected.json()["result"]["content"][0]["text"],
                 )
+            extra = client.post("/mcp", headers=headers, json={
+                "jsonrpc": "2.0", "id": 30, "method": "tools/call",
+                "params": {
+                    "name": "cw_project_status",
+                    "arguments": {
+                        "project_id": "cwp_" + "A" * 24,
+                        "url": "http://169.254.169.254/latest/meta-data",
+                    },
+                },
+            })
+            self.assertTrue(extra.json()["result"]["isError"])
+            self.assertIn("validation", extra.json()["result"]["content"][0]["text"].lower())
+            invalid_json = client.post(
+                "/mcp", headers=headers, content=b"{invalid",
+            )
+            self.assertEqual(400, invalid_json.status_code)
+            wrong_type = client.post(
+                "/mcp",
+                headers={**headers, "content-type": "text/plain"},
+                content=b"{}",
+            )
+            self.assertIn(wrong_type.status_code, {400, 415})
+            invalid_method = client.put("/mcp", headers=headers, content=b"{}")
+            self.assertEqual(405, invalid_method.status_code)
+            self.assertTrue(all(set(event) <= {
+                "event", "outcome", "active_requests", "tool", "latency_ms",
+            } for event in telemetry.events()))
+            encoded_events = json.dumps(telemetry.events())
+            self.assertNotIn("cwp_", encoded_events)
+            self.assertNotIn("Bearer", encoded_events)
 
     @unittest.skipUnless(__import__("importlib").util.find_spec("mcp"), "MCP SDK unavailable")
     def test_public_pairing_endpoint_is_rate_limited(self) -> None:
@@ -1049,7 +1169,7 @@ class RemoteHTTPGatewayEndToEndTests(unittest.IsolatedAsyncioTestCase):
                 "sub": "principal-http",
                 "cw_workspace": "workspace-http",
                 "client_id": "fixture-client",
-                "scope": "project.read phase.start operation.read",
+                "scope": "project.read gate.read history.read completion.read",
                 "iat": int(now.timestamp()),
                 "exp": int((now + timedelta(minutes=5)).timestamp()),
             }, private, algorithm="RS256", headers={"kid": "fixture"})
@@ -1067,23 +1187,24 @@ class RemoteHTTPGatewayEndToEndTests(unittest.IsolatedAsyncioTestCase):
                     },
                 })
                 self.assertEqual(200, initialized.status_code, initialized.text)
-                called = await client.post(gateway + "/mcp", headers=headers, json={
-                    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                    "params": {
-                        "name": "cw_project_status",
-                        "arguments": {
-                            "project_id": grant.project_handle,
-                            "operation_id": "remote-http-read",
+                for request_id, tool_name in enumerate(sorted(HTTPS_READ_ONLY_TOOLS), start=2):
+                    called = await client.post(gateway + "/mcp", headers=headers, json={
+                        "jsonrpc": "2.0", "id": request_id, "method": "tools/call",
+                        "params": {
+                            "name": tool_name,
+                            "arguments": {
+                                "project_id": grant.project_handle,
+                                "operation_id": f"remote-http-read-{request_id}",
+                            },
                         },
-                    },
-                })
-                self.assertEqual(200, called.status_code, called.text)
-                structured = called.json()["result"]["structuredContent"]
-                self.assertEqual("SUCCEEDED", structured["status"])
-                self.assertEqual(grant.project_handle, structured["project_id"])
-                self.assertNotIn(str(repo.root), json.dumps(structured))
-                started = await client.post(gateway + "/mcp", headers=headers, json={
-                    "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                    })
+                    self.assertEqual(200, called.status_code, called.text)
+                    structured = called.json()["result"]["structuredContent"]
+                    self.assertEqual("SUCCEEDED", structured["status"], tool_name)
+                    self.assertEqual(grant.project_handle, structured["project_id"])
+                    self.assertNotIn(str(repo.root), json.dumps(structured))
+                rejected = await client.post(gateway + "/mcp", headers=headers, json={
+                    "jsonrpc": "2.0", "id": 20, "method": "tools/call",
                     "params": {
                         "name": "cw_phase_start",
                         "arguments": {
@@ -1092,26 +1213,9 @@ class RemoteHTTPGatewayEndToEndTests(unittest.IsolatedAsyncioTestCase):
                         },
                     },
                 })
-                self.assertEqual(200, started.status_code, started.text)
-                action = started.json()["result"]["structuredContent"]
-                self.assertIn(action["status"], {"QUEUED", "RUNNING", "SUCCEEDED"})
-                poll = 0
-                while action["status"] in {"QUEUED", "RUNNING"} and poll < 50:
-                    await asyncio.sleep(0.01)
-                    polled = await client.post(gateway + "/mcp", headers=headers, json={
-                        "jsonrpc": "2.0", "id": 4 + poll, "method": "tools/call",
-                        "params": {
-                            "name": "cw_operation_status",
-                            "arguments": {
-                                "project_id": grant.project_handle,
-                                "operation_id": f"remote-http-poll-{poll}",
-                                "target_operation_id": "remote-http-start",
-                            },
-                        },
-                    })
-                    action = polled.json()["result"]["structuredContent"]
-                    poll += 1
-                self.assertEqual("SUCCEEDED", action["status"])
+                self.assertEqual(200, rejected.status_code, rejected.text)
+                self.assertTrue(rejected.json()["result"]["isError"])
+                self.assertNotIn("structuredContent", rejected.json().get("result", {}))
             stop.set()
             await asyncio.wait_for(agent_task, 3)
         finally:

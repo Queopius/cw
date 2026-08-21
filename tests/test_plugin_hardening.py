@@ -40,6 +40,9 @@ class RemoteOriginHardeningTests(unittest.TestCase):
             "http://[::1]@evil.example", "http://localhost", "http://localhost.",
             "http://192.168.1.1", "ftp://127.0.0.1", "https://gateway.example/path",
             "http://127.0.0.1:99999", "http://127.0.0.1:not-a-port",
+            "https://gateway.example.", "https://127.0.0.1", "https://169.254.169.254",
+            "https://10.0.0.1", "https://2130706433", "https://0x7f000001",
+            "https://g\N{LATIN SMALL LETTER A WITH ACUTE}teway.example",
         ):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_gateway_url(value)
@@ -89,6 +92,7 @@ class RemoteOriginHardeningTests(unittest.TestCase):
                 asyncio.run(agent.run(stopped))
             self.assertTrue(Client.options)
             self.assertTrue(all(item.get("follow_redirects") is False for item in Client.options))
+            self.assertTrue(all(item.get("trust_env") is False for item in Client.options))
             for function in (request_pairing, register_project_grant):
                 with self.assertRaises(ValueError):
                     asyncio.run(function(**({

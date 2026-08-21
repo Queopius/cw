@@ -22,6 +22,9 @@ development profile introduced in 0.11 can expose this
 same stdio server through Secure MCP Tunnel using an explicit ChatGPT
 development profile.
 
+The separate [HTTPS read-only profile](plugin-mcp-https-read-only.md) exposes
+only six domain reads. It does not change this twelve-tool local stdio surface.
+
 ## Install and start
 
 MCP remains optional:

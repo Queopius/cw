@@ -33,10 +33,11 @@ runs validation, reads a repository, or stores CW workflow truth.
 - `/remote/v1/pairing/*`: device pairing ceremony.
 - `/remote/v1/agent/*`: signed agent poll, result, and grant endpoints.
 
-The MCP tool registry is mechanically derived from the accepted local MCP
-registry. There is no generic JSON-RPC proxy. The six read tools and six
-controlled tools are the entire surface; high-consequence authorization is
-absent.
+The MCP HTTPS registry is a positive allowlist derived from the accepted local
+registry. There is no generic JSON-RPC proxy. HTTPS exposes exactly six read
+tools; direct invocation of the other six local operational tools is rejected
+below discovery. The internal `cw.remote.v1` agent protocol retains its typed
+controlled-operation contracts, while local stdio retains all twelve tools.
 
 The ASGI service can run behind any standards-compliant HTTPS terminator. The
 agent, pairing, and project-grant clients parse the gateway as an origin,
@@ -45,8 +46,9 @@ invalid ports, and never follow redirects. Plain HTTP is limited to the exact
 IP literals `127.0.0.1` and bracketed `::1`; `localhost`, trailing-dot names,
 other `127/8` addresses, and non-loopback targets require HTTPS and are not
 treated as loopback identities.
-No production host, domain, or provider is selected by the current candidate;
-the original non-deployment decision was recorded in the Core 0.13 milestone.
+The staging host is testing-only and is not the Wave 3 candidate unless a
+separate deployment authorization records that fact. Production remains
+undeployed.
 
 Remote failures remain distinct: `AUTHENTICATION_REQUIRED`, `TOKEN_INVALID`,
 `TOKEN_EXPIRED`, `SCOPE_REQUIRED`, `DEVICE_NOT_PAIRED`, `DEVICE_REVOKED`,
@@ -57,5 +59,6 @@ Availability is never reported as a workflow failure, and stack traces are not
 normal MCP results.
 
 See [remote authentication](remote-auth.md), [operations](remote-operations.md),
+the [Plugin HTTPS read-only profile](plugin-mcp-https-read-only.md),
 the [staging environment contract](staging-environment.md), and the
 [0.13 acceptance record](acceptance/remote-gateway-0.13.md).

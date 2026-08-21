@@ -4,10 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from cw import __version__
-
 from cw.remote.deployment import GatewayDeploymentConfig
-from cw.remote.protocol import PROTOCOL_VERSION
 from scripts.validate_staging_bootstrap import validation_errors
 from scripts.validate_plugin_candidate import PLUGIN
 
@@ -103,7 +100,7 @@ class StagingConfigurationTests(unittest.TestCase):
 
 @unittest.skipUnless(HAS_REMOTE, "remote dependencies unavailable")
 class StagingRuntimeTests(unittest.TestCase):
-    def test_readiness_exposes_only_sanitized_build_identity(self) -> None:
+    def test_readiness_exposes_only_sanitized_runtime_state(self) -> None:
         from starlette.testclient import TestClient
 
         with tempfile.TemporaryDirectory() as directory:
@@ -118,11 +115,8 @@ class StagingRuntimeTests(unittest.TestCase):
                     self.assertEqual(200, health.status_code)
                     self.assertEqual(200, readiness.status_code)
                     self.assertEqual("ok", health.json()["status"])
-                    self.assertEqual(SHA, readiness.json()["build"]["build_sha"])
-                    self.assertEqual(__version__, readiness.json()["build"]["cw_core_version"])
-                    self.assertEqual((PLUGIN / "VERSION").read_text(encoding="utf-8").strip(), readiness.json()["build"]["cw_plugin_version"])
-                    self.assertEqual(PROTOCOL_VERSION, readiness.json()["build"]["protocol_version"])
-                    self.assertEqual(PROTOCOL_VERSION, readiness.json()["build"]["remote_protocol_version"])
+                    self.assertEqual("https-read-only", readiness.json()["profile"])
+                    self.assertEqual(6, readiness.json()["tool_count"])
                     encoded = json.dumps(readiness.json())
                     self.assertNotIn(str(Path.home()), encoded)
                     self.assertNotIn("tenant.eu.auth0.com", encoded)
@@ -150,8 +144,36 @@ class StagingRuntimeTests(unittest.TestCase):
                     self.assertEqual("ok", health["status"])
                     self.assertEqual("ready", readiness["status"])
                     self.assertNotIn("schema_version", health)
-                    self.assertIn("schema_version", readiness)
-                    self.assertIn("build", readiness)
+                    self.assertEqual("https-read-only", readiness["profile"])
+                    self.assertEqual(6, readiness["tool_count"])
+                    self.assertNotIn("build", readiness)
+            finally:
+                store.close()
+
+    def test_readiness_fails_closed_without_leaking_internal_error(self) -> None:
+        from unittest.mock import patch
+        from starlette.testclient import TestClient
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = GatewayDeploymentConfig.from_environment(
+                environment(Path(directory) / "gateway.sqlite3")
+            )
+            app, store = config.create_app()
+            try:
+                with patch.object(store, "schema_version", side_effect=RuntimeError(
+                    "secret /home/private/project token=hidden",
+                )):
+                    with TestClient(app, base_url="http://staging-mcp.cwcli.dev") as client:
+                        response = client.get("/readyz")
+                self.assertEqual(503, response.status_code)
+                self.assertEqual({
+                    "status": "not_ready",
+                    "service": "cw-remote-gateway",
+                    "profile": "https-read-only",
+                    "tool_count": 6,
+                }, response.json())
+                self.assertNotIn("secret", response.text)
+                self.assertNotIn("/home/", response.text)
             finally:
                 store.close()
 

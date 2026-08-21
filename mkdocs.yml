@@ -66,6 +66,7 @@ nav:
       - Plugin Submission: plugin-submission.md
       - ChatGPT Plugin 0.12 Acceptance: acceptance/chatgpt-plugin-0.12.md
       - Remote Gateway: remote-gateway.md
+      - Plugin MCP HTTPS Read-only: plugin-mcp-https-read-only.md
       - Remote Agent: remote-agent.md
       - Remote Authentication: remote-auth.md
       - Remote Pairing: remote-pairing.md
