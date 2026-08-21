@@ -39,7 +39,7 @@ artifact["url"] = archive.as_uri()
 local_manifest = root / "candidate-manifest.json"
 local_manifest.write_text(json.dumps(document), encoding="utf-8")
 parsed = ReleaseManifest.from_dict(document)
-assert parsed.plugin is None
+assert str(parsed.version) == "0.15.0"
 
 paths = InstallPaths(root / "managed", root / "bin")
 stable = paths.versions / "0.14.1"
