@@ -14,11 +14,11 @@ small surface-level changes.
 
 ## Current versions
 
-- **CW Core / CLI**: `0.14.1`
-- **CW Plugin**: `0.1.0` (candidate)
+- **CW Core / CLI**: `0.15.0`
+- **CW Plugin**: `0.1.0` (published asset immutable; current source unpublished)
 - **Remote protocol**: `cw.remote.v1`
 
-The plugin version is intentionally independent. A local `0.14.1` patch can be
+The plugin version is intentionally independent. A Core `0.15.0` release can be
 released without `0.1.x` changes when only core behavior changed. A plugin fix,
 for example a metadata or skill clarification, can move to `0.1.1` without
 requiring a core point release.
@@ -54,6 +54,12 @@ Current policy for `0.1.0`:
 - `cw_core.minimum: 0.14.0`
 - `cw_core.compatible_policy: >=0.14.0,<1.0.0`
 - `remote_protocol.required: cw.remote.v1`
+
+Core and Plugin publication are separate ceremonies. Core `0.15.0` is a
+Core-only release and does not rebuild, attach, replace, or reinterpret the
+published `cw-plugin-0.1.0.zip`. The current Plugin source is an unpublished
+candidate; publishing it requires an independently authorized Plugin `0.2.0`
+release.
 
 ## Future components
 

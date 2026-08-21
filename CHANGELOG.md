@@ -4,6 +4,8 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.15.0 — 2026-08-21
+
 - Add public `cw plan amend --file ... --expected-workflow-sha256 ...` support
   for transactional, backup-first correction of an unapproved proposal. The
   command preserves the Completion Contract, uses optimistic concurrency and
@@ -26,6 +28,14 @@ All notable changes to CW are documented here.
 - Make generic `cw plan rebuild` refuse reviewed workflows. A rebaseline does
   not create a gate, inherit validation, approve a review, or start another
   phase.
+- Release Core/CLI independently from the Plugin: the Core-only manifest omits
+  Plugin metadata deliberately, the public Plugin `0.1.0` bytes remain
+  immutable, and release asset publication is restricted to an exact allowlist.
+- Require immutable annotated public tags to resolve to commits contained in
+  `origin/prod`; reject tags sourced only from development or promotion branches.
+- Keep `cw plan amend` local-only: it is not exposed through MCP or Remote and
+  always returns an amended active workflow to an unapproved `PLAN_PROPOSED`
+  state requiring a separate `cw plan approve`.
 
 ## 0.14.1 — 2026-08-20
 

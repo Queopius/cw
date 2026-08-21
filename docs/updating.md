@@ -39,6 +39,12 @@ available source/build provenance. Core's
 updater preserves this metadata but ignores it when selecting or installing a
 Core platform archive. Manifests without the section remain valid.
 
+Core `0.15.0` deliberately publishes a Core-only manifest without `signature`.
+The 0.14.1 updater accepts this shape and treats omission as “no Plugin asset in
+this Core release,” never as an uninstall or replacement instruction. Update,
+rollback, and re-update affect only the managed Core runtime; Plugin sources,
+project directories, and `.cw` evidence are untouched.
+
 The production source is the Queopius CW GitHub release provider over trusted
 HTTPS hosts. Tests use an injected local provider and real archives without
 GitHub. The manifest reserves signing metadata, but CW currently guarantees checksum—not

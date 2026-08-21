@@ -47,8 +47,34 @@ jobs:
         run: |
           python -m pip install --upgrade build
           python -m build
-          python scripts/build_release.py --output dist --channel stable
-          python scripts/build_plugin_candidate.py --output "dist/cw-plugin-$(cat plugins/cw/VERSION).zip"
+          python scripts/build_release.py --output dist --channel stable --component core
+          python scripts/validate_release_assets.py --directory dist --component core
+      - name: Verify stable updater and immutable public Plugin compatibility
+        run: |
+          python -m pip install --force-reinstall dist/*.whl
+          public_dir="$RUNNER_TEMP/cw-public-0.14.1"
+          mkdir -p "$public_dir"
+          curl --proto '=https' --tlsv1.2 --location --fail --silent --show-error \
+            --output "$public_dir/codex_workflow-0.14.1-py3-none-any.whl" \
+            https://github.com/Queopius/cw/releases/download/v0.14.1/codex_workflow-0.14.1-py3-none-any.whl
+          curl --proto '=https' --tlsv1.2 --location --fail --silent --show-error \
+            --output "$public_dir/cw-0.14.1-linux-x86_64.tar.gz" \
+            https://github.com/Queopius/cw/releases/download/v0.14.1/cw-0.14.1-linux-x86_64.tar.gz
+          curl --proto '=https' --tlsv1.2 --location --fail --silent --show-error \
+            --output "$public_dir/cw-plugin-0.1.0.zip" \
+            https://github.com/Queopius/cw/releases/download/v0.14.1/cw-plugin-0.1.0.zip
+          python scripts/validate_public_plugin_compatibility.py \
+            --archive "$public_dir/cw-plugin-0.1.0.zip" \
+            --sha256 b59275bb7e7a32e58c1d48202c9cf489874a6d21ce15fad3ef4cd6f202512021 \
+            --size 546684
+          python scripts/validate_stable_update_path.py \
+            --stable-wheel "$public_dir/codex_workflow-0.14.1-py3-none-any.whl" \
+            --stable-wheel-sha256 ac8e77bbaefadecf5b9ea7519400f94fbd227c3c7d1420346e0e5b34ae32230a \
+            --stable-archive "$public_dir/cw-0.14.1-linux-x86_64.tar.gz" \
+            --stable-archive-sha256 14e8a49e94117c9a3a5e179947c4d7208c778c1bd1e65a7074008012b776104e \
+            --candidate-manifest dist/cw-release-manifest.json \
+            --candidate-archive dist/cw-0.15.0-linux-x86_64.tar.gz \
+            --candidate-commit "$GITHUB_SHA"
       - name: Verify installed wheel
         run: |
           python -m pip install --force-reinstall dist/*.whl
@@ -66,7 +92,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cw-distributions
-          path: dist/*
+          path: dist
           if-no-files-found: error
 
   mcp:
