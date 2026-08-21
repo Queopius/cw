@@ -25,7 +25,7 @@ plugin-check:
 	python3 scripts/validate_plugin_candidate.py
 	python3 scripts/validate_plugin_production_readiness.py
 	python3 scripts/build_plugin_candidate.py --check
-	python3 -m unittest tests.test_plugin_candidate tests.test_chatgpt_development tests.test_plugin_production_readiness
+	python3 -m unittest tests.test_plugin_candidate tests.test_plugin_installation tests.test_chatgpt_development tests.test_plugin_production_readiness
 
 production-readiness-check: plugin-check
 

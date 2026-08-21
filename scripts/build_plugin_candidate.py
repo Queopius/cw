@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
+import stat
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -18,6 +20,8 @@ except ImportError:  # Direct script execution keeps scripts/ on sys.path.
 
 PLUGIN = ROOT / "plugins" / "cw"
 FIXED_TIME = (2026, 8, 15, 0, 0, 0)
+MAX_MEMBER_SIZE = 16 * 1024 * 1024
+MAX_ARCHIVE_SIZE = 32 * 1024 * 1024
 
 
 def plugin_version(root: Path = ROOT) -> str:
@@ -46,17 +50,33 @@ def validate_archive(archive_path: Path, root: Path = ROOT) -> list[str]:
             folded = [name.casefold() for name in names]
             if len(folded) != len(set(folded)):
                 errors.append("archive contains case-colliding entries")
+            total_size = 0
             for entry in entries:
                 path = PurePosixPath(entry.filename)
                 mode = entry.external_attr >> 16
-                if path.is_absolute() or ".." in path.parts or not path.parts or path.parts[0] != "cw":
+                if (
+                    path.is_absolute() or ".." in path.parts or not path.parts or path.parts[0] != "cw"
+                    or "\\" in entry.filename or "\x00" in entry.filename
+                    or re.match(r"^[A-Za-z]:", entry.filename)
+                ):
                     errors.append(f"archive entry has an unsafe path: {entry.filename}")
-                if (mode & 0o170000) == 0o120000:
-                    errors.append(f"archive entry is a symlink: {entry.filename}")
+                if entry.is_dir() or not stat.S_ISREG(mode):
+                    errors.append(f"archive entry is not a regular file: {entry.filename}")
                 if entry.date_time != FIXED_TIME:
                     errors.append(f"archive timestamp is not normalized: {entry.filename}")
                 if mode != 0o100644:
                     errors.append(f"archive mode is not normalized: {entry.filename}")
+                if entry.flag_bits & 0x1:
+                    errors.append(f"archive entry is encrypted: {entry.filename}")
+                if entry.file_size > MAX_MEMBER_SIZE:
+                    errors.append(f"archive entry is oversized: {entry.filename}")
+                total_size += entry.file_size
+                if entry.file_size and entry.compress_size == 0:
+                    errors.append(f"archive entry has an invalid compression ratio: {entry.filename}")
+                elif entry.compress_size and entry.file_size / entry.compress_size > 1000:
+                    errors.append(f"archive entry has an excessive compression ratio: {entry.filename}")
+            if total_size > MAX_ARCHIVE_SIZE:
+                errors.append("archive expands beyond the allowed size")
             if names != sorted(expected):
                 errors.append("archive inventory or ordering does not match the canonical Plugin bundle")
             for name, source in expected.items():
@@ -67,26 +87,26 @@ def validate_archive(archive_path: Path, root: Path = ROOT) -> list[str]:
     return errors
 
 
-def build(output: Path) -> dict[str, object]:
-    errors = validation_errors()
+def build(output: Path, root: Path = ROOT) -> dict[str, object]:
+    errors = validation_errors(root)
     if errors:
         raise ValueError("; ".join(errors))
     output.parent.mkdir(parents=True, exist_ok=True)
-    archive_members = expected_members()
+    archive_members = expected_members(root)
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for relative, path in sorted(archive_members.items()):
             info = zipfile.ZipInfo(relative, FIXED_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o100644 << 16
             archive.writestr(info, path.read_bytes(), compresslevel=9)
-    archive_errors = validate_archive(output)
+    archive_errors = validate_archive(output, root)
     if archive_errors:
         raise ValueError("; ".join(archive_errors))
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     return {
         "schema_version": 1,
         "archive": output.name,
-        "plugin_version": plugin_version(),
+        "plugin_version": plugin_version(root),
         "sha256": digest,
         "files": len(archive_members),
     }

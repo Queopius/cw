@@ -57,3 +57,43 @@ legal draft requires human and legal review and is not a submission document.
 
 The published Plugin `0.1.0` archive remains immutable. Any archive built from
 this source tree is an unpublished local candidate.
+
+## Development and evaluation installation
+
+This repository marketplace is a development/evaluation source only. It is not
+a workspace publication and not a universal public publication.
+
+From a local checkout, use the commands supported by the installed Codex CLI:
+
+```text
+codex plugin marketplace add <CW_REPOSITORY_ROOT>
+codex plugin marketplace list
+codex plugin list --marketplace cw-development --available
+codex plugin add cw@cw-development
+```
+
+For a Git-backed evaluation, pin a full immutable commit SHA and include both
+sparse paths:
+
+```text
+codex plugin marketplace add Queopius/cw \
+  --ref <IMMUTABLE_COMMIT_SHA> \
+  --sparse .agents/plugins \
+  --sparse plugins/cw
+```
+
+Never document `dev` or another mutable branch as a stable Plugin channel.
+The CLI does not install ZIP files directly; a candidate must be verified and
+safely expanded into a temporary local marketplace first. The source checkout
+guide at `docs/plugin-installation.md` records prerequisites, update, removal,
+rollback, and cleanup boundaries.
+
+Remove the installed Plugin and marketplace source separately:
+
+```text
+codex plugin remove cw@cw-development
+codex plugin marketplace remove cw-development
+```
+
+CLI `0.148.0` has no `plugin disable` command. Removing a marketplace source is
+not Plugin removal and never authorizes deletion of a project or `.cw`.

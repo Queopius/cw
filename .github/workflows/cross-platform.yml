@@ -40,12 +40,16 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
+      - name: Install the verified Codex Plugin CLI
+        run: npm install --global @openai/codex@0.148.0
       - name: Run native platform and fake-Codex contract tests
         run: python -m unittest tests.test_platform tests.test_fake_codex
       - name: Run platform-neutral MCP stdio and controlled-action contract tests
+        env:
+          CW_TEST_GIT_MARKETPLACE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           python -m pip install ".[remote]"
-          python -m unittest tests.test_mcp_runtime tests.test_mcp_actions tests.test_plugin_candidate tests.test_plugin_hardening tests.test_chatgpt_development tests.test_plugin_production_readiness
+          python -m unittest tests.test_mcp_runtime tests.test_mcp_actions tests.test_plugin_candidate tests.test_plugin_installation tests.test_plugin_hardening tests.test_chatgpt_development tests.test_plugin_production_readiness
           python -m unittest tests.test_remote_gateway
           python -m unittest tests.test_staging_bootstrap
           python scripts/run_mcp_acceptance.py

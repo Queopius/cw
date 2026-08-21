@@ -114,6 +114,7 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     notice_path = root / "NOTICE"
     candidate_docs = (
         root / "docs" / "plugin-app-candidate.md",
+        root / "docs" / "plugin-installation.md",
         root / "docs" / "plugin-listing-draft.md",
         root / "docs" / "plugin-privacy.md",
         root / "docs" / "plugin-support.md",
@@ -359,6 +360,10 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         "https://github.com/Queopius/cw/security/advisories/new",
         "Production MCP HTTPS | `NOT_DEPLOYED`",
         "Proposed next Plugin version: `0.2.0` — **NOT AUTHORIZED**",
+        "development/evaluation source only",
+        "codex plugin marketplace add",
+        "codex plugin remove cw@cw-development",
+        "CLI `0.148.0` has no `plugin disable` command",
     ):
         if phrase not in plugin_readme:
             errors.append(f"Plugin README is missing public-readiness guidance: {phrase}")
@@ -372,16 +377,37 @@ def validation_errors(root: Path = ROOT) -> list[str]:
             errors.append(f"Plugin package declares a broken documentation URL: {broken}")
 
     plugins = marketplace.get("plugins")
-    if marketplace.get("name") != "cw-development" or not isinstance(plugins, list) or len(plugins) != 1:
+    if (
+        not isinstance(marketplace, dict)
+        or set(marketplace) != {"name", "interface", "plugins"}
+        or marketplace.get("name") != "cw-development"
+        or marketplace.get("interface") != {"displayName": "CW Development"}
+        or not isinstance(plugins, list)
+        or len(plugins) != 1
+    ):
         errors.append("repository marketplace must define exactly cw-development/cw")
     else:
         entry = plugins[0]
+        if not isinstance(entry, dict) or set(entry) != {"name", "source", "policy", "category"}:
+            errors.append("repository marketplace Plugin entry schema is invalid")
+            entry = {}
         if entry.get("name") != "cw" or entry.get("source") != {
             "source": "local", "path": "./plugins/cw",
         }:
             errors.append("repository marketplace source must resolve to ./plugins/cw")
         if entry.get("policy") != {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}:
             errors.append("repository marketplace must require explicit available/on-install enablement")
+        if entry.get("category") != "Coding":
+            errors.append("repository marketplace category must be Coding")
+        source_path = entry.get("source", {}).get("path") if isinstance(entry.get("source"), dict) else None
+        if isinstance(source_path, str):
+            try:
+                source = _local_path(root, source_path)
+            except ValueError as exc:
+                errors.append(str(exc))
+            else:
+                if source != plugin.resolve() or not source.is_dir():
+                    errors.append("repository marketplace source must resolve inside its root to plugins/cw")
 
     completion_target = contract.get("completion_target")
     if not isinstance(completion_target, dict):
@@ -437,6 +463,7 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     )
     for phrase in (
         "developers.openai.com/plugins/build/plugins",
+        "developers.openai.com/plugins/deploy/connect-chatgpt",
         "developers.openai.com/plugins/build/mcp-server",
         "developers.openai.com/plugins/build/auth",
         "developers.openai.com/plugins/deploy/submission",
@@ -451,12 +478,26 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         if phrase not in candidate_text:
             errors.append(f"plugin surface/remote classification docs are missing: {phrase}")
 
+    allowed_plugin_roots = {
+        ".codex-plugin", ".mcp.json", "README.md", "VERSION",
+        "capabilities.json", "skills", "assets",
+    }
+    forbidden_components = {
+        ".git", ".cw", "__pycache__", ".pytest_cache", "artifacts", "build", "dist", "tests",
+    }
     for path in sorted(plugin.rglob("*")):
+        relative = path.relative_to(plugin)
         if path.is_symlink():
             errors.append(f"plugin package must not contain symlinks: {path.relative_to(root)}")
             continue
+        if relative.parts and relative.parts[0] not in allowed_plugin_roots:
+            errors.append(f"plugin package contains an unexpected top-level entry: {relative.as_posix()}")
+        if any(part.casefold() in forbidden_components for part in relative.parts):
+            errors.append(f"plugin package contains a forbidden entry: {relative.as_posix()}")
         if not path.is_file():
             continue
+        if path.stat().st_mode & 0o111:
+            errors.append(f"plugin package contains an unexpected executable: {relative.as_posix()}")
         if path.suffix.lower() in {".ttf", ".otf", ".woff", ".woff2"}:
             errors.append(f"plugin package must not include source fonts: {path.name}")
         if path.suffix.lower() in {".json", ".md", ".yaml", ".yml"}:
