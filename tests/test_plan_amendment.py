@@ -1080,7 +1080,10 @@ class ActiveArtifactAmendmentTests(unittest.TestCase):
         os.chdir(self.case.root)
         output = io.StringIO()
         try:
-            with redirect_stdout(output):
+            with (
+                patch("cw.cli.commands.read.shutil.which", return_value="/fixture/bin/tool"),
+                redirect_stdout(output),
+            ):
                 self.assertEqual(0, main(("doctor", "--json")))
         finally:
             os.chdir(previous)
