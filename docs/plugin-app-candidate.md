@@ -1,32 +1,44 @@
 # Plugin / App candidate
 
 CW Core `0.14.1` and CW Plugin `0.1.0` retain the proven local plugin package
-and bounded ChatGPT Developer Mode connection profile. The Plugin remains a local, reviewable
-OpenAI plugin candidate. It is text/tool-first: one production skill,
-one bundled stdio MCP server, official CW assets, and a repo-local development
-marketplace entry. It is not published to the universal Plugins Directory and
-does not provide a hosted service.
+and bounded ChatGPT Developer Mode connection profile. The Plugin remains a
+local, reviewable OpenAI plugin candidate. It is text/tool-first: one production
+skill, one bundled stdio MCP server, official CW assets, a package README, and a
+repo-local development marketplace entry. A staging HTTPS MCP gateway and OAuth
+discovery exist for testing. They are not production services, are not wired
+into this package through `.app.json`, and have not been submitted or published
+to the universal Plugins Directory.
+
+## Technical identity
+
+- **Legal publisher:** Fantomid LLC
+- **Technology brand:** Queopius
+- **Product:** CW — Codex Workflow
+- **Contact identity:** Queopius | Fantomid LLC
+- **Website:** <https://cwcli.dev>
+- **Documentation:** <https://docs.cwcli.dev>
+
+Queopius is a technology brand operated by Fantomid LLC,
+a New Mexico limited liability company.
 
 ## Official model reviewed
 
-This design was checked on 2026-08-15 against current official OpenAI docs:
+This current-state wording was rechecked on 2026-08-21 against official OpenAI
+documentation:
 
-- [Plugin architecture](https://developers.openai.com/plugins/concepts/plugins)
 - [Package your plugin](https://developers.openai.com/plugins/build/plugins)
-- [Connect and test](https://developers.openai.com/plugins/deploy/connect-chatgpt)
 - [Submit plugins](https://developers.openai.com/plugins/deploy/submission)
+- [Build an MCP server](https://developers.openai.com/plugins/build/mcp-server)
+- [Authentication](https://developers.openai.com/plugins/build/auth)
 - [Security and privacy](https://developers.openai.com/plugins/guides/security-privacy)
-- [Apps SDK entry point](https://developers.openai.com/apps-sdk)
-- [Codex MCP support](https://learn.chatgpt.com/docs/extend/mcp)
-- [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 
 The current model is not the obsolete 2023 `ai-plugin.json` convention. A
 plugin has `.codex-plugin/plugin.json` and may bundle `skills/`, `.mcp.json`,
-and optional UI. CW bundles a skill plus MCP and intentionally omits UI,
-`.app.json`, hooks, remote authentication, and high-consequence actions.
-The current Apps SDK entry point redirects into this unified Plugins model;
-CW therefore does not add a legacy or parallel app manifest merely to claim an
-app surface.
+and optional UI. CW bundles a skill plus local MCP and intentionally omits UI,
+hooks, high-consequence actions, and a registered remote `.app.json`
+connection. The separate staging runtime implements HTTPS MCP and OAuth
+discovery for testing; it does not change the local package composition or
+establish public availability.
 
 ## Package shape
 
@@ -34,6 +46,7 @@ app surface.
 plugins/cw/
 ├── .codex-plugin/plugin.json
 ├── .mcp.json
+├── README.md
 ├── capabilities.json
 ├── assets/
 └── skills/cw-workflow/
@@ -127,6 +140,7 @@ with a different payload fails with `OPERATION_CONFLICT`.
 | Codex CLI / IDE local host | `READY` |
 | ChatGPT desktop on the local Codex host | `READY` |
 | ChatGPT web developer-mode app | `READ_ONLY_ACCEPTED`; real ChatGPT Pro + Secure MCP Tunnel evidence |
+| Staging HTTPS MCP/OAuth | `IMPLEMENTED_FOR_TESTING`; not a production or submitted service |
 | Public Plugins Directory | `REQUIRES_REMOTE_APP_MILESTONE` |
 
 ### Codex local: candidate ready
@@ -157,16 +171,18 @@ remote architecture and public HTTPS. See
 
 - Local installable/reviewable package: `READY`.
 - ChatGPT web Developer Mode read-only connection: `ACCEPTED`.
-- Public ChatGPT connection: `NEEDS_REMOTE_RUNTIME`.
-- User-to-project connection lifecycle: `NEEDS_AUTH`.
+- Staging HTTPS MCP and OAuth discovery: `IMPLEMENTED_FOR_TESTING`.
+- Production ChatGPT connection: `NEEDS_PRODUCTION_DEPLOYMENT`.
+- Production user-to-project connection lifecycle: `NEEDS_PRODUCTION_AUTH`.
 - Final privacy/terms/support publication: `NEEDS_PUBLIC_DOCS`.
 - Publisher identity, regions, attestations, contacts, and submission approval:
   `NEEDS_HUMAN_BUSINESS_INPUT`.
 - Public directory submission: `BLOCKED` until those items are resolved.
 
-## Future authenticated remote boundary
+## Staging and future production boundary
 
-If ChatGPT web support is approved later, preserve this mapping:
+The staging implementation tests this mapping; a future production deployment
+must preserve it:
 
 ```text
 authenticated ChatGPT user
@@ -180,11 +196,12 @@ typed ChatGPT/plugin actor
 CWApplication policy → local project
 ```
 
-The next design must choose between a user-run reachable runtime, a secure
-relay to a user-owned local runtime, or a managed service. It must not upload
-source by default, equate ChatGPT identity with OS identity, or add arbitrary
-shell/filesystem/Git access. OAuth, domain verification, retention, revocation,
-and connection lifecycle require separate evidence.
+The selected model uses an HTTPS relay and a paired outbound-only local agent.
+Staging exercises that implementation for testing. Production still requires
+separate deployment, domain verification, retention/deletion decisions,
+operational acceptance, and submission authorization. It must not upload source
+by default, equate ChatGPT identity with OS identity, or add arbitrary
+shell/filesystem/Git access.
 
 ## Deliberately unavailable
 
@@ -198,6 +215,10 @@ The selected public topology, OAuth contract, and remaining submission blockers
 are documented in [plugin production readiness](plugin-production-readiness.md).
 No production public gateway, production OAuth deployment, marketplace
 submission, or universal ChatGPT availability is claimed by Plugin 0.1.0.
+
+The proposed next Plugin version is `0.2.0` because the published `0.1.0`
+artifact is immutable and hardening tightened public contracts. That version is
+**NOT AUTHORIZED** and no version file changes in this readiness wave.
 
 ## Remove or roll back locally
 

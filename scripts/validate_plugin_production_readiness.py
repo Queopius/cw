@@ -160,9 +160,11 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     docs_text = "\n".join(path.read_text(encoding="utf-8") for path in required)
     for phrase in (
         "2026-08-15",
-        "developers.openai.com/plugins/concepts/plugins",
+        "developers.openai.com/plugins/build/plugins",
+        "developers.openai.com/plugins/build/mcp-server",
         "developers.openai.com/plugins/build/auth",
         "developers.openai.com/plugins/deploy/submission",
+        "developers.openai.com/plugins/guides/security-privacy",
         "developers.openai.com/api/docs/guides/secure-mcp-tunnels",
         "OAuth 2.1",
         "public streamable-HTTPS",

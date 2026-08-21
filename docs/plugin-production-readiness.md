@@ -1,20 +1,33 @@
 # Plugin production readiness
 
 CW Plugin 0.1.0 retains the production-candidate contract introduced by the
-Core 0.12 milestone. It does not deploy a production gateway or OAuth service,
-and it is not a public submission.
+Core 0.12 milestone. Local MCP stdio is implemented. A staging HTTPS MCP
+gateway and OAuth discovery are implemented for testing at the current dev
+baseline. Production MCP/OAuth are not deployed, OpenAI domain verification is
+not complete, and no universal submission or public Plugin publication exists.
+
+## Technical publisher identity
+
+- **Legal publisher:** Fantomid LLC
+- **Technology brand:** Queopius
+- **Product:** CW — Codex Workflow
+- **Contact identity:** Queopius | Fantomid LLC
+- **Website:** <https://cwcli.dev>
+- **Documentation:** <https://docs.cwcli.dev>
+
+Queopius is a technology brand operated by Fantomid LLC,
+a New Mexico limited liability company.
 
 ## Official model verified
 
-Reviewed **2026-08-15** against current official OpenAI documentation:
+Current-state wording rechecked **2026-08-21** against official OpenAI
+documentation:
 
-- [Plugin architecture](https://developers.openai.com/plugins/concepts/plugins)
 - [Package your plugin](https://developers.openai.com/plugins/build/plugins)
+- [Build an MCP server](https://developers.openai.com/plugins/build/mcp-server)
 - [Authentication](https://developers.openai.com/plugins/build/auth)
-- [Connect and test](https://developers.openai.com/plugins/deploy/connect-chatgpt)
 - [Submit plugins](https://developers.openai.com/plugins/deploy/submission)
 - [Security and privacy](https://developers.openai.com/plugins/guides/security-privacy)
-- [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 
 The current package entry point is `.codex-plugin/plugin.json`. A plugin may
 combine skills and MCP and does not require UI. A public MCP submission needs
@@ -46,9 +59,9 @@ enables writes. CW therefore treats discovered surface capability as evidence.
    a development tunnel ID.
 8. **Privacy:** source and `.cw` remain local. Only normalized, redacted CW
    envelopes cross the production relay by default.
-9. **Operations:** Queopius owns gateway security, auth integration, routing,
-   availability, and incident response; users own local-agent operation and
-   project grants.
+9. **Operations:** Fantomid LLC operating under the Queopius brand would own
+   production gateway security, auth integration, routing, availability, and
+   incident response; users own local-agent operation and project grants.
 10. **Submission:** blocked until the gateway, OAuth, domain verification,
     legal/business material, and real production acceptance exist.
 
@@ -76,12 +89,70 @@ normal OAuth scope and is not exposed in this candidate.
 | Current plugin package and skill | READY |
 | Deterministic local package/registry validation | READY |
 | Production topology and trust boundary | DEFINED |
-| OAuth and grant contract | DEFINED, NOT IMPLEMENTED |
-| Public HTTPS gateway/relay | NOT IMPLEMENTED |
-| Public domain verification | NOT RUN |
+| Local MCP stdio | IMPLEMENTED |
+| Staging MCP HTTPS | IMPLEMENTED FOR TESTING |
+| Staging OAuth/discovery | IMPLEMENTED FOR TESTING |
+| Production MCP HTTPS | NOT DEPLOYED |
+| Production OAuth | NOT DEPLOYED |
+| OpenAI domain verification | NOT COMPLETED |
 | Legal/business publication inputs | HUMAN INPUT REQUIRED |
-| Public submission | NOT PERFORMED |
+| Universal submission | NOT CREATED |
+| Public Plugin publication | NOT COMPLETED |
 
 Therefore **production readiness is NOT READY** and **plugin submission is
 BLOCKED**. The milestone is useful because the blockers are now explicit and
 implementation can proceed without revisiting CW Core.
+
+## Canonical URL status
+
+Checked on 2026-08-21. This table records current behavior; it does not deploy
+or reserve any external URL.
+
+| Purpose | URL | Classification |
+| --- | --- | --- |
+| Product website | <https://cwcli.dev> | `LIVE_CANONICAL` |
+| Technical documentation | <https://docs.cwcli.dev> | `LIVE_CANONICAL` |
+| Plugin documentation | <https://docs.cwcli.dev/en/stable/plugin-app-candidate/> | `LIVE_LOCALIZED` |
+| Technical support | <https://docs.cwcli.dev/en/stable/plugin-support/> | `LIVE_LOCALIZED` |
+| Remote authentication docs | <https://docs.cwcli.dev/en/stable/remote-auth/> | `LIVE_LOCALIZED` |
+| Staging MCP | `https://staging-mcp.cwcli.dev/mcp` | `STAGING_ONLY` |
+| Production MCP | none | `MISSING` |
+| Production OAuth | none | `MISSING` |
+| Final Privacy Policy | none | `MISSING` |
+| Terms of Use | none | `MISSING` |
+
+The unlocalized Plugin leaf URLs currently return 404. Public metadata uses the
+existing localized stable Plugin page until a reliable version-neutral redirect
+is provided outside this repository. No draft privacy document is linked as a
+final policy.
+
+## Legal readiness checklist
+
+**DRAFT — REQUIRES HUMAN AND LEGAL REVIEW**
+
+This checklist is internal readiness material, not legal advice and not a
+submission document. Human and legal review must define or approve:
+
+- Privacy Policy;
+- Terms of Use;
+- retention;
+- deletion;
+- subprocessors;
+- contractual jurisdiction;
+- incident-response commitments;
+- regional availability;
+- legal, privacy, and support contact details.
+
+No final legal policy is published or linked by Plugin 0.1.0.
+
+## Version boundary
+
+- Core: `0.14.1`
+- Plugin: `0.1.0`
+- Remote protocol: `cw.remote.v1`
+- Proposed next Plugin version: `0.2.0`
+- Proposed version status: **NOT AUTHORIZED**
+
+The proposal reflects the immutable published `0.1.0` bytes, tightened schemas,
+and the future change in remote composition. This document does not modify a
+version file or authorize a release.
