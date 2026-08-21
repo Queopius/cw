@@ -88,6 +88,14 @@ The Release Check workflow rejects tags whose commit is not reachable from
 `origin/release` or whose name does not match the repository `VERSION`. It builds
 artifacts for inspection but does not publish them to PyPI.
 
+The local release builder creates the deterministic Plugin candidate before
+writing `cw-release-manifest.json`, records under the backward-compatible
+`signature.extensions.plugin` key its independent Plugin version,
+filename, SHA-256, byte size, Core compatibility, and source/builder
+provenance, then revalidates the referenced bytes. This metadata does not
+publish or replace a Plugin asset and does not couple the Plugin version to the
+Core tag.
+
 ## Platform release gate
 
 The deterministic platform workflow builds and installs the wheel outside the

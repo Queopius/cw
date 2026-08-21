@@ -1,8 +1,7 @@
 # Plugin / App candidate
 
-CW `0.12.0` retains the proven CW 0.11 plugin package and bounded ChatGPT
-Developer Mode connection profile, then adds explicit production-readiness
-contracts. It remains a local, reviewable
+CW Core `0.14.1` and CW Plugin `0.1.0` retain the proven local plugin package
+and bounded ChatGPT Developer Mode connection profile. The Plugin remains a local, reviewable
 OpenAI plugin candidate. It is text/tool-first: one production skill,
 one bundled stdio MCP server, official CW assets, and a repo-local development
 marketplace entry. It is not published to the universal Plugins Directory and
@@ -42,6 +41,11 @@ plugins/cw/
     └── agents/openai.yaml
 ```
 
+The deterministic `cw-plugin-0.1.0.zip` uses `cw/` as its only root and also
+contains byte-for-byte copies of the repository's canonical `LICENSE` and
+`NOTICE`. The builder rejects missing, changed, symlinked, traversing,
+case-colliding, or otherwise non-canonical members.
+
 The plugin adapter starts the existing executable:
 
 ```text
@@ -52,6 +56,13 @@ It assumes the host launches the bundled stdio server in the active repository.
 The repository must already be an initialized CW project and `cw` must be
 installed with its MCP extra. The command does not initialize projects or
 accept a caller-selected path through a tool.
+
+Before registering any MCP tool, the installed runtime loads its packaged
+Plugin compatibility policy and verifies Core `>=0.14.0,<1.0.0`. Missing,
+malformed, older, or future-incompatible versions and missing or manipulated
+policy data fail closed with `PLATFORM_CAPABILITY_UNAVAILABLE`; no partial tool
+surface is registered. The Remote protocol remains `cw.remote.v1` with strict
+negotiation.
 
 ## Install and enable locally
 
@@ -93,13 +104,21 @@ explicit user intent; it is not added to MCP by this candidate.
 | --- | --- | --- | --- |
 | `READ` | status, inspect, history, explain, completion, gates, operation status | `readOnlyHint=true` | `CWApplication` capability policy |
 | `EXECUTION` | configured validation, independent review | `readOnlyHint=false`, `destructiveHint=false` | trusted workflow/reviewer supervisor |
-| `CONTROLLED_STATE_MUTATION` | authorized phase start, retry, queued cancel | `readOnlyHint=false`, `destructiveHint=false`, `idempotentHint=true` | engine state machine and operation digest |
+| `CONTROLLED_STATE_MUTATION` | authorized phase start, retry, queued cancel | `readOnlyHint=false`, `destructiveHint=false`, `idempotentHint=false` | engine state machine and operation digest |
 | `HIGH_CONSEQUENCE_AUTHORIZATION` | none | absent | rejected server-side |
 
 The current plugin manifest has display-level capabilities, while individual
 MCP annotations carry the supported read/write hints. Neither is trusted for
 authorization. `plugins/cw/capabilities.json` records the precise CW mapping;
 runtime contracts are compared against it in CI.
+
+All 12 tools advertise closed input objects (`additionalProperties=false`) and
+a closed, versioned result envelope. Runtime validation rejects the same
+unknown parameters advertised by the schema. Reads are advertised idempotent.
+Mutations are not advertised idempotent because `operation_id` remains optional
+for compatibility; clients should supply and reuse a stable safe identifier.
+The same identifier and payload replay the persisted operation, while reuse
+with a different payload fails with `OPERATION_CONFLICT`.
 
 ## Supported surfaces
 
@@ -177,4 +196,14 @@ candidate without adding another security or maintenance surface.
 
 The selected public topology, OAuth contract, and remaining submission blockers
 are documented in [plugin production readiness](plugin-production-readiness.md).
-No public gateway or OAuth implementation is included in 0.12.
+No production public gateway, production OAuth deployment, marketplace
+submission, or universal ChatGPT availability is claimed by Plugin 0.1.0.
+
+## Remove or roll back locally
+
+Remove the local development installation with `codex plugin remove cw` (or
+the exact installed plugin identifier reported by `codex plugin list`). Remove
+the repo-local marketplace separately only if it was added for this checkout.
+Stopping/removing the Plugin does not edit project gates or `.cw` evidence.
+Reinstall the unchanged published asset only through a separately authorized
+rollback procedure; local hardening candidates are not published artifacts.

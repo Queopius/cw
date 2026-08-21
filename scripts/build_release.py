@@ -10,8 +10,18 @@ import shutil
 import tarfile
 import tempfile
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    from .build_plugin_candidate import build as build_plugin
+except ImportError:
+    from build_plugin_candidate import build as build_plugin
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from cw.update.models import ReleaseManifest
 
 
 def main() -> int:
@@ -19,7 +29,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=Path("dist/update"))
     parser.add_argument("--channel", choices=("stable", "beta", "dev"), default="stable")
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[1]
+    root = ROOT
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
     args.output.mkdir(parents=True, exist_ok=True)
     archive = args.output / f"cw-{version}-{platform.system().lower()}-{platform.machine().lower()}.tar.gz"
@@ -50,6 +60,12 @@ def main() -> int:
             for path in sorted(stage.rglob("*")):
                 tar.add(path, arcname=path.relative_to(stage), recursive=False)
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    plugin_version = (root / "plugins" / "cw" / "VERSION").read_text(encoding="utf-8").strip()
+    plugin_archive = args.output / f"cw-plugin-{plugin_version}.zip"
+    plugin_result = build_plugin(plugin_archive)
+    compatibility = json.loads(
+        (root / "cw" / "adapters" / "mcp" / "plugin-compatibility.json").read_text(encoding="utf-8")
+    )
     machine = {"AMD64": "x86_64", "aarch64": "arm64"}.get(platform.machine(), platform.machine()).lower()
     manifest = {
         "schema_version": 1, "version": version, "channel": args.channel,
@@ -64,8 +80,31 @@ def main() -> int:
             "summary": "See the bundled CW changelog for verified release details.",
             "url": f"https://github.com/Queopius/cw/releases/tag/v{version}",
         },
+        "signature": {
+            "extensions": {
+                "plugin": {
+                    "name": "cw",
+                    "version": plugin_version,
+                    "asset": {
+                        "filename": plugin_archive.name,
+                        "sha256": plugin_result["sha256"],
+                        "size": plugin_archive.stat().st_size,
+                    },
+                    "core_compatibility": compatibility["core"],
+                    "provenance": {
+                        "source_commit": commit,
+                        "builder": "scripts/build_plugin_candidate.py",
+                    },
+                }
+            },
+        },
     }
-    (args.output / "cw-release-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    manifest_path = args.output / "cw-release-manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    parsed_manifest = ReleaseManifest.from_dict(manifest)
+    if parsed_manifest.plugin is None:
+        raise RuntimeError("release manifest did not record the Plugin candidate")
+    parsed_manifest.plugin.validate_asset(plugin_archive)
     print(archive)
     return 0
 

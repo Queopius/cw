@@ -1,7 +1,8 @@
 # Plugin production deployment contract
 
-CW 0.12 defines, but does not deploy, the production runtime selected in
-[ADR 0005](adr/0005-production-mcp-relay.md). CW 0.14 prepares a deliberately
+The current Plugin 0.1.0 retains, but does not deploy, the production runtime
+contract introduced in Core 0.12 and selected in
+[ADR 0005](adr/0005-production-mcp-relay.md). Core 0.14 prepares a deliberately
 non-production Render/Auth0 staging adapter in
 [ADR 0010](adr/0010-render-staging-hosting.md); those vendors are not permanent
 CW architecture dependencies.
