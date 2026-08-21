@@ -118,7 +118,7 @@ jobs:
           python scripts/validate_remote_candidate.py
           python scripts/validate_staging_bootstrap.py
           python scripts/build_plugin_candidate.py --check
-          python -m unittest tests.test_plugin_candidate tests.test_plugin_hardening tests.test_chatgpt_development tests.test_plugin_production_readiness -v
+          python -m unittest tests.test_plugin_candidate tests.test_plugin_installation tests.test_plugin_hardening tests.test_chatgpt_development tests.test_plugin_production_readiness -v
 
   docs:
     name: Documentation

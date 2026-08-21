@@ -57,6 +57,7 @@ nav:
       - MCP Runtime: mcp-runtime.md
       - MCP Tool Contract: mcp-tool-contract.md
       - Plugin / App Candidate: plugin-app-candidate.md
+      - Plugin Installation: plugin-installation.md
       - ChatGPT Development: chatgpt-development.md
       - ChatGPT 0.11 Acceptance: acceptance/chatgpt-development-0.11.md
       - Plugin Production Readiness: plugin-production-readiness.md
