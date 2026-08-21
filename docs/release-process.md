@@ -26,9 +26,12 @@ dev → staging → release → prod
 
 - `dev` receives ongoing implementation.
 - `staging` receives integrated candidates for broader validation.
-- `release` contains versioned release candidates and is the only branch from
-  which version tags are created.
+- `release` contains untagged versioned release candidates.
 - `prod` is the default branch and represents the current production release.
+
+Public tags are created only after the exact candidate has completed the full
+promotion chain and is contained in `origin/prod`. A tag from `dev`, `staging`,
+or `release` is invalid even when the same tree was previously tested there.
 
 Promote changes with reviewed pull requests in that order. Do not force-push
 long-lived branches.
@@ -66,7 +69,7 @@ remain welcome; only maintainers decide which reviewed changes are merged.
    local result is not evidence for another OS. Review the uploaded sanitized
    compatibility reports before promotion.
 
-4. Update `VERSION`, `cw.__version__`, `pyproject.toml`, and `CHANGELOG.md` in the
+4. Update `VERSION` and its derived public surfaces plus `CHANGELOG.md` in the
    release candidate.
    After bumping `VERSION`, also run:
 
@@ -74,27 +77,35 @@ remain welcome; only maintainers decide which reviewed changes are merged.
    make public-version-sync
    ```
    to refresh public docs version surfaces.
-5. Create an annotated tag while checked out on `release`:
+5. Promote the exact candidate through `release → prod` using a protected PR.
+6. From the final `prod` commit, create and push one annotated tag without
+   moving or recreating it:
 
    ```bash
-   git switch release
-   git tag -a v0.2.0 -m "CW by Queopius 0.2.0"
-   git push origin release v0.2.0
+   git switch prod
+   git pull --ff-only origin prod
+   git tag -a v0.15.0 -m "CW by Queopius 0.15.0"
+   git push origin v0.15.0
    ```
 
-6. Promote the tagged release commit to `prod` through review.
-
 The Release Check workflow rejects tags whose commit is not reachable from
-`origin/release` or whose name does not match the repository `VERSION`. It builds
-artifacts for inspection but does not publish them to PyPI.
+`origin/prod`, lightweight or moved tags, and names that do not match
+`VERSION`. It builds artifacts for inspection but does not publish to PyPI.
 
-The local release builder creates the deterministic Plugin candidate before
-writing `cw-release-manifest.json`, records under the backward-compatible
-`signature.extensions.plugin` key its independent Plugin version,
-filename, SHA-256, byte size, Core compatibility, and source/builder
-provenance, then revalidates the referenced bytes. This metadata does not
-publish or replace a Plugin asset and does not couple the Plugin version to the
-Core tag.
+Core release builds require the explicit `--component core` profile. The
+profile writes only the updater archive and a manifest without
+`signature.extensions.plugin`; wheel and sdist come from the Python build. An
+exact four-file allowlist is validated before workflow upload and again before
+GitHub publication. Existing releases are accepted idempotently only when all
+names, sizes, and SHA-256 digests already match; assets are never replaced with
+`--clobber`.
+
+Plugin validation remains a separate CI job. Its outputs are unpublished
+candidates outside the Core release directory. Core `0.15.0` does not build or
+attach `cw-plugin-0.1.0.zip`; the existing public asset remains canonical at
+SHA-256 `b59275bb7e7a32e58c1d48202c9cf489874a6d21ce15fad3ef4cd6f202512021`.
+Publishing current Plugin source requires a separately authorized Plugin
+`0.2.0` ceremony.
 
 ## Platform release gate
 

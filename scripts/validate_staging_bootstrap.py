@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate deterministic CW 0.14 staging deployment contracts."""
+"""Validate the immutable CW 0.14 staging deployment contract against Core."""
 
 from __future__ import annotations
 
@@ -50,8 +50,8 @@ SECRET_PATTERNS = (
 def validation_errors(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     core_version = (root / "VERSION").read_text(encoding="utf-8").strip()
-    if re.fullmatch(r"0\.14\.\d+", core_version) is None:
-        errors.append("staging bootstrap Core version must remain on the 0.14.x line")
+    if re.fullmatch(r"0\.\d+\.\d+", core_version) is None:
+        errors.append("staging bootstrap validation requires a stable pre-1.0 Core version")
     for relative in ("Dockerfile", ".dockerignore", "render.yaml"):
         if not (root / relative).is_file():
             errors.append(f"missing deployment artifact: {relative}")
@@ -123,7 +123,7 @@ def main() -> int:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    print("CW 0.14 Render/Auth0 staging bootstrap contracts are valid.")
+    print("CW 0.14 Render/Auth0 staging bootstrap contracts are valid for the current Core.")
     return 0
 
 

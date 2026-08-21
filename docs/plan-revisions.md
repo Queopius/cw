@@ -58,8 +58,9 @@ reinterpret evidence against a changed phase contract. If an amendment journal
 remains after interruption, preserve it and its backup and rerun the exact
 supported operation; `cw doctor` verifies the recovered history.
 
-This public CLI addition recommends Core `0.15.0` under SemVer. That version is
-not authorized or applied by this change; the current source remains `0.14.1`.
+This public CLI addition is released as Core `0.15.0` under SemVer. It changes
+neither Plugin `0.1.0` nor `cw.remote.v1` and remains unavailable through MCP
+and Remote.
 
 ### Amending an unapproved proposal
 
