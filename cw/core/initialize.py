@@ -366,7 +366,7 @@ def backup_metadata(root: Path) -> Path:
     relatives = (
         "project.json", "state.json", "config.toml", "runtime", "reviews", "gates",
         "completion", "validation", "plan-revisions", "plan-proposals",
-        "supersessions", "logs", "locks",
+        "supersessions", "evidence-supersessions", "plan-amendments", "logs", "locks",
     )
     for relative in relatives:
         source = root / ".cw" / relative

@@ -200,7 +200,14 @@ def derive_effective_workflow_state(
             issues.append(f"current phase {expected_current} already has a valid gate")
         if state.get("status") == WorkflowState.COMPLETED.value:
             issues.append("workflow is marked complete without all approval gates")
-    if approved and workflow.status == "PROPOSED":
+    active_amendment_proposed = (
+        state.get("status") == WorkflowState.PLAN_PROPOSED.value
+        and isinstance(state.get("history"), list)
+        and bool(state["history"])
+        and isinstance(state["history"][-1], dict)
+        and state["history"][-1].get("action") == "phase_artifacts_amended"
+    )
+    if approved and workflow.status == "PROPOSED" and not active_amendment_proposed:
         issues.append("an executing plan with approval gates cannot remain PROPOSED")
     if (
         expected_current is not None

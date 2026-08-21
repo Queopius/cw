@@ -22,6 +22,8 @@ CORE_PROTECTED_PATHS = (
     ".cw/plan-revisions",
     ".cw/plan-proposals",
     ".cw/supersessions",
+    ".cw/evidence-supersessions",
+    ".cw/plan-amendments",
     ".cw/runtime/plan-rebaseline-transaction.json",
     ".cw/runtime/plan-amend-transaction.json",
     ".codex/workflow/phases.yaml",

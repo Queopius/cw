@@ -51,6 +51,7 @@ jobs:
           python -m pip install ".[remote]"
           python -m unittest tests.test_mcp_runtime tests.test_mcp_actions tests.test_plugin_candidate tests.test_plugin_installation tests.test_plugin_hardening tests.test_chatgpt_development tests.test_plugin_production_readiness
           python -m unittest tests.test_remote_gateway
+          python -m unittest tests.test_plan_amendment tests.test_plan_revisions
           python -m unittest tests.test_staging_bootstrap
           python scripts/run_mcp_acceptance.py
           python scripts/validate_plugin_candidate.py
@@ -82,6 +83,7 @@ jobs:
           cw version --verbose
           cw --version
           cw help
+          cw plan amend --help
       - name: Run installed-wheel deterministic acceptance
         run: python scripts/run_acceptance.py --output artifacts/compatibility-report.json
       - name: Upload sanitized compatibility evidence

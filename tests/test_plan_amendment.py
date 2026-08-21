@@ -20,6 +20,13 @@ from cw.core.errors import CwError, ErrorCode
 from cw.core.initialize import backup_metadata, initialize
 from cw.core.models import WorkflowState
 from cw.core.plan_amendment import TRANSACTION, amend_plan
+from cw.core.plan_amendment import (
+    apply_active_artifact_amendment,
+    audit_evidence_supersessions,
+    prepare_active_artifact_amendment,
+)
+from cw.core.gates import artifact_hashes
+from cw.core.locking import operation_lock
 from cw.core.state import bind_plan, load_state, save_state, transition, validate_state
 from cw.core.utils import atomic_json, sha256_file
 from cw.core.workflow import (
@@ -29,6 +36,10 @@ from cw.core.workflow import (
     workflow_hash,
     write_workflow,
 )
+from tests.helpers import FakeAdapter, TempRepo, result
+from cw.agents.reviewer import run_review
+from cw.application.actions import validate_current_phase
+from cw.application.projects import ProjectHandle, ResolvedProject
 
 FIXTURES = Path(__file__).parent / "fixtures" / "plan-amend"
 
@@ -62,6 +73,111 @@ class ProposedRepo:
 
     def amend(self, **kwargs):
         return amend_plan(self.root, "corrected-phases.yaml", self.sha, **kwargs)
+
+
+class ActiveArtifactRepo:
+    """Neutral active-workflow fixture with incompatible current-phase evidence."""
+
+    def __init__(
+        self,
+        *,
+        reviews: int = 3,
+        phase_id: str = "01-phase-1",
+        addition: str = "tests/Fixtures/Contracts/example.graphql",
+    ) -> None:
+        self.repo = TempRepo(name="generic-marketplace-bridge", phases=2)
+        self.root = self.repo.root
+        self.phase_id = phase_id
+        document = _read_document(self.root / ".codex/workflow/phases.yaml")
+        document["phases"][0]["id"] = phase_id
+        document["phases"][1]["depends_on"] = [phase_id]
+        document["phases"][0]["review_paths"].append("tests/Fixtures/Contracts/**/*")
+        document["completion_target"] = {
+            "id": "controlled-pilot",
+            "name": "Controlled pilot",
+            "description": "Neutral fixture completion boundary",
+            "target_type": "controlled-pilot",
+            "requirements": [{
+                "id": "CONTRACT_INTEGRITY",
+                "description": "The declared completion contract remains intact",
+                "severity": "blocking",
+                "evidence_expectations": ["canonical contract hash"],
+            }],
+        }
+        write_workflow(self.root / ".codex/workflow/phases.yaml", document)
+        state = load_state(self.root)
+        state["current_phase"] = phase_id
+        state["workflow_sha256"] = workflow_hash(self.root / ".codex/workflow/phases.yaml")
+        save_state(self.root, state)
+        self.repo.workflow = load_workflow(self.root)
+        self.repo.artifact()
+        project = ResolvedProject(
+            self.root,
+            self.repo.project,
+            ProjectHandle(self.repo.project.project_id, "generic-fixture", self.root.name),
+        )
+        validate_current_phase(project, "generic-validation-before-amendment")
+        self.addition = addition
+        target = self.root / self.addition
+        target.parent.mkdir(parents=True)
+        target.write_text("type Query { example: String! }\n", encoding="utf-8")
+        readiness = {
+            "schema_version": 1,
+            "phase": phase_id,
+            "status": "READY_FOR_REVIEW",
+            "artifacts": ["docs/phase-1.md", addition],
+            "checks_executed": [],
+            "session_id": "0" * 32,
+        }
+        atomic_json(self.root / ".cw/runtime/READY_FOR_REVIEW.json", readiness)
+        old_hashes = artifact_hashes(self.root, self.repo.workflow.phases[0].artifacts)
+        for attempt in range(1, reviews + 1):
+            review = {
+                "schema_version": 1,
+                "workflow": self.repo.workflow.id,
+                "phase": phase_id,
+                "attempt": attempt,
+                "kind": "semantic_review",
+                "decision": "REVISE",
+                "summary": "Artifact declaration is incomplete",
+                "criteria": [{
+                    "id": "P1-001", "status": "FAIL", "severity": "blocking",
+                    "evidence": ["docs/phase-1.md:1 incomplete manifest"],
+                }],
+                "blocking_criteria": [],
+                "blocking_issues": ["Declare the existing contract fixture", "P1-001"],
+                "artifact_hashes": old_hashes,
+                "created_at": f"2026-08-21T12:00:0{attempt}Z",
+            }
+            path = self.root / ".cw/reviews" / f"{phase_id}-attempt-{attempt:02d}.json"
+            atomic_json(path, review)
+            state["last_review"] = path.relative_to(self.root).as_posix()
+            state.setdefault("history", []).append({
+                "timestamp": review["created_at"], "phase": phase_id,
+                "action": "revision_required", "attempt": attempt,
+                "issues": review["blocking_issues"],
+            })
+        state["attempt"] = reviews
+        state["revision_attempt"] = reviews
+        state["status"] = WorkflowState.REVISION_REQUIRED.value
+        save_state(self.root, state)
+
+    @property
+    def workflow_sha(self) -> str:
+        return workflow_hash(self.root / ".codex/workflow/phases.yaml")
+
+    @property
+    def state_sha(self) -> str:
+        return sha256_file(self.root / ".cw/state.json")
+
+    def apply(self, **kwargs):
+        return apply_active_artifact_amendment(
+            self.root, self.phase_id, [self.addition], self.workflow_sha,
+            self.state_sha, "Declare an existing omitted contract artifact", **kwargs,
+        )
+
+    def close(self) -> None:
+        self.repo.close()
 
 
 class PlanAmendmentTests(unittest.TestCase):
@@ -611,6 +727,382 @@ class PlanAmendmentTests(unittest.TestCase):
         )
         self.assertEqual(output["workflow_sha256"], event["workflow_sha256"])
         self.assertEqual(output["backup"], event["backup"])
+
+    def test_ambiguous_json_yaml_aliases_and_oversized_payload_fail_closed(self) -> None:
+        target = self.repo.root / "corrected-phases.yaml"
+        for content in (
+            '{"schema_version":1,"schema_version":1}',
+            "schema_version: &version 1\nworkflow: {id: sample}\ncopy: *version\n",
+        ):
+            with self.subTest(content=content[:20]):
+                target.write_text(content, encoding="utf-8")
+                with self.assertRaises(CwError) as raised:
+                    amend_plan(self.repo.root, "corrected-phases.yaml", self.repo.sha)
+                self.assertEqual(ErrorCode.SCHEMA_VALIDATION_ERROR, raised.exception.code)
+        target.write_bytes(b"x" * (1024 * 1024 + 1))
+        with self.assertRaises(CwError) as oversized:
+            amend_plan(self.repo.root, "corrected-phases.yaml", self.repo.sha)
+        self.assertEqual(ErrorCode.USAGE_ERROR, oversized.exception.code)
+
+
+class ActiveArtifactAmendmentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.case = ActiveArtifactRepo()
+
+    def tearDown(self) -> None:
+        self.case.close()
+
+    def tree(self) -> dict[str, bytes]:
+        return {
+            path.relative_to(self.case.root).as_posix(): path.read_bytes()
+            for path in self.case.root.rglob("*")
+            if path.is_file() and not path.is_symlink() and ".git" not in path.parts
+        }
+
+    def test_generic_active_amendment_preserves_contract_and_supersedes_evidence(self) -> None:
+        before_contract = contract_hash(load_workflow(self.case.root).completion_target) if load_workflow(self.case.root).completion_target else None
+        original = {
+            path.relative_to(self.case.root).as_posix(): path.read_bytes()
+            for path in [
+                self.case.root / ".cw/runtime/READY_FOR_REVIEW.json",
+                *sorted((self.case.root / ".cw/reviews").glob("*.json")),
+                *sorted((self.case.root / ".cw/validation").glob("*.json")),
+            ]
+        }
+        output = self.case.apply()
+        workflow = load_workflow(self.case.root)
+        state = load_state(self.case.root)
+        self.assertEqual([self.case.addition], output["added_artifacts"])
+        self.assertEqual([], output["removed_artifacts"])
+        self.assertEqual([], output["other_changes"])
+        self.assertEqual("PLAN_PROPOSED", state["status"])
+        self.assertEqual("PROPOSED", workflow.status)
+        self.assertFalse(output["automatic_approval"])
+        self.assertEqual(before_contract, contract_hash(workflow.completion_target) if workflow.completion_target else None)
+        self.assertIn(self.case.addition, workflow.phase(self.case.phase_id).artifacts)
+        self.assertFalse((self.case.root / ".cw/runtime/READY_FOR_REVIEW.json").exists())
+        self.assertEqual([], list((self.case.root / ".cw/reviews").glob("*.json")))
+        backup = self.case.root / output["backup"]
+        for reference, content in original.items():
+            self.assertEqual(content, (backup / reference.removeprefix(".cw/")).read_bytes())
+        self.assertEqual(5, audit_evidence_supersessions(self.case.root, workflow, state))
+        self.assertEqual(5, len(list((self.case.root / ".cw/evidence-supersessions").glob("*.json"))))
+        validate_state(self.case.root, state, workflow)
+
+    def test_dry_run_is_byte_exact_mutation_free_and_reports_both_cas_hashes(self) -> None:
+        before = self.tree()
+        output = prepare_active_artifact_amendment(
+            self.case.root, self.case.phase_id, [self.case.addition],
+            self.case.workflow_sha, self.case.state_sha,
+            "Declare an existing omitted contract artifact",
+        )
+        self.assertEqual(before, self.tree())
+        self.assertTrue(output["dry_run"])
+        self.assertEqual(self.case.workflow_sha, output["expected_workflow_sha256"])
+        self.assertEqual(self.case.state_sha, output["expected_state_sha256"])
+        self.assertEqual("ADD_PHASE_ARTIFACT", output["operation"])
+
+    def test_repeated_additions_are_explicit_and_case_collisions_fail(self) -> None:
+        second = self.case.root / "tests/Fixtures/Contracts/second.graphql"
+        second.write_text("type Mutation { example: Boolean! }\n", encoding="utf-8")
+        output = prepare_active_artifact_amendment(
+            self.case.root, self.case.phase_id, [self.case.addition, second.relative_to(self.case.root).as_posix()],
+            self.case.workflow_sha, self.case.state_sha, "Declare both contract artifacts",
+        )
+        self.assertEqual(2, len(output["added_artifacts"]))
+        with self.assertRaises(CwError) as raised:
+            prepare_active_artifact_amendment(
+                self.case.root, self.case.phase_id, [self.case.addition, self.case.addition.upper()],
+                self.case.workflow_sha, self.case.state_sha, "Collision",
+            )
+        self.assertEqual(ErrorCode.INVALID_ARTIFACT, raised.exception.code)
+
+    def test_workflow_and_state_compare_and_swap_fail_separately(self) -> None:
+        with self.assertRaises(CwError) as workflow_error:
+            prepare_active_artifact_amendment(
+                self.case.root, self.case.phase_id, [self.case.addition], "0" * 64,
+                self.case.state_sha, "Stale workflow",
+            )
+        self.assertEqual(ErrorCode.STALE_WORKFLOW_SHA, workflow_error.exception.code)
+        with self.assertRaises(CwError) as state_error:
+            prepare_active_artifact_amendment(
+                self.case.root, self.case.phase_id, [self.case.addition], self.case.workflow_sha,
+                "0" * 64, "Stale state",
+            )
+        self.assertEqual(ErrorCode.STALE_STATE_SHA, state_error.exception.code)
+
+    def test_invalid_paths_phase_and_completed_gate_fail_closed(self) -> None:
+        invalid = ("../escape", "/tmp/absolute", "C:/windows", ".cw/state.json", "", "docs\\phase.md")
+        for value in invalid:
+            with self.subTest(value=value), self.assertRaises(CwError) as raised:
+                prepare_active_artifact_amendment(
+                    self.case.root, self.case.phase_id, [value], self.case.workflow_sha,
+                    self.case.state_sha, "Reject unsafe path",
+                )
+            self.assertEqual(ErrorCode.INVALID_ARTIFACT, raised.exception.code)
+        with self.assertRaises(CwError):
+            prepare_active_artifact_amendment(
+                self.case.root, "02-phase-2", [self.case.addition], self.case.workflow_sha,
+                self.case.state_sha, "Wrong phase",
+            )
+
+    def test_missing_outside_review_path_symlink_and_hardlink_are_rejected(self) -> None:
+        outside = self.case.root / "outside.txt"
+        outside.write_text("outside\n", encoding="utf-8")
+        symlink = self.case.root / "tests/Fixtures/Contracts/link.graphql"
+        hardlink = self.case.root / "tests/Fixtures/Contracts/hard.graphql"
+        try:
+            symlink.symlink_to(self.case.root / self.case.addition)
+            os.link(self.case.root / self.case.addition, hardlink)
+        except OSError:
+            self.skipTest("links unavailable on this platform")
+        for value in ("missing.graphql", "outside.txt", symlink.relative_to(self.case.root).as_posix(), hardlink.relative_to(self.case.root).as_posix()):
+            with self.subTest(value=value), self.assertRaises(CwError) as raised:
+                prepare_active_artifact_amendment(
+                    self.case.root, self.case.phase_id, [value], self.case.workflow_sha,
+                    self.case.state_sha, "Reject invalid artifact",
+                )
+            self.assertEqual(ErrorCode.INVALID_ARTIFACT, raised.exception.code)
+
+    def test_exact_replay_is_idempotent_and_different_payload_conflicts(self) -> None:
+        workflow_sha, state_sha = self.case.workflow_sha, self.case.state_sha
+        first = apply_active_artifact_amendment(
+            self.case.root, self.case.phase_id, [self.case.addition], workflow_sha,
+            state_sha, "Declare an existing omitted contract artifact",
+        )
+        replay = apply_active_artifact_amendment(
+            self.case.root, self.case.phase_id, [self.case.addition], workflow_sha,
+            state_sha, "Declare an existing omitted contract artifact",
+        )
+        self.assertFalse(first.get("idempotent_replay", False))
+        self.assertTrue(replay["idempotent_replay"])
+        with self.assertRaises(CwError) as raised:
+            apply_active_artifact_amendment(
+                self.case.root, self.case.phase_id, [self.case.addition], workflow_sha,
+                state_sha, "Different reason",
+            )
+        self.assertIn(raised.exception.code, {ErrorCode.STALE_WORKFLOW_SHA, ErrorCode.OPERATION_CONFLICT})
+
+    def test_failures_at_every_write_boundary_restore_original_bytes(self) -> None:
+        stages = (
+            "old_revision_persisted", "new_revision_persisted", "operation_record_persisted",
+            "supersessions_persisted", "active_evidence_removed", "workflow_activated",
+            "state_activated", "audit_completed",
+        )
+        for stage in stages:
+            with self.subTest(stage=stage):
+                case = ActiveArtifactRepo()
+                before_workflow = (case.root / ".codex/workflow/phases.yaml").read_bytes()
+                before_state = (case.root / ".cw/state.json").read_bytes()
+                before_evidence = {
+                    path.relative_to(case.root).as_posix(): path.read_bytes()
+                    for path in [
+                        case.root / ".cw/runtime/READY_FOR_REVIEW.json",
+                        *sorted((case.root / ".cw/reviews").glob("*.json")),
+                        *sorted((case.root / ".cw/validation").glob("*.json")),
+                    ]
+                }
+                def fail(name: str) -> None:
+                    if name == stage:
+                        raise RuntimeError(stage)
+                try:
+                    with self.assertRaises(CwError):
+                        case.apply(failure_injector=fail)
+                    self.assertEqual(before_workflow, (case.root / ".codex/workflow/phases.yaml").read_bytes())
+                    self.assertEqual(before_state, (case.root / ".cw/state.json").read_bytes())
+                    for reference, content in before_evidence.items():
+                        self.assertEqual(content, (case.root / reference).read_bytes())
+                    self.assertFalse((case.root / TRANSACTION).exists())
+                finally:
+                    case.close()
+
+    def test_cli_dry_run_and_confirmed_noninteractive_apply(self) -> None:
+        previous = Path.cwd()
+        os.chdir(self.case.root)
+        try:
+            dry = io.StringIO()
+            with redirect_stdout(dry):
+                self.assertEqual(0, main((
+                    "plan", "amend", "--phase", self.case.phase_id,
+                    "--add-artifact", self.case.addition,
+                    "--expected-workflow-sha256", self.case.workflow_sha,
+                    "--expected-state-sha256", self.case.state_sha,
+                    "--reason", "Declare omitted artifact", "--dry-run", "--json",
+                )))
+            payload = json.loads(dry.getvalue())
+            self.assertTrue(payload["dry_run"])
+            applied = io.StringIO()
+            with redirect_stdout(applied):
+                self.assertEqual(0, main((
+                    "plan", "amend", "--phase", self.case.phase_id,
+                    "--add-artifact", self.case.addition,
+                    "--expected-workflow-sha256", self.case.workflow_sha,
+                    "--expected-state-sha256", self.case.state_sha,
+                    "--reason", "Declare omitted artifact", "--apply", "--yes",
+                    "--non-interactive", "--json",
+                )))
+            self.assertEqual("PLAN_PROPOSED", json.loads(applied.getvalue())["status"])
+        finally:
+            os.chdir(previous)
+
+    def test_noninteractive_apply_without_yes_is_rejected_without_mutation(self) -> None:
+        before = (
+            (self.case.root / ".codex/workflow/phases.yaml").read_bytes(),
+            (self.case.root / ".cw/state.json").read_bytes(),
+        )
+        previous = Path.cwd()
+        os.chdir(self.case.root)
+        try:
+            self.assertEqual(3, main((
+                "plan", "amend", "--phase", self.case.phase_id,
+                "--add-artifact", self.case.addition,
+                "--expected-workflow-sha256", self.case.workflow_sha,
+                "--expected-state-sha256", self.case.state_sha,
+                "--reason", "Declare omitted artifact", "--apply", "--non-interactive",
+            )))
+        finally:
+            os.chdir(previous)
+        self.assertEqual(before, (
+            (self.case.root / ".codex/workflow/phases.yaml").read_bytes(),
+            (self.case.root / ".cw/state.json").read_bytes(),
+        ))
+
+    def test_sanitized_moloni_shaped_regression_has_no_special_behavior(self) -> None:
+        self.case.close()
+        self.case = ActiveArtifactRepo(
+            phase_id="01-provider-contract-baseline-and-billing-intent-adr",
+            addition="tests/Fixtures/Contracts/moloni-on-schema-2026-08-21.graphql",
+        )
+        output = self.case.apply()
+        self.assertEqual(1, len(output["added_artifacts"]))
+        self.assertEqual([], output["removed_artifacts"])
+        self.assertEqual([], output["other_changes"])
+        self.assertTrue(output["completion_contract_preserved"])
+        self.assertEqual("PLAN_PROPOSED", load_state(self.case.root)["status"])
+
+    def test_previous_phase_gate_and_review_are_preserved_byte_for_byte(self) -> None:
+        repo = TempRepo(name="previous-phase-history", phases=2)
+        try:
+            repo.artifact(1)
+            repo.ready(1)
+            run_review(repo.root, repo.workflow, repo.workflow.phases[0], repo.state(), FakeAdapter(result(1)))
+            repo.workflow = load_workflow(repo.root)
+            repo.artifact(2)
+            addition = repo.root / "docs/phase-2-contract.graphql"
+            addition.write_text("type Query { preserved: Boolean! }\n", encoding="utf-8")
+            gate = repo.root / ".cw/gates/01-phase-1.approved.json"
+            review = next((repo.root / ".cw/reviews").glob("01-phase-1-*.json"))
+            before = (gate.read_bytes(), review.read_bytes())
+            output = apply_active_artifact_amendment(
+                repo.root, "02-phase-2", ["docs/phase-2-contract.graphql"],
+                workflow_hash(repo.root / ".codex/workflow/phases.yaml"),
+                sha256_file(repo.root / ".cw/state.json"),
+                "Declare existing Phase 2 contract artifact",
+            )
+            self.assertEqual(before, (gate.read_bytes(), review.read_bytes()))
+            self.assertEqual([], output["removed_artifacts"])
+            validate_state(repo.root, load_state(repo.root), load_workflow(repo.root))
+        finally:
+            repo.close()
+
+    def test_live_session_and_concurrent_operation_lock_are_rejected(self) -> None:
+        session = {
+            "schema_version": 1,
+            "session_id": "0" * 32,
+            "workflow": "generic-marketplace-bridge",
+            "phase": self.case.phase_id,
+            "status": "ACTIVE",
+            "started_at": "2026-08-21T12:00:00Z",
+            "owner_pid": os.getpid(),
+        }
+        atomic_json(self.case.root / ".cw/runtime/implementer-session.json", session)
+        with self.assertRaises(CwError) as active:
+            prepare_active_artifact_amendment(
+                self.case.root, self.case.phase_id, [self.case.addition],
+                self.case.workflow_sha, self.case.state_sha, "Blocked by live process",
+            )
+        self.assertEqual(ErrorCode.LOCKED, active.exception.code)
+        (self.case.root / ".cw/runtime/implementer-session.json").unlink()
+        with operation_lock(self.case.root, "other-operation"):
+            with self.assertRaises(CwError) as locked:
+                self.case.apply()
+        self.assertEqual(ErrorCode.LOCKED, locked.exception.code)
+
+    def test_artifact_toctou_change_aborts_before_journal(self) -> None:
+        from cw.core import plan_amendment
+
+        original = plan_amendment._artifact_path
+        calls = 0
+        def replace_on_second(root: Path, value: str):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                (root / value).write_text("changed during apply\n", encoding="utf-8")
+            return original(root, value)
+        workflow_before = (self.case.root / ".codex/workflow/phases.yaml").read_bytes()
+        state_before = (self.case.root / ".cw/state.json").read_bytes()
+        with patch("cw.core.plan_amendment._artifact_path", side_effect=replace_on_second):
+            with self.assertRaises(CwError) as raised:
+                self.case.apply()
+        self.assertEqual(ErrorCode.OPERATION_CONFLICT, raised.exception.code)
+        self.assertEqual(workflow_before, (self.case.root / ".codex/workflow/phases.yaml").read_bytes())
+        self.assertEqual(state_before, (self.case.root / ".cw/state.json").read_bytes())
+        self.assertFalse((self.case.root / TRANSACTION).exists())
+
+    def test_command_is_not_registered_in_mcp_or_remote(self) -> None:
+        repository = Path(__file__).parents[1]
+        for relative in (
+            "cw/adapters/mcp/server.py", "cw/adapters/mcp/runtime.py",
+            "cw/remote/server.py", "cw/remote/agent.py",
+        ):
+            text = (repository / relative).read_text(encoding="utf-8")
+            self.assertNotIn("cw_plan_amend", text)
+            self.assertNotIn("plan.amend", text)
+
+    def test_doctor_and_audit_are_clean_and_no_agent_is_invoked(self) -> None:
+        with (
+            patch("cw.cli.commands.lifecycle.Planner") as planner,
+            patch("cw.cli.commands.lifecycle.CodexAdapter") as adapter,
+            patch("cw.agents.reviewer.run_review") as reviewer,
+            patch("cw.adapters.codex.CodexAdapter.run_implementer") as implementer,
+        ):
+            self.case.apply()
+        planner.assert_not_called()
+        adapter.assert_not_called()
+        reviewer.assert_not_called()
+        implementer.assert_not_called()
+        workflow = load_workflow(self.case.root)
+        state = load_state(self.case.root)
+        from cw.core.audit import audit_history
+
+        audit_history(self.case.root, workflow, state)
+        previous = Path.cwd()
+        os.chdir(self.case.root)
+        output = io.StringIO()
+        try:
+            with redirect_stdout(output):
+                self.assertEqual(0, main(("doctor", "--json")))
+        finally:
+            os.chdir(previous)
+        self.assertEqual(0, json.loads(output.getvalue())["result"]["errors"])
+
+    def test_new_human_plan_approval_is_required_and_remains_auditable(self) -> None:
+        self.case.apply()
+        amended_revision = load_state(self.case.root)["active_plan_revision"]
+        previous = Path.cwd()
+        os.chdir(self.case.root)
+        try:
+            self.assertEqual(0, main(("plan", "approve", "--json")))
+        finally:
+            os.chdir(previous)
+        workflow = load_workflow(self.case.root)
+        state = load_state(self.case.root)
+        self.assertEqual("APPROVED", workflow.status)
+        self.assertEqual("READY", state["status"])
+        self.assertIn(amended_revision, state["superseded_plan_revisions"])
+        from cw.core.audit import audit_history
+
+        audit_history(self.case.root, workflow, state)
 
 
 if __name__ == "__main__":

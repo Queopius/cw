@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import re
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ EVENT_ACTIONS = {
     "plan_rebaseline_proposed", "plan_rebaseline_authorized",
     "review_superseded", "plan_revision_activated",
     "plan_amended",
+    "phase_artifacts_amended",
 }
 
 
@@ -239,11 +241,70 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
                 or event["completion_contract_sha256"] != expected_contract
             ):
                 raise CwError(f"Plan amendment evidence is inconsistent: {index}", ErrorCode.INVALID_STATE)
+        if action == "phase_artifacts_amended":
+            required = {
+                "proposal_id", "previous_workflow_sha256", "workflow_sha256",
+                "previous_state_sha256", "completion_contract_sha256",
+                "previous_plan_revision", "new_plan_revision", "added_artifacts",
+                "superseded_evidence", "backup", "reason", "operator",
+            }
+            if (
+                not required.issubset(event)
+                or not re.fullmatch(r"pa-[0-9a-f]{64}", str(event.get("proposal_id")))
+                or any(SHA256.fullmatch(str(event.get(key))) is None for key in (
+                    "previous_workflow_sha256", "workflow_sha256", "previous_state_sha256",
+                ))
+                or not isinstance(event.get("added_artifacts"), list)
+                or not event["added_artifacts"]
+                or not isinstance(event.get("superseded_evidence"), list)
+                or not isinstance(event.get("reason"), str)
+                or not event["reason"].strip()
+            ):
+                raise CwError(f"Active plan amendment event is invalid: {index}", ErrorCode.INVALID_STATE)
+            from .completion import contract_hash
+            from .revisions import load_revision
+            from .utils import sha256_file
+
+            backup = safe_project_path(root, str(event["backup"]), must_exist=True)
+            previous = load_revision(root, str(event["previous_plan_revision"]))
+            current = load_revision(root, str(event["new_plan_revision"]))
+            previous_phase = next(
+                (item for item in previous["workflow"]["phases"] if item.get("id") == phase), None,
+            )
+            current_phase = next(
+                (item for item in current["workflow"]["phases"] if item.get("id") == phase), None,
+            )
+            old_artifacts = previous_phase.get("artifacts", []) if isinstance(previous_phase, dict) else []
+            new_artifacts = current_phase.get("artifacts", []) if isinstance(current_phase, dict) else []
+            normalized_current = copy.deepcopy(current["workflow"])
+            normalized_current["workflow"]["status"] = previous["workflow"]["workflow"]["status"]
+            normalized_phase = next(
+                (item for item in normalized_current["phases"] if item.get("id") == phase), None,
+            )
+            if isinstance(normalized_phase, dict):
+                normalized_phase["artifacts"] = copy.deepcopy(old_artifacts)
+            expected_contract = contract_hash(workflow.completion_target) if workflow.completion_target else "none"
+            if (
+                backup.is_symlink()
+                or not backup.is_dir()
+                or sha256_file(backup / "phases.yaml") != event["previous_workflow_sha256"]
+                or sha256_file(backup / "state.json") != event["previous_state_sha256"]
+                or event["completion_contract_sha256"] != expected_contract
+                or not isinstance(previous_phase, dict)
+                or not isinstance(current_phase, dict)
+                or not isinstance(normalized_phase, dict)
+                or [value for value in new_artifacts if value not in old_artifacts] != event["added_artifacts"]
+                or any(value not in new_artifacts for value in old_artifacts)
+                or normalized_current != previous["workflow"]
+            ):
+                raise CwError(f"Active plan amendment evidence is inconsistent: {index}", ErrorCode.INVALID_STATE)
     from .completion import audit_completion_history
     from .revisions import audit_revisions
+    from .plan_amendment import audit_evidence_supersessions
 
     completion = audit_completion_history(root, workflow)
     revision_audit = audit_revisions(root, workflow, state)
+    evidence_supersessions = audit_evidence_supersessions(root, workflow, state)
     result = {"reviews": len(review_files), "gates": len(gate_files), "events": len(history)}
     if not revision_audit["legacy_derived"] or revision_audit["superseded_reviews"]:
         result.update({
@@ -252,4 +313,6 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
         })
     if workflow.completion_target is not None or any(completion.values()):
         result.update(completion)
+    if evidence_supersessions:
+        result["superseded_evidence"] = evidence_supersessions
     return result
