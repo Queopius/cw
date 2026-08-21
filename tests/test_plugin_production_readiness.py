@@ -102,6 +102,25 @@ class PluginProductionReadinessTests(unittest.TestCase):
         self.assertIn("workspace-admin opt-in", policy["business_enterprise"])
         self.assertEqual("read-only", policy["unknown_surface"])
 
+    def test_current_distribution_status_is_truthful(self) -> None:
+        self.assertEqual(
+            "STAGING_IMPLEMENTED_PRODUCTION_NOT_DEPLOYED",
+            self.production["status"],
+        )
+        self.assertEqual(
+            {
+                "local_mcp_stdio": "IMPLEMENTED",
+                "staging_mcp_https": "IMPLEMENTED_FOR_TESTING",
+                "staging_oauth_discovery": "IMPLEMENTED_FOR_TESTING",
+                "production_mcp_https": "NOT_DEPLOYED",
+                "production_oauth": "NOT_DEPLOYED",
+                "openai_domain_verification": "NOT_COMPLETED",
+                "universal_submission": "NOT_CREATED",
+                "public_plugin_publication": "NOT_COMPLETED",
+            },
+            self.capabilities["distribution_status"],
+        )
+
     def test_skill_resists_injection_and_explains_human_review(self) -> None:
         skill = (PLUGIN / "skills/cw-workflow/SKILL.md").read_text(encoding="utf-8")
         for phrase in (

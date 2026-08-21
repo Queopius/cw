@@ -1,7 +1,8 @@
 # CW Remote gateway
 
-CW 0.13 implements a hosting-neutral, production-oriented gateway candidate.
-CW 0.14 adds a Render/Auth0 staging deployment contract, but the service is
+The current `cw.remote.v1` implementation is a hosting-neutral,
+production-oriented gateway candidate introduced in Core 0.13. Core 0.14 adds
+a Render/Auth0 staging deployment contract, but the service is
 not considered deployed until external evidence exists and has not been
 submitted to OpenAI.
 
@@ -38,8 +39,14 @@ controlled tools are the entire surface; high-consequence authorization is
 absent.
 
 The ASGI service can run behind any standards-compliant HTTPS terminator. The
-CLI loopback/plain-HTTP allowance exists only for deterministic development.
-No production host, domain, or provider is selected in 0.13.
+agent, pairing, and project-grant clients parse the gateway as an origin,
+reject userinfo, paths, queries, fragments, deceptive hostname suffixes, and
+invalid ports, and never follow redirects. Plain HTTP is limited to the exact
+IP literals `127.0.0.1` and bracketed `::1`; `localhost`, trailing-dot names,
+other `127/8` addresses, and non-loopback targets require HTTPS and are not
+treated as loopback identities.
+No production host, domain, or provider is selected by the current candidate;
+the original non-deployment decision was recorded in the Core 0.13 milestone.
 
 Remote failures remain distinct: `AUTHENTICATION_REQUIRED`, `TOKEN_INVALID`,
 `TOKEN_EXPIRED`, `SCOPE_REQUIRED`, `DEVICE_NOT_PAIRED`, `DEVICE_REVOKED`,

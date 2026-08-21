@@ -1,7 +1,8 @@
 # CW Remote privacy and data flow
 
 By default, CW repositories remain on the user's machine. Raw `.cw` state also
-remains local. CW 0.13 does not implement repository upload or remote workflow
+remains local. The `cw.remote.v1` implementation introduced in Core 0.13 and
+retained by Core 0.14.1 does not implement repository upload or remote workflow
 storage.
 
 | Data category | Leaves device? | Persisted by gateway? |

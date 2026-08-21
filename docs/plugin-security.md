@@ -29,14 +29,16 @@ server executes it only as capability `validation.run`, under the normal
 project lock and state checks. Unknown or high-consequence tools are rejected
 before dispatch.
 
-## ChatGPT development and production gap
+## ChatGPT development, staging, and production gap
 
 The development profile fixes `chatgpt_app` origin, requires explicit project
 grants, and can omit all controlled actions from discovery. Secure MCP Tunnel
 authenticates the development transport but does not make ChatGPT identity the
-local OS identity or satisfy public submission. A future public HTTPS relay
-still requires OAuth, device pairing, per-user grants, revocation, audit
-boundaries, rate limiting, and local source ownership.
+local OS identity or satisfy public submission. The staging HTTPS relay, OAuth
+discovery, device pairing, grants, revocation, and audit boundaries are
+implemented for testing. They do not establish production availability; the
+production service must separately pass rate limiting, isolation, recovery,
+privacy, and operational acceptance while preserving local source ownership.
 
 Real ChatGPT Pro acceptance on 2026-08-15 exercised a project that was in
 `HUMAN_REVIEW_REQUIRED`. The read-only profile returned the authoritative

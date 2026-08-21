@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import os
 import stat
@@ -8,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 from cw.adapters.mcp.runtime import MCPRuntime, RuntimeConfig
 from cw.application import Actor, ActorOrigin
@@ -16,6 +18,39 @@ from .device import DeviceCredential, signed_headers
 from .errors import RemoteError, RemoteErrorCode
 from .gateway import GatewayService
 from .protocol import RemoteRequest, RemoteResponse
+
+
+def validate_gateway_url(value: str) -> str:
+    """Return a canonical gateway origin after enforcing transport policy.
+
+    Plain HTTP is restricted to the exact loopback IP literals 127.0.0.1 and
+    IPv6 ::1. Other 127/8 addresses and hostnames, including ``localhost``, are
+    not resolved or trusted as loopback identities. Redirects are disabled by
+    every caller so this check remains authoritative for the final target.
+    """
+    if not isinstance(value, str) or not value:
+        raise ValueError("Remote gateway URL must be a non-empty absolute URL")
+    parsed = urlsplit(value)
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Remote gateway URL must not contain user information")
+    if not parsed.hostname:
+        raise ValueError("Remote gateway URL must contain a hostname")
+    try:
+        parsed.port
+    except ValueError as exc:
+        raise ValueError("Remote gateway URL contains an invalid port") from exc
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise ValueError("Remote gateway URL must be an origin without path, query, or fragment")
+    if parsed.scheme == "http":
+        try:
+            address = ipaddress.ip_address(parsed.hostname)
+        except ValueError as exc:
+            raise ValueError("Plain HTTP is allowed only for an exact loopback IP address") from exc
+        if address not in {ipaddress.ip_address("127.0.0.1"), ipaddress.ip_address("::1")}:
+            raise ValueError("Remote gateway must use HTTPS outside loopback development")
+    elif parsed.scheme != "https":
+        raise ValueError("Remote gateway must use HTTPS outside loopback development")
+    return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
 
 
 def _replace_identity(value: Any, local_id: str, remote_id: str) -> Any:
@@ -218,9 +253,7 @@ class HTTPAgentClient:
         self, *, gateway_url: str, credential: DeviceCredential,
         runtime: LocalAgentRuntime, poll_seconds: float = 20.0,
     ) -> None:
-        if not gateway_url.startswith("https://") and not gateway_url.startswith("http://127.0.0.1"):
-            raise ValueError("Remote gateway must use HTTPS outside loopback development")
-        self.gateway_url = gateway_url.rstrip("/")
+        self.gateway_url = validate_gateway_url(gateway_url)
         self.credential = credential
         self.runtime = runtime
         self.poll_seconds = poll_seconds
@@ -231,7 +264,7 @@ class HTTPAgentClient:
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("CW Remote requires codex-workflow[remote]") from exc
         delay = 0.25
-        async with httpx.AsyncClient(timeout=self.poll_seconds + 5) as client:
+        async with httpx.AsyncClient(timeout=self.poll_seconds + 5, follow_redirects=False) as client:
             while not stop.is_set():
                 try:
                     request = await self._poll(client)
@@ -296,10 +329,9 @@ async def request_pairing(
         import httpx
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("CW Remote requires codex-workflow[remote]") from exc
-    if not gateway_url.startswith("https://") and not gateway_url.startswith("http://127.0.0.1"):
-        raise ValueError("Remote gateway must use HTTPS outside loopback development")
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.post(gateway_url.rstrip("/") + "/remote/v1/pairing/request", json={
+    gateway_origin = validate_gateway_url(gateway_url)
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+        response = await client.post(gateway_origin + "/remote/v1/pairing/request", json={
             "device_id": credential.device_id,
             "public_key": credential.public_key,
             "display_name": display_name,
@@ -318,15 +350,16 @@ async def register_project_grant(
         import httpx
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("CW Remote requires codex-workflow[remote]") from exc
+    gateway_origin = validate_gateway_url(gateway_url)
     canonical = project.resolve(strict=True)
     path = "/remote/v1/agent/grants"
     body = json.dumps({
         "display_name": canonical.name,
         "protocol_version": "cw.remote.v1",
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
         response = await client.post(
-            gateway_url.rstrip("/") + path,
+            gateway_origin + path,
             content=body,
             headers={"content-type": "application/json", **signed_headers(
                 credential, method="POST", path=path, body=body,

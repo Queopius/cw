@@ -1,10 +1,15 @@
 # MCP tool contract
 
-CW implements the stdio read and controlled-action subset below. CW 0.11 may
-advertise only the six primary reads on a restricted ChatGPT development
+CW Core 0.14.1 implements the stdio read and controlled-action subset below.
+CW Plugin 0.1.0 may advertise only the six primary reads on a restricted ChatGPT development
 surface, but it never adds another tool. All
 tools have narrow schemas, opaque project scope, structured application results,
 and stable errors. No tool dispatches through the CLI.
+
+Every announced input schema is closed with `additionalProperties=false`, and
+the runtime rejects unknown properties as `INVALID_REQUEST`. Outputs use a
+closed schema-version-1 envelope; malformed adapter output is converted to a
+sanitized `STATE_INCONSISTENT` response rather than crossing the MCP boundary.
 
 | Tool | Capability | Class | Input beyond project/operation IDs |
 | --- | --- | --- | --- |
@@ -51,6 +56,16 @@ Action submission and polling serialize the same `OperationResult` model:
 Lifecycle values are `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `BLOCKED`, and
 `CANCELLED`. An operation ID is bound to its project and request digest. Exact
 replay is idempotent; conflicting reuse fails safely.
+
+Read tools advertise `idempotentHint=true`. Controlled actions advertise
+`idempotentHint=false` because omission of `operation_id` remains supported for
+existing clients and generates a fresh operation. Callers that need retry
+safety supply one stable 1–128 character operation ID: same ID and payload
+replay the operation; the same ID with a different payload is rejected.
+
+Tool registration is preceded by fail-closed Core compatibility validation.
+Plugin 0.1.0 accepts Core `>=0.14.0,<1.0.0`; a missing, malformed, too-old, or
+future-incompatible Core version or policy registers no partial tool surface.
 
 ## Errors
 
