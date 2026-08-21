@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import io
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -19,9 +18,11 @@ from cw.core.completion import (
 )
 from cw.core.errors import CwError, ErrorCode
 from cw.core.initialize import repair
+from cw.core.audit import audit_history
+from cw.core.revisions import persist_revision, revision_payload
 from cw.core.progress import derive_effective_workflow_state
 from cw.core.state import load_state, save_state
-from cw.core.workflow import load_workflow, write_workflow, workflow_hash
+from cw.core.workflow import _read_document, load_workflow, write_workflow, workflow_hash
 from cw.planning.planner import Planner
 from cw.ui.console import Console
 from tests.helpers import FakeAdapter, TempRepo, result
@@ -149,7 +150,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertFalse(effective.is_complete)
 
     def test_satisfied_review_creates_distinct_completion_evidence(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         backend = CompletionBackend(self.completion_result())
         report = run_completion_review(self.repo.root, self.repo.workflow, self.repo.state(), backend)
         self.assertEqual("SATISFIED", report["decision"])
@@ -160,7 +162,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual(0, backend.planner_calls)
 
     def test_extension_requires_human_authorization_and_preserves_old_gates(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         old_gates = {path.name: path.read_bytes() for path in (self.repo.root / ".cw/gates").glob("*.json")}
         missing = self.repo.workflow.completion_target.requirements[0].id
         backend = CompletionBackend(
@@ -185,7 +188,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual(old_gates, {path.name: path.read_bytes() for path in (self.repo.root / ".cw/gates").glob("*.json")})
 
     def test_rejected_extension_does_not_mutate_phases(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         missing = self.repo.workflow.completion_target.requirements[0].id
         run_completion_review(
             self.repo.root, self.repo.workflow, self.repo.state(),
@@ -200,7 +204,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual("PLANNED_COMPLETE", self.repo.state()["status"])
 
     def test_extension_phase_uses_normal_gate_flow_then_reviews_again(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         missing = self.repo.workflow.completion_target.requirements[0].id
         run_completion_review(
             self.repo.root, self.repo.workflow, self.repo.state(),
@@ -241,7 +246,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual(2, self.repo.state()["completion_cycle"])
 
     def test_completion_reviewer_infrastructure_failure_is_retryable_blocked(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         backend = CompletionBackend(error=CwError("offline", ErrorCode.REVIEWER_NETWORK_ERROR))
         with self.assertRaises(CwError):
             run_completion_review(self.repo.root, self.repo.workflow, self.repo.state(), backend)
@@ -267,7 +273,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual(["review"], calls)
 
     def test_malformed_completion_schema_fails_closed(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         with self.assertRaises(CwError):
             run_completion_review(
                 self.repo.root, self.repo.workflow, self.repo.state(),
@@ -276,7 +283,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual("COMPLETION_BLOCKED", self.repo.state()["status"])
 
     def test_repair_recovers_stale_completed_metadata_to_extension_proposed(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         missing = self.repo.workflow.completion_target.requirements[0].id
         run_completion_review(
             self.repo.root, self.repo.workflow, self.repo.state(),
@@ -292,7 +300,8 @@ class CompletionContractTests(unittest.TestCase):
         self.assertIsNotNone(repaired["extension_proposal"])
 
     def test_repair_recovers_valid_completion_evidence_from_stale_state(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
         run_completion_review(
             self.repo.root, self.repo.workflow, self.repo.state(),
             CompletionBackend(self.completion_result()),
@@ -307,22 +316,38 @@ class CompletionContractTests(unittest.TestCase):
         self.assertEqual(".cw/completion/completion.satisfied.json", repaired["last_completion_gate"])
 
     def test_repair_finishes_durably_authorized_extension_after_interruption(self) -> None:
-        self.adopt(); self.approve_phases()
+        self.adopt()
+        self.approve_phases()
+        document = _read_document(self.repo.root / ".codex/workflow/phases.yaml")
+        revision = revision_payload(
+            self.repo.root, document, parent_revision_id=None,
+            actor_id="local-operator", actor_origin="human_cli",
+        )
+        persist_revision(self.repo.root, revision)
+        state = self.repo.state()
+        state["active_plan_revision"] = revision["plan_revision_id"]
+        state["active_plan_revision_sha256"] = revision["canonical_workflow_sha256"]
+        save_state(self.repo.root, state)
         missing = self.repo.workflow.completion_target.requirements[0].id
         run_completion_review(
             self.repo.root, self.repo.workflow, self.repo.state(),
             CompletionBackend(self.completion_result("EXTENSION_REQUIRED", missing), [self.extension_phase(missing)]),
         )
-        with patch("cw.core.completion.write_workflow", side_effect=OSError("interrupted")):
+        with patch("cw.core.revisions.persist_revision", side_effect=OSError("interrupted")):
             with self.assertRaises(OSError):
                 authorize_extension(
                     self.repo.root, self.repo.workflow, self.repo.state(), approve=True,
                     authorization=self.authorization(),
                 )
-        self.assertEqual(2, len(load_workflow(self.repo.root).phases))
-        repair(self.repo.root)
         self.assertEqual(3, len(load_workflow(self.repo.root).phases))
-        self.assertEqual("03-system-hardening", self.repo.state()["current_phase"])
+        repair(self.repo.root)
+        recovered_workflow = load_workflow(self.repo.root)
+        recovered_state = self.repo.state()
+        self.assertEqual(3, len(recovered_workflow.phases))
+        self.assertEqual("03-system-hardening", recovered_state["current_phase"])
+        self.assertNotEqual(revision["plan_revision_id"], recovered_state["active_plan_revision"])
+        self.assertIn(revision["plan_revision_id"], recovered_state["superseded_plan_revisions"])
+        audit_history(self.repo.root, recovered_workflow, recovered_state)
 
 
 class PlannerCompletionIntentTests(unittest.TestCase):

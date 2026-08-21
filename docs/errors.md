@@ -36,6 +36,10 @@ stored diagnostic proves that retry is safe.
 | `PLANNER_PROCESS_ERROR` | Planner process exited without a valid result | Context | Inspect `cw error`; retry if offered |
 | `PLANNER_SCHEMA_ERROR` | Planner returned invalid structured plan data | Context | Inspect diagnostics; retry after environment/build correction |
 | `PLAN_TIMEOUT` | Planner exceeded its bounded timeout | Yes, when recorded | `cw retry` or adjust the supported timeout policy |
+| `STALE_WORKFLOW_SHA` | Proposed workflow no longer matches the amendment's required SHA-256 | No | Reload `cw plan show --json` and prepare the correction against that exact proposal |
+| `COMPLETION_CONTRACT_CHANGE_REQUIRES_REBUILD` | An amendment attempted to change the Completion Contract | Human boundary | Use an explicitly authorized plan rebuild instead of amendment |
+| `PLAN_AMEND_INTEGRITY_ERROR` | Amendment failed and the previous proposal was restored | No automatic retry | Inspect the diagnostic and verified backup before retrying intentionally |
+| `PLAN_AMEND_ROLLBACK_FAILED` | CW could not prove restoration from the amendment backup | Operator | Stop all workflow operations and restore the recorded backup |
 
 ## Implementation and validation errors
 
@@ -110,6 +114,14 @@ with the expected structured result.
 | `AUTHORIZATION_REQUIRED` | A high-consequence mutation lacks matching, current, explicit human authorization | New confirmation | Ask the operator to confirm the exact current proposal and action |
 | `OPERATION_CONFLICT` | An operation identifier was reused for a different request or another adapter holds the project lock | Context | Reuse the original request exactly, or wait and issue a new operation ID |
 | `PROJECT_SCOPE_VIOLATION` | A requested path or project handle is outside the adapter's authorized roots | No | Select an explicitly authorized CW repository |
+| `PLAN_REBASELINE_REQUIRED` | Reviewed workflow correction requires the explicit rebaseline ceremony | Human boundary | Create and inspect an exact proposal with a reason, then authorize it |
+| `STALE_WORKFLOW_SHA` | The workflow changed after an amendment was prepared | New preview | Run `cw plan show --json` and prepare the amendment against the live hash |
+| `STALE_STATE_SHA` | Runtime state changed after an active amendment was prepared | New preview | Stop and prepare against the newly reported state hash |
+| `INVALID_ARTIFACT` | An added artifact is missing, linked, non-regular, non-canonical, duplicated, protected, or outside `review_paths` | No | Correct the explicit path; do not edit `.cw` |
+| `FORBIDDEN_PLAN_CHANGE` | An active amendment would change more than additions to current `phase.artifacts` | No | Use the governed operation appropriate to the intended contract change |
+| `PLAN_REVISION_INVALID` | Active or historical plan revision identity/hash/contract is invalid | No | Stop; inspect revision evidence and recover from the verified backup |
+| `SUPERSESSION_INVALID` | Review supersession, its authorization, or its historical links are invalid | No | Stop; preserve evidence and investigate tampering or incomplete migration |
+| `TRANSACTION_RECOVERY_REQUIRED` | A rebaseline or plan-amend transaction awaits deterministic recovery | Operator | Do not edit state; resume the supported operation or restore its recorded backup |
 | `PROJECT_COMPLETED` | A controlled action targeted a semantically completed project | No | Inspect completion evidence; do not reopen implicitly |
 | `PHASE_NOT_STARTABLE` | Current state/readiness/session does not permit phase start | Context | Inspect status and finish or reconcile the current operation |
 | `OPERATION_IN_PROGRESS` | A conflicting/running operation cannot be replaced or cancelled safely | Later | Poll the active operation; do not assume rollback |

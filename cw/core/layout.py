@@ -7,6 +7,8 @@ from .errors import CwError, ErrorCode
 
 MUTABLE_DIRECTORIES = (
     "runtime", "reviews", "gates", "completion", "validation", "logs", "locks", "backups",
+    "plan-revisions", "plan-proposals", "supersessions", "evidence-supersessions",
+    "plan-amendments",
     "governance",
 )
 STATIC_DIRECTORIES = ("hooks", "schemas", "prompts", "workflow")
@@ -17,6 +19,8 @@ CRITICAL_FILES = (
     ".cw/runtime/implementer-session.json",
     ".cw/runtime/active-run.json",
     ".cw/runtime/READY_FOR_REVIEW.json",
+    ".cw/runtime/plan-rebaseline-transaction.json",
+    ".cw/runtime/plan-amend-transaction.json",
     ".codex/hooks.json",
     ".codex/hooks/phase_gate.py",
     ".codex/workflow/phases.yaml",

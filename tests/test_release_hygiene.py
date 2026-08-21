@@ -58,6 +58,10 @@ class ReleaseHygieneTests(unittest.TestCase):
         self.assertIn('version = {file = ["VERSION"]}', metadata)
         self.assertEqual(version, __import__("cw").__version__)
 
+    def test_safe_yaml_parser_is_a_constrained_runtime_dependency(self) -> None:
+        metadata = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('dependencies = ["PyYAML>=6.0.2,<7"]', metadata)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -29,6 +29,10 @@ def _timestamp(value: dict[str, Any]) -> str | None:
 def history_timeline(root: Path, workflow: Workflow, state: dict[str, Any]) -> list[dict[str, Any]]:
     """Build a phase audit view from validated append-only evidence."""
     audit_history(root, workflow, state)
+    from .revisions import active_revision, supersession_index
+
+    supersessions = supersession_index(root)
+    active_revision_id, _ = active_revision(root, state, workflow)
     reviews_by_phase: dict[str, list[tuple[str, dict[str, Any]]]] = {
         phase.id: [] for phase in workflow.phases
     }
@@ -69,11 +73,19 @@ def history_timeline(root: Path, workflow: Workflow, state: dict[str, Any]) -> l
                 continue
             decision = _review_decision(review)
             if decision == "REVISE":
+                supersession = supersessions.get(reference)
                 entries.append({
                     "kind": "revision_required",
                     "attempt": review.get("attempt"),
+                    "revision_attempt": review.get("revision_attempt"),
                     "timestamp": _timestamp(review),
                     "review": reference,
+                    "plan_revision_id": (
+                        supersession.get("old_plan_revision_id") if supersession
+                        else review.get("plan_revision_id") or active_revision_id
+                    ),
+                    "superseded": supersession is not None,
+                    "supersession": supersession.get("result", {}).get("supersession") if supersession else None,
                 })
             elif decision == "HUMAN_REVIEW_REQUIRED" and gate is None:
                 entries.append({
@@ -110,7 +122,25 @@ def history_timeline(root: Path, workflow: Workflow, state: dict[str, Any]) -> l
 
         is_current = state.get("current_phase") == phase.id and state.get("status") != "COMPLETED"
         if is_current:
-            entries.append({"kind": "current", "attempt": state.get("attempt", 0), "timestamp": None})
+            entries.extend(
+                {
+                    "kind": event.get("action"),
+                    "timestamp": event.get("timestamp"),
+                    **{key: value for key, value in event.items() if key not in {"action", "timestamp", "phase"}},
+                }
+                for event in raw_events
+                if isinstance(event, dict)
+                and event.get("phase") == phase.id
+                and event.get("action") in {
+                    "plan_rebaseline_proposed", "plan_rebaseline_authorized",
+                    "review_superseded", "plan_revision_activated",
+                }
+            )
+            entries.append({
+                "kind": "current", "attempt": state.get("attempt", 0),
+                "revision_attempt": state.get("revision_attempt", state.get("attempt", 0)),
+                "plan_revision_id": active_revision_id, "timestamp": None,
+            })
         if entries:
             timeline.append({
                 "phase": phase.id,

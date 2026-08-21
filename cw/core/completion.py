@@ -676,6 +676,7 @@ def authorize_extension(
         transition(root, state, WorkflowState.PLANNED_COMPLETE)
         return authorization
     document = _read_document(root / ".codex/workflow/phases.yaml")
+    old_revision_id = state.get("active_plan_revision")
     existing = document.get("phases")
     if not isinstance(existing, list):
         raise CwError("Workflow phases are invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
@@ -683,6 +684,20 @@ def authorize_extension(
     document.setdefault("workflow", {})["status"] = "APPROVED"
     write_workflow(root / ".codex/workflow/phases.yaml", document)
     extended = load_workflow(root)
+    if isinstance(old_revision_id, str):
+        from .revisions import persist_revision, revision_payload
+
+        revision = revision_payload(
+            root, document, parent_revision_id=old_revision_id,
+            actor_id=grant.actor.actor_id, actor_origin=grant.actor.origin.value,
+            authorization_reference=approval_reference,
+        )
+        persist_revision(root, revision)
+        state["active_plan_revision"] = revision["plan_revision_id"]
+        state["active_plan_revision_sha256"] = revision["canonical_workflow_sha256"]
+        state["superseded_plan_revisions"] = [
+            *state.get("superseded_plan_revisions", []), old_revision_id,
+        ]
     first = extended.phases[len(workflow.phases)]
     state.update({
         "workflow_sha256": workflow_hash(root / ".codex/workflow/phases.yaml"),
@@ -696,6 +711,13 @@ def authorize_extension(
         "cycle": proposal["cycle"], "proposal": proposal_reference, "authorization": approval_reference,
         "phases": [item["id"] for item in proposal["phases"]],
     })
+    if isinstance(old_revision_id, str):
+        state["history"].append({
+            "timestamp": authorization["authorized_at"], "phase": first.id,
+            "action": "plan_revision_activated",
+            "plan_revision_id": state["active_plan_revision"],
+            "parent_plan_revision_id": old_revision_id,
+        })
     save_state(root, state)
     return {**authorization, "phases": proposal["phases"], "current_phase": first.id}
 
@@ -803,12 +825,15 @@ def recover_approved_extension(root: Path, workflow: Workflow, state: dict[str, 
     directory = completion_root(root) / "authorizations"
     if not directory.is_dir() or directory.is_symlink():
         return False
-    approvals: list[dict[str, Any]] = []
+    approvals: list[tuple[Path, dict[str, Any]]] = []
     for path in sorted(directory.glob("*.json")):
         value = load_json(path)
         if isinstance(value, dict) and value.get("decision") == "APPROVED":
-            approvals.append(value)
-    for approval in sorted(approvals, key=lambda item: (int(item.get("cycle", 0)), str(item.get("authorized_at", "")))):
+            approvals.append((path, value))
+    for approval_path, approval in sorted(
+        approvals,
+        key=lambda item: (int(item[1].get("cycle", 0)), str(item[1].get("authorized_at", ""))),
+    ):
         reference = approval.get("proposal_reference")
         if not isinstance(reference, str):
             continue
@@ -819,19 +844,46 @@ def recover_approved_extension(root: Path, workflow: Workflow, state: dict[str, 
         proposed_ids = [str(item.get("id")) for item in phases if isinstance(item, dict)]
         existing_ids = [phase.id for phase in workflow.phases]
         present = [phase_id in existing_ids for phase_id in proposed_ids]
+        old_revision_id = state.get("active_plan_revision")
         if all(present):
-            continue
-        if any(present):
+            current_document = _read_document(root / ".codex/workflow/phases.yaml")
+            current_revision_id = None
+            if isinstance(old_revision_id, str):
+                from .revisions import revision_id
+
+                current_revision_id = revision_id(current_document)
+                if current_revision_id == old_revision_id:
+                    continue
+            else:
+                continue
+        if any(present) and not all(present):
             raise CwError("Approved extension was only partially appended", ErrorCode.INVALID_STATE)
-        if proposal.get("base_workflow_sha256") != workflow_hash(root / ".codex/workflow/phases.yaml"):
-            raise CwError("Approved extension does not match the current workflow", ErrorCode.INVALID_STATE)
-        _validate_extension_phases(root, workflow, phases, set(proposal.get("requirement_ids", [])))
-        document = _read_document(root / ".codex/workflow/phases.yaml")
-        document["phases"] = [*document.get("phases", []), *phases]
-        document.setdefault("workflow", {})["status"] = "APPROVED"
-        write_workflow(root / ".codex/workflow/phases.yaml", document)
+        if not all(present):
+            if proposal.get("base_workflow_sha256") != workflow_hash(root / ".codex/workflow/phases.yaml"):
+                raise CwError("Approved extension does not match the current workflow", ErrorCode.INVALID_STATE)
+            _validate_extension_phases(root, workflow, phases, set(proposal.get("requirement_ids", [])))
+            document = _read_document(root / ".codex/workflow/phases.yaml")
+            document["phases"] = [*document.get("phases", []), *phases]
+            document.setdefault("workflow", {})["status"] = "APPROVED"
+            write_workflow(root / ".codex/workflow/phases.yaml", document)
+        else:
+            document = _read_document(root / ".codex/workflow/phases.yaml")
         extended = load_workflow(root)
-        first = extended.phases[len(workflow.phases)]
+        first = extended.phase(proposed_ids[0])
+        if isinstance(old_revision_id, str):
+            from .revisions import persist_revision, revision_payload
+
+            revision = revision_payload(
+                root, document, parent_revision_id=old_revision_id,
+                actor_id=str(approval.get("actor_id")), actor_origin=str(approval.get("actor_origin")),
+                authorization_reference=approval_path.relative_to(root).as_posix(),
+            )
+            persist_revision(root, revision)
+            state["active_plan_revision"] = revision["plan_revision_id"]
+            state["active_plan_revision_sha256"] = revision["canonical_workflow_sha256"]
+            state["superseded_plan_revisions"] = [
+                *state.get("superseded_plan_revisions", []), old_revision_id,
+            ]
         state.update({
             "workflow_sha256": workflow_hash(root / ".codex/workflow/phases.yaml"),
             "current_phase": first.id, "status": WorkflowState.IN_PROGRESS.value,
@@ -853,6 +905,13 @@ def recover_approved_extension(root: Path, workflow: Workflow, state: dict[str, 
                     if load_json(path) == approval
                 ),
                 "phases": proposed_ids,
+            })
+        if isinstance(old_revision_id, str):
+            state["history"].append({
+                "timestamp": approval.get("authorized_at") or utc_now(), "phase": first.id,
+                "action": "plan_revision_activated",
+                "plan_revision_id": state["active_plan_revision"],
+                "parent_plan_revision_id": old_revision_id,
             })
         return True
     return False

@@ -59,7 +59,9 @@ class PluginProductionReadinessTests(unittest.TestCase):
             for values in self.production["scopes"].values()
             for scope in values
         }
-        runtime_allowed = set(CAPABILITIES) - {"project.repair", "extension.authorize"}
+        runtime_allowed = set(CAPABILITIES) - {
+            "project.repair", "extension.authorize", "plan.rebaseline",
+        }
         self.assertEqual(EXPECTED_SCOPES, scopes)
         self.assertEqual(runtime_allowed, scopes)
         self.assertNotIn("workflow.admin", scopes)

@@ -46,6 +46,10 @@ CAPABILITIES = {
             "extension.authorize", CapabilityClass.HIGH_CONSEQUENCE_AUTHORIZATION,
             True, human_authorization_required=True,
         ),
+        Capability(
+            "plan.rebaseline", CapabilityClass.HIGH_CONSEQUENCE_AUTHORIZATION,
+            True, human_authorization_required=True,
+        ),
     )
 }
 
