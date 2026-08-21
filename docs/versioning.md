@@ -40,7 +40,9 @@ requiring a core point release.
 
 ## Compatibility contract
 
-`plugins/cw/capabilities.json` declares plugin compatibility explicitly:
+`cw/adapters/mcp/plugin-compatibility.json` is the runtime authority for Plugin
+compatibility. `plugins/cw/capabilities.json` mirrors the user-facing range and
+the Plugin validator fails if it drifts from that packaged policy:
 
 - `plugin_version` (for auditing and update checks)
 - `cw_core.minimum`

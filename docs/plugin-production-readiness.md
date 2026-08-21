@@ -1,8 +1,8 @@
 # Plugin production readiness
 
-CW 0.12 turns the accepted ChatGPT Developer Mode prototype into an explicit
-production candidate contract. It does not deploy a gateway, implement OAuth,
-or submit the plugin.
+CW Plugin 0.1.0 retains the production-candidate contract introduced by the
+Core 0.12 milestone. It does not deploy a production gateway or OAuth service,
+and it is not a public submission.
 
 ## Official model verified
 

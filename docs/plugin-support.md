@@ -1,7 +1,7 @@
 # Plugin candidate support
 
-CW plugin candidate support is limited to local and Secure MCP Tunnel
-development evaluation. CW 0.12 production documents are architecture and
+CW Plugin 0.1.0 support is limited to local and Secure MCP Tunnel development
+evaluation. Historical 0.12 production documents are architecture and
 acceptance contracts, not a hosted service commitment.
 
 - Documentation: <https://docs.cwcli.dev>

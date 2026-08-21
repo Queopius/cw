@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import json
 import re
+import stat
 import sys
 from pathlib import Path
 from typing import Any
-
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "cw"
@@ -96,6 +96,10 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     contract_path = root / "docs" / "chatgpt-development-completion-contract.json"
     acceptance_path = root / "docs" / "chatgpt-development-acceptance.json"
     acceptance_evidence_path = root / "docs" / "acceptance" / "chatgpt-development-0.11.md"
+    plugin_version_path = plugin / "VERSION"
+    compatibility_policy_path = root / "cw" / "adapters" / "mcp" / "plugin-compatibility.json"
+    license_path = root / "LICENSE"
+    notice_path = root / "NOTICE"
     candidate_docs = (
         root / "docs" / "plugin-app-candidate.md",
         root / "docs" / "plugin-listing-draft.md",
@@ -112,7 +116,8 @@ def validation_errors(root: Path = ROOT) -> list[str]:
 
     required = (
         manifest_path, mcp_path, capability_path, skill_path, skill_ui_path,
-        marketplace_path, contract_path, *candidate_docs,
+        marketplace_path, contract_path, compatibility_policy_path,
+        license_path, notice_path, *candidate_docs,
     )
     missing = [str(path.relative_to(root)) for path in required if not path.is_file()]
     if missing:
@@ -125,15 +130,41 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         marketplace = _load(marketplace_path)
         contract = _load(contract_path)
         acceptance = _load(acceptance_path)
+        runtime_policy = _load(compatibility_policy_path)
     except (OSError, json.JSONDecodeError) as exc:
         return [f"invalid plugin JSON: {exc}"]
+    expected_policy_fields = {"schema_version", "policy_id", "plugin_version", "core", "remote_protocol"}
+    runtime_core = runtime_policy.get("core") if isinstance(runtime_policy, dict) else None
+    if (
+        not isinstance(runtime_policy, dict)
+        or set(runtime_policy) != expected_policy_fields
+        or runtime_policy.get("schema_version") != 1
+        or runtime_policy.get("policy_id") != "cw.plugin.compatibility.v1"
+        or not isinstance(runtime_core, dict)
+        or set(runtime_core) != {"minimum", "maximum_exclusive"}
+        or not all(
+            isinstance(runtime_core.get(key), str)
+            and re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", runtime_core[key])
+            for key in ("minimum", "maximum_exclusive")
+        )
+    ):
+        errors.append("runtime Plugin compatibility policy is invalid")
+    elif tuple(map(int, runtime_core["minimum"].split("."))) >= tuple(
+        map(int, runtime_core["maximum_exclusive"].split("."))
+    ):
+        errors.append("runtime Plugin compatibility policy range is invalid")
 
     core_version = (root / "VERSION").read_text(encoding="utf-8").strip()
     try:
-        plugin_version = PLUGIN_VERSION.read_text(encoding="utf-8").strip()
+        version_stat = plugin_version_path.lstat()
+        if stat.S_ISLNK(version_stat.st_mode) or not stat.S_ISREG(version_stat.st_mode):
+            raise OSError("plugins/cw/VERSION must be a regular non-symlink file")
+        plugin_version = plugin_version_path.read_text(encoding="utf-8").strip()
     except OSError as exc:
         errors.append(f"plugin VERSION file is missing: {exc}")
         plugin_version = ""
+    if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", plugin_version):
+        errors.append("plugins/cw/VERSION must contain a valid stable semantic version")
     manifest_version = str(manifest.get("version", ""))
     if manifest_version.split("+", 1)[0] != plugin_version:
         errors.append("plugin manifest base version must equal plugins/cw/VERSION")
@@ -149,16 +180,33 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         if not isinstance(cw_core, dict):
             errors.append("compatibility.cw_core must be an object")
         else:
-            if not str(cw_core.get("minimum", "")) == "0.14.0":
-                errors.append("compatibility.cw_core.minimum must currently require Core >= 0.14.0")
-            if cw_core.get("compatible_policy") != ">=0.14.0,<1.0.0":
-                errors.append("compatibility.cw_core.compatible_policy must be deliberate and explicit")
+            runtime_core = runtime_policy.get("core", {}) if isinstance(runtime_policy, dict) else {}
+            expected_policy = (
+                f">={runtime_core.get('minimum', '')},"
+                f"<{runtime_core.get('maximum_exclusive', '')}"
+            )
+            if str(cw_core.get("minimum", "")) != runtime_core.get("minimum"):
+                errors.append("compatibility.cw_core.minimum must match the runtime policy")
+            if cw_core.get("compatible_policy") != expected_policy:
+                errors.append("compatibility.cw_core.compatible_policy must match the runtime policy")
         remote_protocol = compatibility.get("remote_protocol", {})
         if not isinstance(remote_protocol, dict):
             errors.append("compatibility.remote_protocol must be an object")
         else:
             if str(remote_protocol.get("required", "")) != "cw.remote.v1":
                 errors.append("compatibility.remote_protocol.required must be cw.remote.v1")
+    if not isinstance(runtime_policy, dict) or runtime_policy.get("plugin_version") != plugin_version:
+        errors.append("runtime Plugin compatibility policy must match plugins/cw/VERSION")
+    if not isinstance(runtime_policy, dict) or runtime_policy.get("remote_protocol") != "cw.remote.v1":
+        errors.append("runtime Plugin compatibility policy must require cw.remote.v1")
+    for legal_path in (license_path, notice_path):
+        try:
+            legal_stat = legal_path.lstat()
+        except OSError as exc:
+            errors.append(f"canonical legal file is missing: {exc}")
+        else:
+            if stat.S_ISLNK(legal_stat.st_mode) or not stat.S_ISREG(legal_stat.st_mode):
+                errors.append(f"canonical legal file must be regular and non-symlink: {legal_path.name}")
     if contract.get("milestone_version") != "0.11.0":
         errors.append("ChatGPT development Completion Contract must remain historical 0.11 evidence")
     if manifest.get("name") != "cw":
@@ -357,7 +405,12 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         if phrase not in candidate_text:
             errors.append(f"plugin surface/remote classification docs are missing: {phrase}")
 
-    for path in sorted(item for item in plugin.rglob("*") if item.is_file()):
+    for path in sorted(plugin.rglob("*")):
+        if path.is_symlink():
+            errors.append(f"plugin package must not contain symlinks: {path.relative_to(root)}")
+            continue
+        if not path.is_file():
+            continue
         if path.suffix.lower() in {".ttf", ".otf", ".woff", ".woff2"}:
             errors.append(f"plugin package must not include source fonts: {path.name}")
         if path.suffix.lower() in {".json", ".md", ".yaml", ".yml"}:

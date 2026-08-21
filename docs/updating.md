@@ -30,6 +30,15 @@ performs a staged smoke test, and atomically changes `current`. Failure leaves
 the running installation selected. The previous healthy version remains for
 rollback and retention is bounded.
 
+Release manifest schema 1 may also contain an optional closed
+`signature.extensions.plugin` section. Reusing the existing schema-v1 signature
+object keeps Core 0.14.1 manifest consumers able to preserve and ignore the new
+metadata during Core artifact selection. The section records the independently
+versioned `cw-plugin-0.1.0.zip`, SHA-256, size, Core compatibility range, and
+available source/build provenance. Core's
+updater preserves this metadata but ignores it when selecting or installing a
+Core platform archive. Manifests without the section remain valid.
+
 The production source is the Queopius CW GitHub release provider over trusted
 HTTPS hosts. Tests use an injected local provider and real archives without
 GitHub. The manifest reserves signing metadata, but CW currently guarantees checksum—not

@@ -39,6 +39,45 @@
         "url": {"type": "string"}
       }
     },
-    "signature": {"type": ["object", "null"]}
+    "signature": {
+      "type": ["object", "null"],
+      "properties": {
+        "extensions": {
+          "type": "object",
+          "properties": {
+            "plugin": {
+              "type": "object", "additionalProperties": false,
+              "required": ["name", "version", "asset", "core_compatibility", "provenance"],
+              "properties": {
+                "name": {"const": "cw"},
+                "version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+                "asset": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["filename", "sha256", "size"],
+                  "properties": {
+                    "filename": {"type": "string", "pattern": "^cw-plugin-[0-9]+\\.[0-9]+\\.[0-9]+\\.zip$"},
+                    "sha256": {"type": "string", "pattern": "^(sha256:)?[0-9a-f]{64}$"},
+                    "size": {"type": "integer", "minimum": 1}
+                  }
+                },
+                "core_compatibility": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["minimum", "maximum_exclusive"],
+                  "properties": {"minimum": {"type": "string"}, "maximum_exclusive": {"type": "string"}}
+                },
+                "provenance": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["source_commit", "builder"],
+                  "properties": {
+                    "source_commit": {"type": "string", "minLength": 1},
+                    "builder": {"const": "scripts/build_plugin_candidate.py"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
