@@ -1,7 +1,10 @@
 # Plugin candidate privacy and data handling
 
-This document describes the local CW plugin candidate. It is an engineering
-draft, not a substitute for a lawyer-approved public privacy policy.
+**DRAFT — REQUIRES HUMAN AND LEGAL REVIEW**
+
+This document describes technical data handling for the CW plugin candidate.
+It is not a published Privacy Policy and must not be linked as a final legal or
+submission document.
 
 ## Local candidate data flow
 
@@ -27,10 +30,13 @@ the repository or create a remote state copy. CW does not define retention or
 deletion beyond the user's local repository/evidence management and the
 app/tunnel policies of the OpenAI workspace used for development.
 
-No source upload or permanent CW remote service exists in this milestone. A
-future public bridge would require a separately approved policy covering identity,
-authentication, data minimization, retention, deletion, logging, incident
-response, and subprocess exposure.
+The staging gateway and OAuth discovery are implemented for testing. The
+staging relay may process the normalized envelopes and minimum identity,
+device, grant, routing, revocation, and audit metadata described below; it does
+not make the service production or authorize source upload. No production CW
+remote service is deployed. Production requires a separately approved policy
+covering identity, authentication, data minimization, retention, deletion,
+logging, incident response, and subprocess exposure.
 
 ## User control
 
@@ -42,9 +48,10 @@ repair, release, deployment, or update actions.
 
 ## Public-policy gap
 
-Before public submission, Queopius must approve final legal language, a public
-privacy contact, retention/deletion commitments for any remote runtime, and the
-relationship between the Apache-2.0 software license and service terms.
+Before public submission, Fantomid LLC must approve final legal language, a
+public privacy contact, retention/deletion commitments for any production
+remote runtime, and the relationship between the Apache-2.0 software license
+and service terms.
 
 ## CW 0.12 production data-flow decision
 

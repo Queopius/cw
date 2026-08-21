@@ -19,6 +19,7 @@ from cw.core.recovery import (
 from cw.core.session import create_session, readiness_path
 from cw.core.layout import safe_directory
 from cw.core.state import load_state, save_state, transition
+from cw.core.revisions import artifact_revision_metadata, validation_attempts
 from cw.core.utils import atomic_json_new, utc_now
 from cw.execution.runs import load_active_run
 from cw.execution.processes import ProcessInspector
@@ -140,8 +141,10 @@ def validate_current_phase(project: ResolvedProject, operation_id: str) -> dict[
         _reject_completion_boundary(state)
         phase = _phase(workflow, state)
         validation = validate_phase(project.root, workflow, phase)
+        global_attempt, revision_attempt = validation_attempts(project.root, workflow, state)
         evidence = {
             "schema_version": 1,
+            "kind": "phase_validation",
             "workflow": workflow.id,
             "phase": phase.id,
             "operation_id": operation_id,
@@ -150,6 +153,9 @@ def validate_current_phase(project: ResolvedProject, operation_id: str) -> dict[
             "artifact_hashes": validation.artifact_hashes,
             "errors": validation.errors,
             "created_at": utc_now(),
+            "validation_attempt": global_attempt + 1,
+            "revision_validation_attempt": revision_attempt + 1,
+            **artifact_revision_metadata(project.root, workflow, state, include_legacy=True),
         }
         path = _validation_path(project.root, phase.id, operation_id)
         try:

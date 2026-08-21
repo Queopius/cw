@@ -1,5 +1,29 @@
 # Troubleshooting CW by symptom
 
+## Plugin marketplace or installation fails
+
+Verify the installed surface before retrying:
+
+```text
+codex plugin --help
+codex plugin marketplace list
+codex plugin list --available
+```
+
+The supported install command is `codex plugin add`; `plugin install`,
+`plugin enable`, and `plugin disable` are not available in Codex CLI `0.148.0`.
+For a repository source, confirm that `.agents/plugins/marketplace.json` and
+`plugins/cw` are both present and that the marketplace path is exactly
+`./plugins/cw`. For Git, use a full immutable SHA and include both sparse paths.
+
+If a candidate ZIP fails validation, do not extract it with a generic unzip
+command and do not reuse a partial destination. Verify the expected SHA-256 and
+run `scripts/prepare_plugin_marketplace.py` into a new empty evaluation
+directory. See [Plugin packaging and installation](plugin-installation.md).
+
+Removing `cw@cw-development` and removing `cw-development` are separate
+operations. Neither operation should delete a repository, `.cw`, or evidence.
+
 ## Independent approval cannot be satisfied
 
 Run `cw governance diagnose --pr NUMBER`. If the author is the only authorized

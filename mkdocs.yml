@@ -1,7 +1,7 @@
 site_name: CW — Codex Workflow
 site_url: https://docs.cwcli.dev
 site_description: Bounded, gate-driven AI-assisted software development workflows.
-site_author: Queopius
+site_author: Fantomid LLC
 repo_url: https://github.com/Queopius/cw
 repo_name: Queopius/cw
 
@@ -41,6 +41,7 @@ nav:
       - CLI Reference: cli-reference.md
   - Core Workflow:
       - Gates and Reviews: gates-and-reviews.md
+      - Plan Revisions: plan-revisions.md
       - Completion Contracts: completion-contracts.md
       - Batch Execution: batch-execution.md
       - Live Execution: live-execution.md
@@ -49,6 +50,7 @@ nav:
       - Configuration: configuration.md
       - Release Governance: governance.md
       - Updating: updating.md
+      - Core 0.15.0 Migration Notes: releases/core-0.15.0.md
       - Troubleshooting: troubleshooting.md
       - Error Reference: errors.md
   - Engineering:
@@ -57,6 +59,7 @@ nav:
       - MCP Runtime: mcp-runtime.md
       - MCP Tool Contract: mcp-tool-contract.md
       - Plugin / App Candidate: plugin-app-candidate.md
+      - Plugin Installation: plugin-installation.md
       - ChatGPT Development: chatgpt-development.md
       - ChatGPT 0.11 Acceptance: acceptance/chatgpt-development-0.11.md
       - Plugin Production Readiness: plugin-production-readiness.md
@@ -97,6 +100,9 @@ nav:
       - ADR — Device Identity and Pairing: adr/0008-device-identity-pairing.md
       - ADR — Remote Persistence: adr/0009-remote-persistence.md
       - ADR — Render Staging Hosting: adr/0010-render-staging-hosting.md
+      - ADR — Plan Revision Identity: adr/0011-plan-revision-identity.md
+      - ADR — Review Supersession: adr/0012-review-supersession.md
+      - Plan Rebaseline Recovery: operations/plan-rebaseline-recovery.md
       - Project Layout: project-layout.md
       - Platform Support: testing/platform-support.md
       - Windows VM Acceptance: testing/windows-vm-acceptance.md

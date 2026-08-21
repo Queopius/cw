@@ -15,17 +15,41 @@ from .utils import atomic_write, safe_project_path, sha256_bytes
 
 
 def _read_document(path: Path) -> dict[str, Any]:
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise CwError(
+            "phases.yaml is not UTF-8",
+            ErrorCode.SCHEMA_VALIDATION_ERROR,
+            details=str(exc),
+        ) from exc
+    return workflow_document_from_text(text)
+
+
+def workflow_document_from_text(text: str) -> dict[str, Any]:
     try:
         value = json.loads(text)
     except json.JSONDecodeError:
         try:
-            import yaml  # type: ignore[import-not-found]
+            import yaml  # type: ignore[import-untyped]
+        except ImportError as exc:
+            raise CwError(
+                "phases.yaml requires the PyYAML runtime dependency",
+                ErrorCode.SCHEMA_VALIDATION_ERROR,
+                details=str(exc),
+            ) from exc
+        try:
             value = yaml.safe_load(text)
-        except (ImportError, Exception) as exc:
-            raise CwError("phases.yaml is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR, details=str(exc)) from exc
+        except yaml.YAMLError as exc:
+            raise CwError(
+                "phases.yaml is invalid",
+                ErrorCode.SCHEMA_VALIDATION_ERROR,
+                details=str(exc),
+            ) from exc
     if not isinstance(value, dict):
-        raise CwError("phases.yaml must contain an object", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        raise CwError(
+            "phases.yaml must contain an object", ErrorCode.SCHEMA_VALIDATION_ERROR
+        )
     return value
 
 
@@ -168,7 +192,8 @@ def validate_workflow(root: Path, workflow: Workflow) -> None:
 
 
 def write_workflow(path: Path, payload: dict[str, Any]) -> None:
-    # JSON is a strict YAML subset and avoids a mandatory runtime dependency.
+    # Canonical writes stay deterministic JSON, while safe PyYAML supports
+    # human-authored YAML inputs at the public boundary.
     atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 

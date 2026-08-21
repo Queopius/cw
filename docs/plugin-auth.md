@@ -1,7 +1,9 @@
 # Plugin authentication and authorization contract
 
-This is the production contract selected for CW 0.12. It is not an OAuth
-implementation and does not grant access to any deployed service.
+This is the production contract selected for CW 0.12. Staging implements OAuth
+discovery, protected-resource metadata, token validation, pairing, and grants
+for testing. Production OAuth is not deployed, and the staging implementation
+does not grant production or public-Plugin availability.
 
 ## Authentication
 

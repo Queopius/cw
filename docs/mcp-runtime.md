@@ -1,7 +1,8 @@
 # MCP runtime: local governed access
 
-CW 0.9 extends the optional local stdio MCP runtime with four narrow controlled
-actions. The six 0.8 inspection tools and all read-only resources remain. Every
+The current Core 0.15.0 optional stdio MCP runtime retains four narrow
+controlled actions, six inspection tools, operation polling/cancellation, and
+all read-only resources introduced across the 0.8–0.11 milestones. Every
 request invokes `CWApplication` directly and uses the same engine, project lock,
 state, gates, review pipeline, and Completion Contract semantics as the CLI.
 
@@ -16,7 +17,8 @@ CWApplication → CW engine → .cw evidence
 ```
 
 This is not a generally writable MCP server, public ChatGPT plugin, hosted MCP
-endpoint, Apps SDK UI, or remote source-code service. CW 0.11 can expose this
+endpoint, Apps SDK UI, or remote source-code service. The Secure MCP Tunnel
+development profile introduced in 0.11 can expose this
 same stdio server through Secure MCP Tunnel using an explicit ChatGPT
 development profile.
 

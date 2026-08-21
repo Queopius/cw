@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from cw.core.completion import contract_payload, latest_completion_review, load_extension_proposal
 from cw.core.errors import CwError, ErrorCode
+from cw.core.models import WorkflowState
 from cw.core.progress import derive_effective_workflow_state
 from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import process_is_alive
@@ -80,6 +81,11 @@ def project_status(root: Path, context: ContextLoader) -> dict[str, Any]:
             proposal = load_extension_proposal(root, state, workflow)
         except CwError:
             proposal = None
+    from cw.core.revisions import active_revision, supersession_index, validation_attempts
+
+    active_revision_id, active_revision_sha256 = active_revision(root, state, workflow) if workflow.phases else (None, None)
+    supersessions = supersession_index(root) if workflow.phases else {}
+    validation_attempt, revision_validation_attempt = validation_attempts(root, workflow, state) if workflow.phases else (0, 0)
     return {
         "schema_version": SCHEMA_VERSION,
         "project": project.project_id,
@@ -106,6 +112,29 @@ def project_status(root: Path, context: ContextLoader) -> dict[str, Any]:
         "completion_requirement_count": len(contract.requirements) if contract is not None else 0,
         "extension_proposal": proposal,
         "attempt": state.get("attempt", 0),
+        "revision_attempt": state.get("revision_attempt", state.get("attempt", 0)),
+        "validation_attempt": validation_attempt,
+        "revision_validation_attempt": revision_validation_attempt,
+        "active_plan_revision": active_revision_id,
+        "active_plan_revision_sha256": active_revision_sha256,
+        "superseded_plan_revisions": state.get("superseded_plan_revisions", []),
+        "superseded_reviews": sorted(supersessions),
+        "active_review": state.get("last_review"),
+        "historical_attempts": [
+            {
+                "phase": event.get("phase"), "attempt": event.get("attempt"),
+                "outcome": event.get("action"), "timestamp": event.get("timestamp"),
+            }
+            for event in state.get("history", [])
+            if isinstance(event, dict)
+            and event.get("action") in {"approved", "revision_required", "human_review_required"}
+            and isinstance(event.get("attempt"), int)
+        ],
+        "rebaseline": {
+            "allowed": state.get("status") == WorkflowState.REVISION_REQUIRED.value and not gates.get(current, False),
+            "pending": state.get("pending_rebaseline"),
+            "completed": bool(supersessions),
+        },
         "max_attempts": workflow.max_review_attempts,
         "ready": (root / ".cw/runtime/READY_FOR_REVIEW.json").is_file(),
         "gate": gates.get(current, False) if current else False,
@@ -150,4 +179,13 @@ def explain_status(data: dict[str, Any]) -> dict[str, Any]:
         "completion_satisfied": data.get("completion_satisfied", False),
         "completion_review": data.get("completion_review"),
         "extension_proposal": data.get("extension_proposal"),
+        "active_plan_revision": data.get("active_plan_revision"),
+        "superseded_plan_revisions": data.get("superseded_plan_revisions", []),
+        "superseded_reviews": data.get("superseded_reviews", []),
+        "rebaseline": data.get("rebaseline"),
+        "rebaseline_explanation": (
+            "The active REVISE review may be superseded only by an exact, human-authorized plan proposal. Historical evidence remains immutable."
+            if data.get("rebaseline", {}).get("allowed")
+            else "Rebaseline requires REVISION_REQUIRED state, an active REVISE review, no current gate, and exact human authorization."
+        ),
     }

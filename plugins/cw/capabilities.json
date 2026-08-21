@@ -57,8 +57,18 @@
     "project_grants": "startup-only explicit project paths; tool calls use opaque handles"
   },
   "enforcement": "Server-side CWApplication policy is authoritative; plugin metadata and tool annotations are advisory.",
+  "distribution_status": {
+    "local_mcp_stdio": "IMPLEMENTED",
+    "staging_mcp_https": "IMPLEMENTED_FOR_TESTING",
+    "staging_oauth_discovery": "IMPLEMENTED_FOR_TESTING",
+    "production_mcp_https": "NOT_DEPLOYED",
+    "production_oauth": "NOT_DEPLOYED",
+    "openai_domain_verification": "NOT_COMPLETED",
+    "universal_submission": "NOT_CREATED",
+    "public_plugin_publication": "NOT_COMPLETED"
+  },
   "production_candidate": {
-    "status": "ARCHITECTURE_DEFINED_RUNTIME_NOT_DEPLOYED",
+    "status": "STAGING_IMPLEMENTED_PRODUCTION_NOT_DEPLOYED",
     "transport": "public-streamable-https-to-authenticated-relay",
     "local_runtime": "paired outbound-only agent with explicit opaque project grants",
     "oauth": "OAuth 2.1 MCP authorization with PKCE and per-request scope enforcement",

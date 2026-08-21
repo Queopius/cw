@@ -126,6 +126,11 @@ def _is_new_gate(path: str) -> bool:
     return candidate.parent.as_posix() == ".cw/gates" and candidate.name.endswith(".approved.json")
 
 
+def _is_new_plan_revision(path: str) -> bool:
+    candidate = Path(path)
+    return candidate.parent.as_posix() == ".cw/plan-revisions" and candidate.suffix == ".json"
+
+
 def _validate_review(
     root: Path,
     workflow: Workflow,
@@ -324,7 +329,10 @@ def verify_protected_paths(
         )
     additions = sorted(set(after.entries) - set(before.entries))
     files = [path for path in additions if not path.endswith("/")]
-    unexpected = [path for path in additions if path.endswith("/") or not (_is_new_review(path) or _is_new_gate(path))]
+    unexpected = [
+        path for path in additions
+        if path.endswith("/") or not (_is_new_review(path) or _is_new_gate(path) or _is_new_plan_revision(path))
+    ]
     if unexpected:
         raise CwError(
             "Protected workflow metadata was created during implementation",
@@ -335,6 +343,13 @@ def verify_protected_paths(
     state = load_state(root)
     reviews = [path for path in files if _is_new_review(path)]
     gates = [path for path in files if _is_new_gate(path)]
+    revisions = [path for path in files if _is_new_plan_revision(path)]
+    if len(revisions) > 1:
+        raise CwError("Multiple plan revision snapshots were created", ErrorCode.PROTECTED_PATH_MODIFIED)
+    if revisions:
+        from .revisions import load_revision
+
+        load_revision(root, Path(revisions[0]).stem)
     if len(reviews) > 1 or len(gates) > 1:
         raise CwError("Multiple protected review results were created", ErrorCode.PROTECTED_PATH_MODIFIED)
     report = _validate_review(root, workflow, phase, state, reviews[0]) if reviews else None
