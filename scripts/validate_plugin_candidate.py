@@ -18,6 +18,7 @@ CAPABILITIES = PLUGIN / "capabilities.json"
 PLUGIN_VERSION = PLUGIN / "VERSION"
 SKILL = PLUGIN / "skills" / "cw-workflow" / "SKILL.md"
 SKILL_UI = PLUGIN / "skills" / "cw-workflow" / "agents" / "openai.yaml"
+PLUGIN_README = PLUGIN / "README.md"
 MARKETPLACE = ROOT / ".agents" / "plugins" / "marketplace.json"
 CONTRACT = ROOT / "docs" / "chatgpt-development-completion-contract.json"
 
@@ -57,6 +58,16 @@ REQUIRED_CONTRACT_IDS = {
     "high-consequence-exclusion", "security-privacy", "replay-recovery",
     "development-documentation", "future-auth-architecture",
 }
+EXPECTED_DISTRIBUTION_STATUS = {
+    "local_mcp_stdio": "IMPLEMENTED",
+    "staging_mcp_https": "IMPLEMENTED_FOR_TESTING",
+    "staging_oauth_discovery": "IMPLEMENTED_FOR_TESTING",
+    "production_mcp_https": "NOT_DEPLOYED",
+    "production_oauth": "NOT_DEPLOYED",
+    "openai_domain_verification": "NOT_COMPLETED",
+    "universal_submission": "NOT_CREATED",
+    "public_plugin_publication": "NOT_COMPLETED",
+}
 
 
 def _load(path: Path) -> Any:
@@ -92,6 +103,7 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     capability_path = plugin / "capabilities.json"
     skill_path = plugin / "skills" / "cw-workflow" / "SKILL.md"
     skill_ui_path = plugin / "skills" / "cw-workflow" / "agents" / "openai.yaml"
+    plugin_readme_path = plugin / "README.md"
     marketplace_path = root / ".agents" / "plugins" / "marketplace.json"
     contract_path = root / "docs" / "chatgpt-development-completion-contract.json"
     acceptance_path = root / "docs" / "chatgpt-development-acceptance.json"
@@ -116,6 +128,7 @@ def validation_errors(root: Path = ROOT) -> list[str]:
 
     required = (
         manifest_path, mcp_path, capability_path, skill_path, skill_ui_path,
+        plugin_readme_path,
         marketplace_path, contract_path, compatibility_policy_path,
         license_path, notice_path, *candidate_docs,
     )
@@ -221,16 +234,19 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         errors.append("plugin interface contains unsupported fields")
     if interface.get("displayName") != "CW — Codex Workflow":
         errors.append("plugin displayName must preserve the CW product identity")
-    if manifest.get("author", {}).get("name") != "Queopius":
-        errors.append("plugin author must be Queopius")
-    if interface.get("developerName") != "Queopius":
-        errors.append("plugin developerName must be Queopius")
+    if manifest.get("author") != {"name": "Fantomid LLC", "url": "https://cwcli.dev"}:
+        errors.append("plugin author must identify Fantomid LLC at the canonical product website")
+    if interface.get("developerName") != "Queopius | Fantomid LLC":
+        errors.append("plugin developerName must preserve the Queopius and Fantomid LLC identity")
+    if manifest.get("homepage") != "https://docs.cwcli.dev/en/stable/plugin-app-candidate/":
+        errors.append("plugin homepage must use the live canonical Plugin documentation URL")
     for key in ("homepage", "repository"):
         if not str(manifest.get(key, "")).startswith("https://"):
             errors.append(f"plugin {key} must use HTTPS")
-    for key in ("websiteURL", "privacyPolicyURL"):
-        if not str(interface.get(key, "")).startswith("https://"):
-            errors.append(f"plugin interface {key} must use HTTPS")
+    if interface.get("websiteURL") != "https://cwcli.dev":
+        errors.append("plugin interface websiteURL must use the canonical product website")
+    if "privacyPolicyURL" in interface or "termsOfServiceURL" in interface:
+        errors.append("draft legal documents must not be linked as final Plugin policies")
     prompts = interface.get("defaultPrompt")
     if not isinstance(prompts, list) or not 1 <= len(prompts) <= 3:
         errors.append("plugin interface requires one to three default prompts")
@@ -297,6 +313,12 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         errors.append("ChatGPT read-only profile must expose exactly the six accepted read tools")
     if "HIGH_CONSEQUENCE_AUTHORIZATION" in normalized_groups:
         errors.append("plugin must not expose HIGH_CONSEQUENCE_AUTHORIZATION")
+    if capabilities.get("distribution_status") != EXPECTED_DISTRIBUTION_STATUS:
+        errors.append("plugin distribution status must distinguish local, staging, production, and submission")
+    if capabilities.get("production_candidate", {}).get("status") != (
+        "STAGING_IMPLEMENTED_PRODUCTION_NOT_DEPLOYED"
+    ):
+        errors.append("plugin production status must not confuse staging with production")
     encoded = json.dumps({"manifest": manifest, "mcp": mcp, "capabilities": capabilities}).lower()
     for term in FORBIDDEN_TERMS:
         if term in encoded:
@@ -328,6 +350,26 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     for phrase in ("display_name:", "short_description:", "default_prompt:", "type: \"mcp\""):
         if phrase not in ui_text:
             errors.append(f"skill UI metadata is missing {phrase}")
+    plugin_readme = plugin_readme_path.read_text(encoding="utf-8")
+    for phrase in (
+        "Legal publisher:** Fantomid LLC",
+        "Technology brand:** Queopius",
+        "Queopius is a technology brand operated by Fantomid LLC",
+        "https://github.com/Queopius/cw/issues",
+        "https://github.com/Queopius/cw/security/advisories/new",
+        "Production MCP HTTPS | `NOT_DEPLOYED`",
+        "Proposed next Plugin version: `0.2.0` — **NOT AUTHORIZED**",
+    ):
+        if phrase not in plugin_readme:
+            errors.append(f"Plugin README is missing public-readiness guidance: {phrase}")
+    for broken in (
+        "https://docs.cwcli.dev/plugin-app-candidate/",
+        "https://docs.cwcli.dev/plugin-privacy/",
+        "https://docs.cwcli.dev/plugin-support/",
+        "https://docs.cwcli.dev/remote-auth/",
+    ):
+        if broken in json.dumps(manifest) or broken in plugin_readme:
+            errors.append(f"Plugin package declares a broken documentation URL: {broken}")
 
     plugins = marketplace.get("plugins")
     if marketplace.get("name") != "cw-development" or not isinstance(plugins, list) or len(plugins) != 1:
@@ -394,7 +436,11 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         ),
     )
     for phrase in (
-        "developers.openai.com/plugins/concepts/plugins",
+        "developers.openai.com/plugins/build/plugins",
+        "developers.openai.com/plugins/build/mcp-server",
+        "developers.openai.com/plugins/build/auth",
+        "developers.openai.com/plugins/deploy/submission",
+        "developers.openai.com/plugins/guides/security-privacy",
         "developers.openai.com/api/docs/guides/secure-mcp-tunnels",
         "PLATFORM_CAPABILITY_UNAVAILABLE",
         "Tunnels Read + Use",

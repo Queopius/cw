@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "description": "AI software-delivery governance with evidence-backed gates and controlled actions.",
   "author": {
-    "name": "Queopius",
+    "name": "Fantomid LLC",
     "url": "https://cwcli.dev"
   },
-  "homepage": "https://docs.cwcli.dev/plugin-app-candidate/",
+  "homepage": "https://docs.cwcli.dev/en/stable/plugin-app-candidate/",
   "repository": "https://github.com/Queopius/cw",
   "license": "Apache-2.0",
   "keywords": [
@@ -22,14 +22,13 @@
     "displayName": "CW \u2014 Codex Workflow",
     "shortDescription": "AI delivery governance with evidence-backed gates",
     "longDescription": "Build with autonomy and advance with evidence through structured phases, independent review, evidence-backed gates, Completion Contracts, bounded autonomy, and narrow controlled actions.",
-    "developerName": "Queopius",
+    "developerName": "Queopius | Fantomid LLC",
     "category": "Coding",
     "capabilities": [
       "Read",
       "Controlled Actions"
     ],
     "websiteURL": "https://cwcli.dev",
-    "privacyPolicyURL": "https://docs.cwcli.dev/plugin-privacy/",
     "defaultPrompt": [
       "What is blocking this CW project?",
       "Inspect the current authorized phase and its evidence.",

@@ -1,9 +1,9 @@
 # Plugin production deployment contract
 
-The current Plugin 0.1.0 retains, but does not deploy, the production runtime
-contract introduced in Core 0.12 and selected in
-[ADR 0005](adr/0005-production-mcp-relay.md). Core 0.14 prepares a deliberately
-non-production Render/Auth0 staging adapter in
+The current Plugin 0.1.0 does not deploy a production runtime. It retains the
+production contract introduced in Core 0.12 and selected in
+[ADR 0005](adr/0005-production-mcp-relay.md). Core 0.14 implements a deliberately
+non-production Render/Auth0 staging adapter for testing in
 [ADR 0010](adr/0010-render-staging-hosting.md); those vendors are not permanent
 CW architecture dependencies.
 
@@ -11,9 +11,9 @@ CW architecture dependencies.
 
 | Component | Owner | Responsibility |
 | --- | --- | --- |
-| Public HTTPS MCP gateway | Queopius | TLS, protocol, auth enforcement, rate limits, routing, redaction, availability |
-| OAuth authorization integration | Queopius/approved IdP | discovery, tokens, rotation, revocation, incident controls |
-| Relay/control plane | Queopius | tenant isolation, device pairing, grants, bounded routing, audit |
+| Public HTTPS MCP gateway | Fantomid LLC / Queopius | TLS, protocol, auth enforcement, rate limits, routing, redaction, availability |
+| OAuth authorization integration | Fantomid LLC / Queopius / approved IdP | discovery, tokens, rotation, revocation, incident controls |
+| Relay/control plane | Fantomid LLC / Queopius | tenant isolation, device pairing, grants, bounded routing, audit |
 | Local CW agent | user/operator | outbound connection, local runtime health, explicit project grants |
 | CWApplication/Engine | CW | invariant, scope, operation, evidence, review, gate, completion policy |
 | Repository and `.cw` | user/operator | local source and authoritative workflow evidence |
@@ -55,5 +55,6 @@ incident rollback, and installed local-agent tests. A public endpoint must not
 be deployed merely to satisfy documentation.
 
 The staging procedure is in [the staging deployment runbook](operations/staging-deploy.md).
-Until its external evidence passes, staging is prepared rather than deployed,
-production remains not ready, and plugin submission remains blocked.
+Staging HTTPS MCP and OAuth discovery are deployed for testing. They are not a
+production endpoint or submission target. Production remains not deployed and
+plugin submission remains blocked.

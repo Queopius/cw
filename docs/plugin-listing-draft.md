@@ -6,13 +6,18 @@ published to any directory.
 ## Listing
 
 **Name:** CW — Codex Workflow
-**Developer:** Queopius
+**Publisher:** Fantomid LLC
+**Brand:** Queopius
+**Developer/contact identity:** Queopius | Fantomid LLC
 **Category:** Coding
 **Website:** <https://cwcli.dev>
-**Documentation:** <https://docs.cwcli.dev/plugin-app-candidate/>
-**Support:** <https://docs.cwcli.dev/plugin-support/>
-**Privacy:** <https://docs.cwcli.dev/plugin-privacy/>
+**Documentation:** <https://docs.cwcli.dev/en/stable/plugin-app-candidate/>
+**Support:** <https://docs.cwcli.dev/en/stable/plugin-support/>
+**Privacy:** not published; the repository contains only an engineering draft
 **Source:** <https://github.com/Queopius/cw>
+
+Queopius is a technology brand operated by Fantomid LLC,
+a New Mexico limited liability company.
 
 **Short description**
 
@@ -31,6 +36,7 @@ autonomy. Advance with evidence. No valid gate. No next phase.
 - ChatGPT desktop local host: supported candidate where policy permits.
 - ChatGPT web Developer Mode: read-only profile accepted through Secure MCP
   Tunnel on ChatGPT Pro; controlled actions were not enabled in that test.
+- Staging MCP HTTPS and OAuth discovery: implemented for testing only.
 - ChatGPT public directory: unavailable until the selected HTTPS relay, OAuth
   2.1, domain verification, production acceptance, and human submission inputs
   are completed.
@@ -62,7 +68,7 @@ Negative cases:
 
 ## Materials still requiring human decisions
 
-- Approve publisher identity and the organization that would submit.
+- Verify the authorized publisher identity in OpenAI Platform.
 - Approve public support contact and final legal privacy language.
 - Provide and approve a terms-of-service URL if required for submission.
 - Choose countries/regions and complete policy attestations.
