@@ -50,14 +50,14 @@ prompts, or unrestricted logs in support reports.
 No final Privacy Policy or Terms of Use is published by this candidate. Any
 legal draft requires human and legal review and is not a submission document.
 
-- Core tested from this source tree: `0.15.0`
+- Core tested from this source tree: `0.15.1`
 - Plugin: `0.1.0`
 - Remote protocol: `cw.remote.v1`
 - Proposed next Plugin version: `0.2.0` — **NOT AUTHORIZED**
 
 The published Plugin `0.1.0` archive remains immutable and compatible with the
 declared Core range `>=0.14.0,<1.0.0`. Any archive built from this source tree
-is an unpublished local candidate; Core `0.15.0` does not republish it.
+is an unpublished local candidate; Core `0.15.1` does not republish it.
 
 ## Development and evaluation installation
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+import stat
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,7 @@ from .authorization import OperationContext, validate_authorization, validate_op
 from .errors import CwError, ErrorCode
 from .layout import safe_directory, safe_file, validate_tree
 from .models import ReviewDecision, Workflow, WorkflowState
+from .platform import fsync_directory
 from .reviews import validate_reviewer_result
 from .schema import SCHEMA_VERSION, schema_version
 from .utils import (
@@ -100,6 +102,78 @@ def supersession_path(root: Path, identifier: str) -> Path:
     if SUPERSESSION_ID.fullmatch(identifier) is None:
         raise CwError("Plan supersession identity is invalid", ErrorCode.SUPERSESSION_INVALID)
     return root / ".cw" / "supersessions" / f"{identifier}.json"
+
+
+def supersession_directory(root: Path) -> Path | None:
+    """Return the validated review-supersession directory when it exists.
+
+    Projects created before plan revisions were introduced legitimately have no
+    ``.cw/supersessions`` directory.  Readers interpret that absence as an empty
+    append-only index, while every existing filesystem object remains subject to
+    strict type and symlink validation.
+    """
+
+    runtime = root / ".cw"
+    try:
+        runtime_metadata = runtime.lstat()
+    except OSError as exc:
+        raise CwError(
+            "CW metadata directory cannot be inspected",
+            ErrorCode.SUPERSESSION_INVALID,
+            details=str(exc),
+        ) from exc
+    if not stat.S_ISDIR(runtime_metadata.st_mode):
+        raise CwError(
+            "CW metadata directory is unsafe",
+            ErrorCode.SUPERSESSION_INVALID,
+        )
+    directory = runtime / "supersessions"
+    try:
+        metadata = directory.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise CwError(
+            "Review supersession directory cannot be inspected",
+            ErrorCode.SUPERSESSION_INVALID,
+            details=str(exc),
+        ) from exc
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise CwError(
+            "Review supersession directory is unsafe",
+            ErrorCode.SUPERSESSION_INVALID,
+        )
+    return directory
+
+
+def create_supersession_directory(root: Path) -> Path:
+    """Create the optional directory for a locked, journaled mutation only."""
+
+    existing = supersession_directory(root)
+    if existing is not None:
+        return existing
+    directory = root / ".cw" / "supersessions"
+    try:
+        directory.mkdir(mode=0o700)
+    except FileExistsError as exc:
+        raise CwError(
+            "Review supersession directory changed during the operation",
+            ErrorCode.OPERATION_CONFLICT,
+        ) from exc
+    except OSError as exc:
+        raise CwError(
+            "Review supersession directory could not be created safely",
+            ErrorCode.SUPERSESSION_INVALID,
+            details=str(exc),
+        ) from exc
+    validated = supersession_directory(root)
+    if validated is None:
+        raise CwError(
+            "Review supersession directory creation was not durable",
+            ErrorCode.SUPERSESSION_INVALID,
+        )
+    fsync_directory(directory.parent)
+    return validated
 
 
 def active_revision(root: Path, state: dict[str, Any], workflow: Workflow | None = None) -> tuple[str, str]:
@@ -740,14 +814,40 @@ def validate_supersession(root: Path, payload: dict[str, Any]) -> dict[str, Any]
 
 
 def supersession_index(root: Path) -> dict[str, dict[str, Any]]:
-    directory = safe_directory(root / ".cw/supersessions", ".cw/supersessions")
+    directory = supersession_directory(root)
+    if directory is None:
+        return {}
+    try:
+        initial_directory = directory.lstat()
+    except OSError as exc:
+        raise CwError(
+            "Review supersession directory changed while being read",
+            ErrorCode.SUPERSESSION_INVALID,
+            details=str(exc),
+        ) from exc
     index: dict[str, dict[str, Any]] = {}
     nonces: set[str] = set()
     operations: set[str] = set()
-    for path in sorted(directory.iterdir()):
+    try:
+        entries = sorted(directory.iterdir())
+    except OSError as exc:
+        raise CwError(
+            "Review supersession directory cannot be read",
+            ErrorCode.SUPERSESSION_INVALID,
+            details=str(exc),
+        ) from exc
+    for path in entries:
+        try:
+            metadata = path.lstat()
+        except OSError as exc:
+            raise CwError(
+                "Review supersession entry cannot be inspected",
+                ErrorCode.SUPERSESSION_INVALID,
+                details=str(exc),
+            ) from exc
         if (
-            path.is_symlink()
-            or not path.is_file()
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
             or path.suffix != ".json"
             or SUPERSESSION_ID.fullmatch(path.stem) is None
         ):
@@ -763,6 +863,21 @@ def supersession_index(root: Path) -> dict[str, dict[str, Any]]:
         index[review] = payload
         nonces.add(nonce)
         operations.add(operation)
+    try:
+        final_directory = directory.lstat()
+    except OSError as exc:
+        raise CwError(
+            "Review supersession directory changed while being read",
+            ErrorCode.SUPERSESSION_INVALID,
+            details=str(exc),
+        ) from exc
+    if (initial_directory.st_dev, initial_directory.st_ino) != (
+        final_directory.st_dev, final_directory.st_ino
+    ):
+        raise CwError(
+            "Review supersession directory changed while being read",
+            ErrorCode.SUPERSESSION_INVALID,
+        )
     return index
 
 

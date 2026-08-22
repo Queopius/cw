@@ -6,6 +6,7 @@ import json
 import unittest
 import io
 import os
+import shutil
 from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
@@ -32,6 +33,7 @@ from cw.core.revisions import (
     authorization_resource,
     create_rebaseline_proposal,
     recover_rebaseline_transaction,
+    supersession_index,
 )
 from cw.core.initialize import backup_metadata
 from cw.core.state import load_state, save_state, transition
@@ -45,6 +47,70 @@ from tests.helpers import FakeAdapter, TempRepo, result
 
 
 DASHBOARD_CASE = Path(__file__).parent / "fixtures/cw-dashboard-rebaseline.json"
+
+
+class LegacySupersessionIndexTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.repo = TempRepo(name="legacy-cw-0141")
+        self.directory = self.repo.root / ".cw/supersessions"
+        shutil.rmtree(self.directory)
+
+    def tearDown(self) -> None:
+        self.repo.close()
+
+    def test_missing_and_empty_directories_are_empty_indexes_without_creation(self) -> None:
+        self.assertEqual({}, supersession_index(self.repo.root))
+        self.assertFalse(self.directory.exists())
+        self.directory.mkdir()
+        self.assertEqual({}, supersession_index(self.repo.root))
+
+    def test_file_directory_symlinks_and_dangling_symlinks_fail_closed(self) -> None:
+        target = self.repo.root / "supersession-target"
+        target.mkdir()
+        cases = ("file", "directory-symlink", "dangling-symlink")
+        for kind in cases:
+            with self.subTest(kind=kind):
+                if self.directory.exists() or self.directory.is_symlink():
+                    if self.directory.is_dir() and not self.directory.is_symlink():
+                        shutil.rmtree(self.directory)
+                    else:
+                        self.directory.unlink()
+                if kind == "file":
+                    self.directory.write_text("not a directory\n", encoding="utf-8")
+                elif kind == "directory-symlink":
+                    self.directory.symlink_to(target, target_is_directory=True)
+                else:
+                    self.directory.symlink_to(self.repo.root / "missing-target", target_is_directory=True)
+                with self.assertRaises(CwError) as raised:
+                    supersession_index(self.repo.root)
+                self.assertEqual(ErrorCode.SUPERSESSION_INVALID, raised.exception.code)
+
+    def test_unsafe_entries_and_malformed_json_fail_closed(self) -> None:
+        self.directory.mkdir()
+        unexpected = self.directory / "unexpected.txt"
+        unexpected.write_text("{}\n", encoding="utf-8")
+        with self.assertRaises(CwError) as unexpected_error:
+            supersession_index(self.repo.root)
+        self.assertEqual(ErrorCode.SUPERSESSION_INVALID, unexpected_error.exception.code)
+        unexpected.unlink()
+        malformed = self.directory / ("ps-" + "0" * 64 + ".json")
+        malformed.write_text("{", encoding="utf-8")
+        with self.assertRaises(CwError) as malformed_error:
+            supersession_index(self.repo.root)
+        self.assertEqual(ErrorCode.SCHEMA_VALIDATION_ERROR, malformed_error.exception.code)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO creation is unavailable")
+    def test_fifo_directory_and_entry_fail_closed(self) -> None:
+        os.mkfifo(self.directory)
+        with self.assertRaises(CwError) as directory_error:
+            supersession_index(self.repo.root)
+        self.assertEqual(ErrorCode.SUPERSESSION_INVALID, directory_error.exception.code)
+        self.directory.unlink()
+        self.directory.mkdir()
+        os.mkfifo(self.directory / ("ps-" + "0" * 64 + ".json"))
+        with self.assertRaises(CwError) as entry_error:
+            supersession_index(self.repo.root)
+        self.assertEqual(ErrorCode.SUPERSESSION_INVALID, entry_error.exception.code)
 
 
 class RebaselineCase:
