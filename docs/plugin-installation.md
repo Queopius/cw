@@ -16,7 +16,7 @@ The commands below were verified with `codex-cli 0.148.0` on 2026-08-21.
   desktop build for the manual Plugins Directory flow;
 - Python 3.10 or later;
 - CW Core installed with the MCP extra, within `>=0.14.0,<1.0.0`;
-- CW Core `0.15.0` for the current tested combination; the immutable public
+- CW Core `0.15.1` for the current tested combination; the immutable public
   Plugin `0.1.0` remains compatible under its `>=0.14.0,<1.0.0` policy;
 - a Git repository already initialized with `cw init` before MCP use;
 - permission only for the repository root explicitly selected for the MCP
@@ -135,7 +135,7 @@ marketplace source fails explicitly without changing other configuration.
 
 ## Current boundaries
 
-- Core is `0.15.0`; its release does not republish the Plugin.
+- Core is `0.15.1`; its release does not republish the Plugin.
 - Plugin remains `0.1.0`.
 - Remote protocol remains `cw.remote.v1`.
 - The public `cw-plugin-0.1.0.zip` asset remains immutable.

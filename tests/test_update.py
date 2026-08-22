@@ -91,17 +91,24 @@ class CountingProvider(LocalReleaseProvider):
 
 
 class UpdateFixture:
-    def __init__(self, base: Path, *, target: str = "0.2.0", smoke_ok: bool = True):
+    def __init__(
+        self,
+        base: Path,
+        *,
+        target: str = "0.2.0",
+        current: str = "0.1.5",
+        smoke_ok: bool = True,
+    ):
         self.base = base
         self.paths = InstallPaths(base / "home/share/cw", base / "home/bin")
-        old = make_release_tree(base, "0.1.5")
+        old = make_release_tree(base, current)
         self.paths.versions.mkdir(parents=True)
-        old_install = self.paths.versions / "0.1.5"
+        old_install = self.paths.versions / current
         old.rename(old_install)
         self.paths.share.mkdir(parents=True, exist_ok=True)
         module_path = old_install / "cw/update/installation.py"
         self.installation = ManagedInstallation(self.paths, module_path=module_path)
-        self.installation.pointer.activate("0.1.5")
+        self.installation.pointer.activate(current)
         self.archive = archive_tree(base, make_release_tree(base, target, smoke_ok=smoke_ok), target)
         self.manifest_path = base / "manifest.json"
         self.manifest_path.write_text(json.dumps(manifest_dict(target, self.archive)), encoding="utf-8")
@@ -215,6 +222,40 @@ class UpdateServiceTests(unittest.TestCase):
         self.assertTrue((self.fixture.paths.versions / "0.1.5").is_dir())
         state = json.loads(self.fixture.paths.state.read_text())
         self.assertEqual("0.1.5", state["previous_version"])
+
+    def test_0141_to_0151_rollback_and_reupdate_preserve_project_evidence(self):
+        fixture = UpdateFixture(
+            Path(self.temporary.name) / "core-0141-0151",
+            current="0.14.1",
+            target="0.15.1",
+        )
+        evidence = fixture.base / "consumer/.cw/state.json"
+        evidence.parent.mkdir(parents=True)
+        evidence.write_bytes(b'{"legacy":true}\n')
+        before = evidence.read_bytes()
+        fixture.service.install()
+        self.assertEqual("0.15.1", fixture.installation.active_version())
+        self.assertEqual(before, evidence.read_bytes())
+        self.assertEqual("0.14.1", fixture.service.rollback().current)
+        self.assertEqual(before, evidence.read_bytes())
+        fixture.service.install(requested_version="0.15.1")
+        self.assertEqual("0.15.1", fixture.installation.active_version())
+        self.assertEqual(before, evidence.read_bytes())
+
+    def test_0150_to_0151_and_rollback_preserve_project_evidence(self):
+        fixture = UpdateFixture(
+            Path(self.temporary.name) / "core-0150-0151",
+            current="0.15.0",
+            target="0.15.1",
+        )
+        evidence = fixture.base / "consumer/.cw/state.json"
+        evidence.parent.mkdir(parents=True)
+        evidence.write_bytes(b'{"legacy":true}\n')
+        before = evidence.read_bytes()
+        fixture.service.install()
+        self.assertEqual("0.15.1", fixture.installation.active_version())
+        self.assertEqual("0.15.0", fixture.service.rollback().current)
+        self.assertEqual(before, evidence.read_bytes())
 
     def test_rollback_success(self):
         self.fixture.service.install()

@@ -1,6 +1,6 @@
 # MCP runtime: local governed access
 
-The current Core 0.15.0 optional stdio MCP runtime retains four narrow
+The current Core 0.15.1 optional stdio MCP runtime retains four narrow
 controlled actions, six inspection tools, operation polling/cancellation, and
 all read-only resources introduced across the 0.8–0.11 milestones. Every
 request invokes `CWApplication` directly and uses the same engine, project lock,

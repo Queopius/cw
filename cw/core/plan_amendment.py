@@ -285,9 +285,14 @@ def _restore(root: Path, transaction: dict[str, Any]) -> None:
             )
         manifest = load_json(manifest_path)
         manifest_evidence = manifest.get("evidence") if isinstance(manifest, dict) else None
+        manifest_keys = frozenset(manifest) if isinstance(manifest, dict) else frozenset()
+        legacy_manifest_keys = {
+            "schema_version", "kind", "workflow", "state", "evidence", "proposal_id",
+        }
+        directory_inventory = manifest.get("directories", []) if isinstance(manifest, dict) else None
         if (
             not isinstance(manifest, dict)
-            or set(manifest) != {"schema_version", "kind", "workflow", "state", "evidence", "proposal_id"}
+            or manifest_keys not in {frozenset(legacy_manifest_keys), frozenset(legacy_manifest_keys | {"directories"})}
             or manifest.get("schema_version") != 1
             or manifest.get("kind") != "plan_artifact_amend_restore_manifest"
             or manifest.get("proposal_id") != transaction.get("proposal_id")
@@ -301,6 +306,7 @@ def _restore(root: Path, transaction: dict[str, Any]) -> None:
             or not isinstance(manifest_evidence, list)
             or [item.get("path") for item in manifest_evidence if isinstance(item, dict)]
             != transaction.get("superseded_evidence")
+            or not isinstance(directory_inventory, list)
         ):
             raise CwError(
                 "Plan amendment restore manifest is invalid",
@@ -314,6 +320,21 @@ def _restore(root: Path, transaction: dict[str, Any]) -> None:
         if set(evidence_hashes) != set(transaction.get("superseded_evidence", [])):
             raise CwError(
                 "Plan amendment restore inventory is invalid",
+                ErrorCode.PLAN_AMEND_ROLLBACK_FAILED,
+            )
+        expected_directory_inventory = [{
+            "path": ".cw/supersessions",
+            "existed": ".cw/supersessions" not in transaction.get("created_directories", []),
+        }]
+        if (
+            ("directories" in manifest_keys and directory_inventory != expected_directory_inventory)
+            or (
+                "directories" not in manifest_keys
+                and bool(transaction.get("created_directories", []))
+            )
+        ):
+            raise CwError(
+                "Plan amendment directory restore inventory is invalid",
                 ErrorCode.PLAN_AMEND_ROLLBACK_FAILED,
             )
     atomic_write_bytes(root / ".codex/workflow/phases.yaml", old_workflow.read_bytes())
@@ -347,6 +368,37 @@ def _restore(root: Path, transaction: dict[str, Any]) -> None:
         target = safe_project_path(root, reference)
         if target.is_file() and not target.is_symlink():
             target.unlink()
+    for reference in reversed(transaction.get("created_directories", [])):
+        if reference != ".cw/supersessions":
+            raise CwError(
+                "Plan amendment rollback directory is invalid",
+                ErrorCode.PLAN_AMEND_ROLLBACK_FAILED,
+            )
+        target = root / reference
+        try:
+            metadata = target.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise CwError(
+                "Plan amendment rollback directory cannot be inspected",
+                ErrorCode.PLAN_AMEND_ROLLBACK_FAILED,
+                details=str(exc),
+            ) from exc
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise CwError(
+                "Plan amendment rollback directory is unsafe",
+                ErrorCode.PLAN_AMEND_ROLLBACK_FAILED,
+            )
+        try:
+            target.rmdir()
+            fsync_directory(target.parent)
+        except OSError as exc:
+            raise CwError(
+                "Plan amendment rollback directory is not empty",
+                ErrorCode.PLAN_AMEND_ROLLBACK_FAILED,
+                details=str(exc),
+            ) from exc
     if (
         workflow_hash(root / ".codex/workflow/phases.yaml")
         != transaction["previous_workflow_sha256"]
@@ -380,8 +432,9 @@ def _validate_active_transaction(transaction: dict[str, Any]) -> None:
         r"evidence-supersessions/es-[0-9a-f]{64}|"
         r"plan-amendments/pa-[0-9a-f]{64})\.json"
     )
+    transaction_keys = frozenset(transaction)
     if (
-        set(transaction) != required
+        transaction_keys not in {frozenset(required), frozenset(required | {"created_directories"})}
         or not isinstance(transaction.get("created_at"), str)
         or re.fullmatch(r"\.cw/backups/[A-Za-z0-9._-]+", str(transaction.get("backup"))) is None
         or any(_SHA256.fullmatch(str(transaction.get(key))) is None for key in (
@@ -394,6 +447,7 @@ def _validate_active_transaction(transaction: dict[str, Any]) -> None:
         or not isinstance(created, list)
         or len(created) != len(set(created))
         or any(not isinstance(item, str) or allowed_created.fullmatch(item) is None for item in created)
+        or transaction.get("created_directories", []) not in ([], [".cw/supersessions"])
     ):
         raise CwError(
             "Plan amendment transaction schema is invalid",
@@ -1078,6 +1132,9 @@ def _apply_active_artifact_amendment_locked(
     backup = backup_metadata(root)
     backup_relative = backup.relative_to(root).as_posix()
     evidence = prepared["evidence"]
+    from .revisions import supersession_directory, supersession_index
+
+    review_supersessions_existed = supersession_directory(root) is not None
     inventory = {
         "schema_version": 1,
         "kind": "plan_artifact_amend_restore_manifest",
@@ -1088,6 +1145,10 @@ def _apply_active_artifact_amendment_locked(
         "state": {"path": ".cw/state.json", "sha256": prepared["expected_state_sha256"]},
         "evidence": evidence,
         "proposal_id": prepared["proposal_id"],
+        "directories": [{
+            "path": ".cw/supersessions",
+            "existed": review_supersessions_existed,
+        }],
     }
     atomic_json(backup / "plan-amend-restore-manifest.json", inventory)
     # Second CAS and file-identity check occur after backup and immediately
@@ -1101,8 +1162,16 @@ def _apply_active_artifact_amendment_locked(
         _, observed = _artifact_path(root, value)
         if observed != identity:
             raise CwError("Artifact changed during amendment", ErrorCode.OPERATION_CONFLICT, exit_code=4)
+    supersession_index(root)
+    if (supersession_directory(root) is not None) != review_supersessions_existed:
+        raise CwError(
+            "Review supersession directory changed during the operation",
+            ErrorCode.OPERATION_CONFLICT,
+            exit_code=4,
+        )
 
     from .revisions import (
+        create_supersession_directory,
         load_revision,
         persist_revision,
         revision_path,
@@ -1207,6 +1276,9 @@ def _apply_active_artifact_amendment_locked(
         "previous_state_sha256": prepared["expected_state_sha256"],
         "superseded_evidence": [item["path"] for item in evidence],
         "created_files": created_files,
+        "created_directories": (
+            [] if review_supersessions_existed else [".cw/supersessions"]
+        ),
         "proposal_id": prepared["proposal_id"],
     }
     transaction["transaction_sha256"] = sha256_bytes(json.dumps(
@@ -1220,6 +1292,14 @@ def _apply_active_artifact_amendment_locked(
             failure_injector(name)
 
     try:
+        if not review_supersessions_existed:
+            if supersession_directory(root) is not None:
+                raise CwError(
+                    "Review supersession directory changed during the operation",
+                    ErrorCode.OPERATION_CONFLICT,
+                )
+            create_supersession_directory(root)
+            step("supersession_directory_created")
         persist_revision(root, old_revision)
         step("old_revision_persisted")
         persist_revision(root, new_revision)
