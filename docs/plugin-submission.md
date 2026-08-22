@@ -6,7 +6,9 @@ plan for a future explicitly authorized submission.
 ## Candidate listing
 
 - **Name:** CW — Codex Workflow
-- **Developer:** Queopius; final Fantomid LLC relationship requires human/legal approval
+- **Legal publisher:** Fantomid LLC
+- **Brand:** Queopius
+- **Developer/contact identity:** Queopius | Fantomid LLC
 - **Category:** Coding
 - **Positioning:** Govern AI-assisted development with phases, validation,
   independent review, and evidence-backed gates.
@@ -32,19 +34,25 @@ disconnect recovery. The full matrix is in
 | --- | --- |
 | Current plugin manifest, skill, assets, deterministic archive | READY |
 | Accurate tool schemas and permission annotations | READY locally |
-| Public streamable-HTTPS MCP endpoint | MISSING |
-| OAuth 2.1 protected resource and authorization metadata | MISSING |
+| Staging streamable-HTTPS MCP endpoint | IMPLEMENTED FOR TESTING |
+| Staging OAuth protected-resource and authorization metadata | IMPLEMENTED FOR TESTING |
+| Production streamable-HTTPS MCP endpoint | NOT DEPLOYED |
+| Production OAuth | NOT DEPLOYED |
 | Domain verification challenge | NOT RUN |
 | Production tenant/project isolation acceptance | NOT RUN |
 | Public privacy policy and retention/deletion commitments | HUMAN/LEGAL INPUT |
 | Terms of service | HUMAN/LEGAL INPUT |
-| Final publisher/business identity and support contact | HUMAN/BUSINESS INPUT |
+| Publisher identity verification and support approval | HUMAN/BUSINESS INPUT |
 | Countries/regions, policy attestations, screenshots if requested | HUMAN/BUSINESS INPUT |
 | Apps Management write permission and submission approval | HUMAN AUTHORIZATION REQUIRED |
 
 The manifest intentionally does not invent a terms URL, registered `.app.json`
 connection, remote server URL, or screenshots. Add them only when the actual
 public artifacts exist and validate.
+
+Queopius is a technology brand operated by Fantomid LLC,
+a New Mexico limited liability company. This technical disclosure does not
+replace legal review or OpenAI Platform identity verification.
 
 ## Decision
 

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "workflow": {"id": "bridge-fixture", "repository": "bridge-fixture", "version": 1, "status": "PROPOSED", "goal": "Controlled pilot remediation"},
+  "settings": {"max_review_attempts": 3, "command_timeout_seconds": 30},
+  "reviewer": {"command": "codex", "timeout_seconds": 30, "sandbox": "read-only"},
+  "completion_target": {
+    "id": "controlled-pilot", "name": "Controlled pilot", "description": "Safe controlled pilot acceptance", "target_type": "controlled-pilot",
+    "requirements": [
+      {"id": "FUNCTIONAL_BEHAVIOR", "description": "Behavior works", "severity": "blocking", "evidence_expectations": ["tests"]},
+      {"id": "INTEGRATION_COHERENCE", "description": "Integrations agree", "severity": "blocking", "evidence_expectations": ["contracts"]},
+      {"id": "VERIFICATION_BASELINE", "description": "Verification passes", "severity": "blocking", "evidence_expectations": ["quality gates"]},
+      {"id": "SECURITY_BASELINE", "description": "Security passes", "severity": "blocking", "evidence_expectations": ["security checks"]},
+      {"id": "INSTALL_RUNTIME", "description": "Consumers install", "severity": "blocking", "evidence_expectations": ["consumer lanes"]},
+      {"id": "FAILURE_SAFETY", "description": "Failures are safe", "severity": "blocking", "evidence_expectations": ["recovery tests"]},
+      {"id": "TARGET_ACCEPTANCE", "description": "Pilot accepted", "severity": "blocking", "evidence_expectations": ["pilot evidence"]}
+    ]
+  },
+  "phases": [
+    {"id":"01-contracts","name":"Contracts","objective":"Freeze contracts","depends_on":[],"artifacts":["docs/contracts.md"],"review_paths":["docs/**"],"required_commands":[],"acceptance_criteria":[{"id":"C-1","description":"Contracts recorded","severity":"blocking"}],"blocking_criteria":[],"requires_human_approval":true,"completion_requirements":["INTEGRATION_COHERENCE"]},
+    {"id":"02-schema","name":"Schema","objective":"Align schema","depends_on":["01-contracts"],"artifacts":["src/schema.py"],"review_paths":["src/**"],"required_commands":[],"acceptance_criteria":[{"id":"S-1","description":"Schema aligned","severity":"blocking"}],"blocking_criteria":[],"requires_human_approval":true,"completion_requirements":["INTEGRATION_COHERENCE"]},
+    {"id":"03-resolvers","name":"Resolvers","objective":"Resolve destinations","depends_on":["02-schema"],"artifacts":["src/resolvers.py"],"review_paths":["src/**"],"required_commands":[],"acceptance_criteria":[{"id":"R-1","description":"Resolvers deterministic","severity":"blocking"}],"blocking_criteria":[],"requires_human_approval":true,"completion_requirements":["FUNCTIONAL_BEHAVIOR"]},
+    {"id":"04-recovery","name":"Recovery","objective":"Recover ambiguity","depends_on":["03-resolvers"],"artifacts":["src/recovery.py"],"review_paths":["src/**"],"required_commands":[],"acceptance_criteria":[{"id":"REC-1","description":"Recovery safe","severity":"blocking"}],"blocking_criteria":[],"requires_human_approval":true,"completion_requirements":["FAILURE_SAFETY"]},
+    {"id":"05-amazon","name":"Amazon","objective":"Conform sandbox","depends_on":["04-recovery"],"artifacts":["src/amazon.py"],"review_paths":["src/**"],"required_commands":[],"acceptance_criteria":[{"id":"A-1","description":"Sandbox supported","severity":"blocking"}],"blocking_criteria":[],"requires_human_approval":true,"completion_requirements":["INTEGRATION_COHERENCE"]},
+    {"id":"06-dry-run","name":"Dry run","objective":"Exercise zero mutation path","depends_on":["05-amazon"],"artifacts":["tools/dry_run.py"],"review_paths":["tools/**"],"required_commands":[],"acceptance_criteria":[{"id":"D-1","description":"Dry run safe","severity":"blocking"}],"blocking_criteria":[],"requires_human_approval":true,"completion_requirements":["FUNCTIONAL_BEHAVIOR"]},
+    {"id":"07-security","name":"Security","objective":"Regress safety","depends_on":["06-dry-run"],"artifacts":["tests/security.py"],"review_paths":["tests/**"],"required_commands":[],"acceptance_criteria":[{"id":"SEC-1","description":"Security proven","severity":"blocking"}],"blocking_criteria":[],"requires_human_approval":true,"completion_requirements":["SECURITY_BASELINE"]},
+    {"id":"08-consumers","name":"Consumers","objective":"Verify consumers","depends_on":["07-security"],"artifacts":["tests/consumers.py"],"review_paths":["tests/**"],"required_commands":[],"acceptance_criteria":[{"id":"I-1","description":"Consumers pass","severity":"blocking"}],"blocking_criteria":[],"requires_human_approval":true,"completion_requirements":["INSTALL_RUNTIME"]},
+    {"id":"09-read-only","name":"Read only","objective":"Read provider state","depends_on":["08-consumers"],"artifacts":["tests/read_only.py"],"review_paths":["tests/**"],"required_commands":[],"acceptance_criteria":[{"id":"RO-1","description":"Reads pass","severity":"blocking"}],"blocking_criteria":[],"requires_human_approval":true,"completion_requirements":["TARGET_ACCEPTANCE"]},
+    {"id":"10-envelope","name":"Envelope","objective":"Prepare financial gate","depends_on":["09-read-only"],"artifacts":["docs/gate.md"],"review_paths":["docs/**"],"required_commands":[],"acceptance_criteria":[{"id":"G-1","description":"Gate exact","severity":"blocking"}],"blocking_criteria":[],"requires_human_approval":true,"completion_requirements":["SECURITY_BASELINE"]},
+    {"id":"11-pilot","name":"Pilot","objective":"Execute controlled draft","depends_on":["10-envelope"],"artifacts":["artifacts/pilot.json"],"review_paths":["artifacts/**"],"required_commands":[],"acceptance_criteria":[{"id":"P-1","description":"Pilot matched","severity":"blocking"}],"blocking_criteria":[],"requires_human_approval":true,"completion_requirements":["VERIFICATION_BASELINE","TARGET_ACCEPTANCE"]}
+  ]
+}

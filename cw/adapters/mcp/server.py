@@ -6,6 +6,7 @@ from typing import Any
 
 from cw.application import ApplicationError
 
+from .compatibility import ensure_plugin_compatible
 from .runtime import MCPReadOnlyRuntime, RuntimeConfig
 
 
@@ -34,6 +35,7 @@ def _sdk() -> tuple[Any, Any, Any]:
 
 
 def create_server(runtime: MCPReadOnlyRuntime) -> Any:
+    ensure_plugin_compatible()
     FastMCP, Annotations, ToolAnnotations = _sdk()
     server = FastMCP(
         "CW — Codex Workflow",
@@ -45,7 +47,7 @@ def create_server(runtime: MCPReadOnlyRuntime) -> Any:
         annotations = ToolAnnotations(
             readOnlyHint=bool(contract["annotations"]["readOnlyHint"]),
             destructiveHint=False,
-            idempotentHint=True,
+            idempotentHint=bool(contract["annotations"]["idempotentHint"]),
             openWorldHint=False,
         )
         server.tool(
@@ -55,56 +57,61 @@ def create_server(runtime: MCPReadOnlyRuntime) -> Any:
             annotations=annotations,
             structured_output=True,
         )(function)
+        registered = next(item for item in server._tool_manager.list_tools() if item.name == name)
+        registered.fn_metadata.arg_model.model_config["extra"] = "forbid"
+        registered.fn_metadata.arg_model.model_rebuild(force=True)
+        registered.parameters = runtime.tool_contract(name).input_schema()
+        registered.fn_metadata.output_schema = runtime.tool_contract(name).output_schema()
 
-    def project_status(project_id: str = "", operation_id: str = "") -> dict[str, Any]:
+    def project_status(project_id: str = "", operation_id: str = "") -> dict[str, object]:
         return runtime.call_tool(
             "cw_project_status", {"project_id": project_id, "operation_id": operation_id},
         )
 
-    def project_inspect(project_id: str = "", operation_id: str = "") -> dict[str, Any]:
+    def project_inspect(project_id: str = "", operation_id: str = "") -> dict[str, object]:
         return runtime.call_tool(
             "cw_project_inspect", {"project_id": project_id, "operation_id": operation_id},
         )
 
-    def history(project_id: str = "", operation_id: str = "") -> dict[str, Any]:
+    def history(project_id: str = "", operation_id: str = "") -> dict[str, object]:
         return runtime.call_tool("cw_history", {"project_id": project_id, "operation_id": operation_id})
 
-    def explain(project_id: str = "", operation_id: str = "") -> dict[str, Any]:
+    def explain(project_id: str = "", operation_id: str = "") -> dict[str, object]:
         return runtime.call_tool("cw_explain", {"project_id": project_id, "operation_id": operation_id})
 
-    def completion_status(project_id: str = "", operation_id: str = "") -> dict[str, Any]:
+    def completion_status(project_id: str = "", operation_id: str = "") -> dict[str, object]:
         return runtime.call_tool(
             "cw_completion_status", {"project_id": project_id, "operation_id": operation_id},
         )
 
-    def gate_status(project_id: str = "", operation_id: str = "") -> dict[str, Any]:
+    def gate_status(project_id: str = "", operation_id: str = "") -> dict[str, object]:
         return runtime.call_tool(
             "cw_gate_status", {"project_id": project_id, "operation_id": operation_id},
         )
 
-    def phase_start(project_id: str = "", operation_id: str = "") -> dict[str, Any]:
+    def phase_start(project_id: str = "", operation_id: str = "") -> dict[str, object]:
         return runtime.call_tool(
             "cw_phase_start", {"project_id": project_id, "operation_id": operation_id},
         )
 
-    def validate(project_id: str = "", operation_id: str = "") -> dict[str, Any]:
+    def validate(project_id: str = "", operation_id: str = "") -> dict[str, object]:
         return runtime.call_tool(
             "cw_validate", {"project_id": project_id, "operation_id": operation_id},
         )
 
-    def request_review(project_id: str = "", operation_id: str = "") -> dict[str, Any]:
+    def request_review(project_id: str = "", operation_id: str = "") -> dict[str, object]:
         return runtime.call_tool(
             "cw_request_review", {"project_id": project_id, "operation_id": operation_id},
         )
 
-    def retry(project_id: str = "", operation_id: str = "") -> dict[str, Any]:
+    def retry(project_id: str = "", operation_id: str = "") -> dict[str, object]:
         return runtime.call_tool(
             "cw_retry", {"project_id": project_id, "operation_id": operation_id},
         )
 
     def operation_status(
         target_operation_id: str, project_id: str = "", operation_id: str = "",
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         return runtime.call_tool("cw_operation_status", {
             "project_id": project_id,
             "operation_id": operation_id,
@@ -113,7 +120,7 @@ def create_server(runtime: MCPReadOnlyRuntime) -> Any:
 
     def operation_cancel(
         target_operation_id: str, project_id: str = "", operation_id: str = "",
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         return runtime.call_tool("cw_operation_cancel", {
             "project_id": project_id,
             "operation_id": operation_id,
@@ -196,6 +203,7 @@ def serve(config: RuntimeConfig) -> int:
             json.dumps({
                 "event": "startup_failure", "code": exc.code.value,
                 "message": exc.message, "retryable": exc.retryable,
+                "details": exc.details,
             }, sort_keys=True),
             file=sys.stderr,
             flush=True,

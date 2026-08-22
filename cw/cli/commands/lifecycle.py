@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -11,10 +12,24 @@ from cw.core.gates import gate_path, validate_gate
 from cw.core.initialize import backup_metadata, initialize, repair as repair_metadata
 from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
+from cw.core.plan_amendment import (
+    amend_plan,
+    apply_active_artifact_amendment,
+    prepare_active_artifact_amendment,
+)
 from cw.core.recovery import mark_infrastructure_error
 from cw.core.state import bind_plan, initial_state, save_state, transition
-from cw.core.utils import utc_now
-from cw.core.workflow import load_workflow, set_plan_status, write_workflow, workflow_hash
+from cw.core.utils import safe_project_path, utc_now
+from cw.core.workflow import _read_document, load_workflow, set_plan_status, write_workflow, workflow_hash
+from cw.core.authorization import Actor, ActorOrigin, OperationContext, issue_user_authorization
+from cw.core.revisions import (
+    apply_rebaseline,
+    authorization_resource,
+    create_rebaseline_proposal,
+    load_proposal,
+    persist_revision,
+    revision_payload,
+)
 from cw.planning.planner import Planner
 from cw.ui.console import Console, emit_json
 
@@ -92,6 +107,10 @@ def _show_plan(
     workflow: Any,
 ) -> int:
     payload = _plan_payload(workflow)
+    payload["workflow_sha256"] = workflow_hash(root / ".codex/workflow/phases.yaml")
+    from cw.core.utils import sha256_file
+
+    payload["state_sha256"] = sha256_file(root / ".cw/state.json")
     payload["current_phase"] = state.get("current_phase")
     for phase in payload["phases"]:
         phase["status"] = "current" if phase["id"] == state.get("current_phase") else "pending"
@@ -140,7 +159,21 @@ def _approve_plan(
     with operation_lock(root, "plan-approve"):
         set_plan_status(root, "APPROVED")
         workflow = load_workflow(root)
+        document = _read_document(root / ".codex/workflow/phases.yaml")
+        revision = revision_payload(
+            root, document, parent_revision_id=None,
+            actor_id="local-operator", actor_origin=ActorOrigin.HUMAN_CLI.value,
+        )
+        persist_revision(root, revision)
+        previous_revision = state.get("active_plan_revision")
+        if isinstance(previous_revision, str) and previous_revision != revision["plan_revision_id"]:
+            state["superseded_plan_revisions"] = [
+                *[item for item in state.get("superseded_plan_revisions", []) if isinstance(item, str)],
+                previous_revision,
+            ]
         state["workflow_sha256"] = workflow_hash(root / ".codex" / "workflow" / "phases.yaml")
+        state["active_plan_revision"] = revision["plan_revision_id"]
+        state["active_plan_revision_sha256"] = revision["canonical_workflow_sha256"]
         transition(root, state, WorkflowState.READY)
     payload = {"status": "READY", "phases": len(workflow.phases)}
     if args.json:
@@ -161,13 +194,220 @@ def command_plan(
     context: ContextLoader,
 ) -> int:
     root = root_resolver()
+    amend_options = (
+        getattr(args, "file", None),
+        getattr(args, "expected_workflow_sha256", None),
+        getattr(args, "expected_state_sha256", None),
+        getattr(args, "phase", None),
+        getattr(args, "add_artifact", None),
+        getattr(args, "dry_run", False),
+        getattr(args, "yes", False),
+        getattr(args, "non_interactive", False),
+    )
+    rebaseline_options = tuple(
+        getattr(args, name, None)
+        for name in ("proposal", "authorize", "operation_id")
+    )
+    if args.action != "rebaseline" and any(value not in {None, False} for value in rebaseline_options):
+        raise CwError(
+            "Rebaseline options require 'cw plan rebaseline'",
+            ErrorCode.USAGE_ERROR,
+            exit_code=2,
+        )
+    if args.action != "amend" and any(value not in {None, False} for value in amend_options):
+        raise CwError(
+            "Amendment options require 'cw plan amend'",
+            ErrorCode.USAGE_ERROR,
+            exit_code=2,
+        )
+    if args.action not in {"amend", "rebaseline"} and any(
+        value not in {None, False}
+        for value in (getattr(args, "reason", None), getattr(args, "apply", None))
+    ):
+        raise CwError(
+            "Reason and apply options require plan amend or plan rebaseline",
+            ErrorCode.USAGE_ERROR,
+            exit_code=2,
+        )
+    if args.action == "amend":
+        if any(value not in {None, False} for value in rebaseline_options) or args.goal:
+            raise CwError(
+                "Plan amend received options for another plan action",
+                ErrorCode.USAGE_ERROR,
+                exit_code=2,
+            )
+        active_mode = bool(args.phase or args.add_artifact or args.expected_state_sha256 or args.reason or args.dry_run or args.apply is True or args.yes or args.non_interactive)
+        file_mode = bool(args.file)
+        if file_mode and active_mode:
+            raise CwError(
+                "Plan amend --file and active artifact options are mutually exclusive",
+                ErrorCode.USAGE_ERROR,
+                exit_code=2,
+            )
+        if file_mode:
+            if not args.expected_workflow_sha256:
+                raise CwError(
+                    "Plan amend --file requires --expected-workflow-sha256",
+                    ErrorCode.USAGE_ERROR,
+                    exit_code=2,
+                )
+            with operation_lock(root, "plan-amend"):
+                payload = amend_plan(root, args.file, args.expected_workflow_sha256)
+        else:
+            if isinstance(args.apply, str):
+                raise CwError("Active plan amend --apply does not accept a value", ErrorCode.USAGE_ERROR, exit_code=2)
+            required = (
+                args.phase, args.add_artifact, args.expected_workflow_sha256,
+                args.expected_state_sha256, args.reason,
+            )
+            if not all(required) or bool(args.dry_run) == bool(args.apply is True):
+                raise CwError(
+                    "Active plan amend requires phase, artifacts, both hashes, reason, and exactly one of --dry-run or --apply",
+                    ErrorCode.USAGE_ERROR,
+                    exit_code=2,
+                )
+            if args.dry_run:
+                payload = prepare_active_artifact_amendment(
+                    root, args.phase, args.add_artifact,
+                    args.expected_workflow_sha256, args.expected_state_sha256, args.reason,
+                )
+            else:
+                if args.non_interactive and not args.yes:
+                    raise CwError(
+                        "Non-interactive amendment requires --yes",
+                        ErrorCode.AUTHORIZATION_REQUIRED,
+                        exit_code=3,
+                    )
+                if not args.yes and input("\nApply this exact artifact-only plan amendment? [y/N] ").strip().lower() not in {"y", "yes"}:
+                    raise CwError("Plan amendment was not confirmed", ErrorCode.AUTHORIZATION_REQUIRED, exit_code=3)
+                payload = apply_active_artifact_amendment(
+                    root, args.phase, args.add_artifact,
+                    args.expected_workflow_sha256, args.expected_state_sha256, args.reason,
+                )
+        if args.json:
+            emit_json(payload)
+        else:
+            console.header("Plan amendment" if payload.get("dry_run") else "Plan amended")
+            console.item("✓", "Validated without writes" if payload.get("dry_run") else "Plan changed safely")
+            console.field("State", payload["status"])
+            if "phase_count" in payload:
+                console.field("Phases", payload["phase_count"])
+            if "phase" in payload:
+                console.field("Phase", payload["phase"])
+                console.field("Added artifacts", ", ".join(payload["added_artifacts"]))
+                console.field("Semantic removals", len(payload["removed_artifacts"]))
+                console.field("Other semantic changes", len(payload["other_changes"]))
+            if payload.get("backup"):
+                console.field("Backup", payload["backup"])
+            console.field("Previous workflow", payload.get("previous_workflow_sha256", payload.get("expected_workflow_sha256")))
+            console.field("Current workflow", payload["workflow_sha256"])
+            if payload.get("previous_state_sha256") or payload.get("expected_state_sha256"):
+                console.field("Expected state", payload.get("previous_state_sha256", payload.get("expected_state_sha256")))
+            console.field("Completion Contract", "preserved")
+            console.field("Approval required", "YES")
+            if not payload.get("dry_run"):
+                console.run("cw plan approve")
+        return 0
     project, state, workflow = context(root)
     if args.action == "show":
         return _show_plan(args, console, root, state, workflow)
     if args.action == "approve":
         return _approve_plan(args, console, root, state, workflow)
+    if args.action == "rebaseline":
+        actor = Actor("local-operator", ActorOrigin.HUMAN_CLI, explicit_user_intent=True)
+        if args.apply:
+            if args.apply is True:
+                raise CwError("Rebaseline --apply requires a proposal ID", ErrorCode.USAGE_ERROR, exit_code=2)
+            if args.goal or args.proposal or args.reason:
+                raise CwError(
+                    "Rebaseline apply accepts only --apply, --authorize, and --operation-id",
+                    ErrorCode.USAGE_ERROR,
+                    exit_code=2,
+                )
+            if not args.authorize:
+                raise CwError(
+                    "Plan rebaseline requires explicit --authorize",
+                    ErrorCode.AUTHORIZATION_REQUIRED,
+                    "Inspect the proposal, then repeat with --authorize.",
+                    exit_code=3,
+                )
+            proposal = load_proposal(root, args.apply)
+            operation_id = args.operation_id or uuid.uuid4().hex
+            grant = issue_user_authorization(
+                action="plan.rebaseline",
+                resource_id=authorization_resource(proposal),
+                operation_id=operation_id,
+                actor=actor,
+            )
+            with operation_lock(root, "plan-rebaseline"):
+                payload = apply_rebaseline(
+                    root, workflow, state, args.apply,
+                    OperationContext(operation_id, actor, "plan.rebaseline", grant),
+                )
+        else:
+            if args.authorize or args.operation_id:
+                raise CwError(
+                    "Rebaseline preview cannot authorize or select an operation ID",
+                    ErrorCode.USAGE_ERROR,
+                    exit_code=2,
+                )
+            if not args.reason or not args.reason.strip():
+                raise CwError("Plan rebaseline requires --reason", ErrorCode.USAGE_ERROR, exit_code=2)
+            if bool(args.goal) == bool(args.proposal):
+                raise CwError(
+                    "Plan rebaseline preview requires exactly one of --goal or --proposal",
+                    ErrorCode.USAGE_ERROR,
+                    exit_code=2,
+                )
+            if args.proposal:
+                proposal_file = safe_project_path(root, args.proposal, must_exist=True)
+                if not proposal_file.is_file() or proposal_file.is_symlink():
+                    raise CwError("Rebaseline proposal path is unsafe", ErrorCode.USAGE_ERROR, exit_code=2)
+                proposed_document = _read_document(proposal_file)
+            else:
+                planner = Planner(
+                    workflow.human_gate_categories,
+                    backend=CodexAdapter(),
+                    timeout=workflow.review_timeout,
+                )
+                proposed_document = planner.propose_plan(root, project.project_id, args.goal)
+            with operation_lock(root, "plan-rebaseline-proposal"):
+                payload = create_rebaseline_proposal(
+                    root, workflow, state, proposed_document,
+                    reason=args.reason, actor_id=actor.actor_id,
+                    actor_origin=actor.origin.value,
+                )
+            payload = {
+                "status": "PROPOSED",
+                "proposal_id": payload["proposal_id"],
+                "proposal_sha256": payload["proposal_sha256"],
+                "old_plan_revision_id": payload["old_plan_revision_id"],
+                "new_plan_revision_id": payload["new_plan_revision_id"],
+                "phase": payload["phase"],
+                "reason": payload["reason"],
+                "authorization_required": True,
+                "apply_command": f"cw plan rebaseline --apply {payload['proposal_id']} --authorize",
+            }
+        if args.json:
+            emit_json(payload)
+        else:
+            console.header("Plan rebaseline")
+            console.field("Status", payload["status"])
+            console.field("Proposal", payload.get("proposal_id", args.apply))
+            console.field("Old revision", payload.get("old_plan_revision_id"))
+            console.field("New revision", payload.get("new_plan_revision_id"))
+            if payload.get("authorization_required"):
+                console.wrapped("Human authorization is required for this exact proposal hash.", 2)
+                console.action(payload["apply_command"], "Authorize and activate the corrected plan")
+        return 0
     with operation_lock(root, "plan"):
         if args.action == "rebuild":
+            if state.get("status") == WorkflowState.REVISION_REQUIRED.value or any((root / ".cw/reviews").glob("*.json")):
+                raise CwError(
+                    "Reviewed workflows must use an auditable plan rebaseline",
+                    ErrorCode.PLAN_REBASELINE_REQUIRED,
+                    'Run: cw plan rebaseline --goal "..." --reason "..."',
+                )
             backup_metadata(root)
             state = initial_state(project.project_id)
             save_state(root, state)

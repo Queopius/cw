@@ -32,6 +32,23 @@ class DocumentationPublishingTests(unittest.TestCase):
         self.assertIn("favicon: assets/brand/cw-mark-32.png", configuration)
         self.assertTrue((ROOT / "docs/assets/brand/cw-mark.png").is_file())
         self.assertTrue((ROOT / "docs/assets/brand/cw-mark-32.png").is_file())
+        self.assertRegex(configuration, r"(?m)^site_author:\s*Fantomid LLC\s*$")
+
+    def test_plugin_public_metadata_uses_live_nonlegal_destinations(self):
+        manifest = (ROOT / "plugins/cw/.codex-plugin/plugin.json").read_text(encoding="utf-8")
+        listing = (ROOT / "docs/plugin-listing-draft.md").read_text(encoding="utf-8")
+        combined = manifest + listing
+        self.assertIn("https://docs.cwcli.dev/en/stable/plugin-app-candidate/", combined)
+        self.assertIn("https://docs.cwcli.dev/en/stable/plugin-support/", listing)
+        for broken in (
+            "https://docs.cwcli.dev/plugin-app-candidate/",
+            "https://docs.cwcli.dev/plugin-privacy/",
+            "https://docs.cwcli.dev/plugin-support/",
+            "https://docs.cwcli.dev/remote-auth/",
+        ):
+            self.assertNotIn(broken, combined)
+        self.assertNotIn("privacyPolicyURL", manifest)
+        self.assertNotIn("termsOfServiceURL", manifest)
 
     def test_package_metadata_keeps_semantic_public_destinations(self):
         metadata = (ROOT / "pyproject.toml").read_text(encoding="utf-8")

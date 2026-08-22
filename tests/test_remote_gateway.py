@@ -669,9 +669,18 @@ class OAuthResourceServerTests(unittest.TestCase):
                 "jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {},
             })
             self.assertEqual(200, listed.status_code, listed.text)
-            names = {item["name"] for item in listed.json()["result"]["tools"]}
+            tools = listed.json()["result"]["tools"]
+            names = {item["name"] for item in tools}
             self.assertEqual(set(REMOTE_READ_TOOLS) | set(REMOTE_CONTROLLED_TOOLS), names)
             self.assertNotIn("cw_authorize_extension", names)
+            self.assertTrue(all(item["inputSchema"]["additionalProperties"] is False for item in tools))
+            self.assertTrue(all(item["outputSchema"]["additionalProperties"] is False for item in tools))
+            for item in tools:
+                self.assertIn("project_id", item["inputSchema"]["required"])
+                self.assertEqual(
+                    item["annotations"]["readOnlyHint"],
+                    item["annotations"]["idempotentHint"],
+                )
 
     @unittest.skipUnless(__import__("importlib").util.find_spec("mcp"), "MCP SDK unavailable")
     def test_public_pairing_endpoint_is_rate_limited(self) -> None:

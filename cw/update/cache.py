@@ -75,6 +75,27 @@ class UpdateCache:
 
 
 def _manifest_dict(manifest: ReleaseManifest) -> dict[str, Any]:
+    signature = dict(manifest.signature or {})
+    if manifest.plugin is not None:
+        extensions = dict(signature.get("extensions", {}))
+        extensions["plugin"] = {
+            "name": manifest.plugin.name,
+            "version": str(manifest.plugin.version),
+            "asset": {
+                "filename": manifest.plugin.filename,
+                "sha256": manifest.plugin.sha256,
+                "size": manifest.plugin.size,
+            },
+            "core_compatibility": {
+                "minimum": str(manifest.plugin.minimum_core),
+                "maximum_exclusive": str(manifest.plugin.maximum_core_exclusive),
+            },
+            "provenance": {
+                "source_commit": manifest.plugin.source_commit,
+                "builder": manifest.plugin.builder,
+            },
+        }
+        signature["extensions"] = extensions
     return {
         "schema_version": manifest.schema_version,
         "version": str(manifest.version),
@@ -90,5 +111,5 @@ def _manifest_dict(manifest: ReleaseManifest) -> dict[str, Any]:
             for item in manifest.artifacts
         ],
         "release_notes": {"summary": manifest.summary, "url": manifest.release_url},
-        **({"signature": manifest.signature} if manifest.signature is not None else {}),
+        **({"signature": signature} if signature else {}),
     }

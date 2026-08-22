@@ -12,7 +12,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{name = "Fantomid LLC"}]
 keywords = ["cw", "codex", "workflow", "queopius"]
-dependencies = []
+dependencies = ["PyYAML>=6.0.2,<7"]
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.29,<2"]
@@ -44,6 +44,7 @@ include = ["cw*"]
 [tool.setuptools.package-data]
 cw = [
   "application/*.json",
+  "adapters/mcp/*.json",
   "schemas/*.json",
   "schemas/codex/*.json",
   "release_history.json",
