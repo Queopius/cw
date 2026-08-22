@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import platform
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from functools import total_ordering
+from pathlib import Path
 from typing import Any
 
 from cw.core.errors import CwError, ErrorCode
@@ -88,6 +90,66 @@ class ReleaseArtifact:
 
 
 @dataclass(frozen=True, slots=True)
+class PluginRelease:
+    name: str
+    version: Version
+    filename: str
+    sha256: str
+    size: int
+    minimum_core: Version
+    maximum_core_exclusive: Version
+    source_commit: str
+    builder: str
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "PluginRelease":
+        if not isinstance(value, dict) or set(value) != {
+            "name", "version", "asset", "core_compatibility", "provenance",
+        }:
+            raise _manifest_error("Plugin release metadata is invalid")
+        asset = value.get("asset")
+        compatibility = value.get("core_compatibility")
+        provenance = value.get("provenance")
+        if not isinstance(asset, dict) or set(asset) != {"filename", "sha256", "size"}:
+            raise _manifest_error("Plugin asset metadata is invalid")
+        if not isinstance(compatibility, dict) or set(compatibility) != {"minimum", "maximum_exclusive"}:
+            raise _manifest_error("Plugin Core compatibility metadata is invalid")
+        if not isinstance(provenance, dict) or set(provenance) != {"source_commit", "builder"}:
+            raise _manifest_error("Plugin provenance metadata is invalid")
+        filename = asset.get("filename")
+        digest = str(asset.get("sha256", "")).removeprefix("sha256:")
+        size = asset.get("size")
+        if (
+            value.get("name") != "cw"
+            or not isinstance(filename, str)
+            or filename != f"cw-plugin-{value.get('version', '')}.zip"
+            or "/" in filename or "\\" in filename
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or not isinstance(size, int) or isinstance(size, bool) or size < 1
+            or not all(isinstance(provenance.get(key), str) and provenance[key] for key in provenance)
+            or provenance.get("builder") != "scripts/build_plugin_candidate.py"
+        ):
+            raise _manifest_error("Plugin release metadata is invalid")
+        plugin_version = Version.parse(str(value.get("version", "")))
+        minimum = Version.parse(str(compatibility.get("minimum", "")))
+        maximum = Version.parse(str(compatibility.get("maximum_exclusive", "")))
+        if not minimum < maximum:
+            raise _manifest_error("Plugin Core compatibility metadata is invalid")
+        return cls(
+            "cw", plugin_version, filename, digest, size, minimum, maximum,
+            provenance["source_commit"], provenance["builder"],
+        )
+
+    def validate_asset(self, path: Path) -> None:
+        if not path.is_file() or path.name != self.filename:
+            raise _manifest_error("Plugin asset is missing")
+        if path.stat().st_size != self.size:
+            raise _manifest_error("Plugin asset size does not match release metadata")
+        if hashlib.sha256(path.read_bytes()).hexdigest() != self.sha256:
+            raise _manifest_error("Plugin asset checksum does not match release metadata")
+
+
+@dataclass(frozen=True, slots=True)
 class ReleaseManifest:
     schema_version: int
     version: Version
@@ -99,6 +161,7 @@ class ReleaseManifest:
     summary: str
     release_url: str
     signature: dict[str, Any] | None = None
+    plugin: PluginRelease | None = None
 
     @classmethod
     def from_dict(cls, value: Any) -> "ReleaseManifest":
@@ -144,12 +207,19 @@ class ReleaseManifest:
         signature = value.get("signature")
         if signature is not None and not isinstance(signature, dict):
             raise _manifest_error("Release signature metadata is invalid")
+        plugin = None
+        if isinstance(signature, dict) and "extensions" in signature:
+            extensions = signature["extensions"]
+            if not isinstance(extensions, dict):
+                raise _manifest_error("Release manifest extensions are invalid")
+            if "plugin" in extensions:
+                plugin = PluginRelease.from_dict(extensions["plugin"])
         return cls(
             schema_version=1, version=Version.parse(str(value.get("version", ""))),
             channel=channel, published_at=published,
             minimum_project_schema=minimum, maximum_project_schema=maximum,
             artifacts=parsed, summary=notes["summary"], release_url=notes["url"],
-            signature=signature,
+            signature=signature, plugin=plugin,
         )
 
     def artifact_for_current_platform(self) -> ReleaseArtifact:

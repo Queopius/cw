@@ -10,6 +10,9 @@
 
 **by Queopius**
 
+Queopius is a technology brand operated by Fantomid LLC,
+a New Mexico limited liability company.
+
 [Website](https://cwcli.dev) · [Documentation](https://docs.cwcli.dev) · [GitHub](https://github.com/Queopius/cw)
 
 [![Tests](https://github.com/Queopius/cw/actions/workflows/ci.yml/badge.svg?branch=prod)](https://github.com/Queopius/cw/actions/workflows/ci.yml)
@@ -55,10 +58,11 @@ explicitly scoped stdio server passed real ChatGPT Pro read-only acceptance
 through Secure MCP Tunnel without uploading the repository. CW 0.13 also adds
 a production-oriented, hosting-neutral remote implementation candidate: an
 OAuth-protected Streamable HTTP MCP gateway and an outbound-only paired local
-agent. Repository source and raw `.cw` remain local by default. It is not a
-deployed public service and is not submitted to OpenAI. CW 0.12 defined a
-future public HTTPS gateway/relay, OAuth, project grants, and production
-security boundary while intentionally shipping no hosted service. See
+agent. Repository source and raw `.cw` remain local by default. A public
+staging gateway and OAuth discovery are implemented for testing, but they are
+not production services and are not submitted to OpenAI. Production HTTPS/OAuth,
+domain verification, and universal publication remain undeployed and
+unauthorized. See
 [MCP runtime](docs/mcp-runtime.md), [ChatGPT development](docs/chatgpt-development.md),
 and [plugin production readiness](docs/plugin-production-readiness.md).
 

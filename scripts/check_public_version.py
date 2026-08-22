@@ -25,15 +25,21 @@ def _errors() -> list[str]:
     release_workflow = (ROOT / ".github" / "workflows" / "release-check.yml").read_text(
         encoding="utf-8"
     )
-    if "gh release create" not in release_workflow or "gh release upload" not in release_workflow:
+    if (
+        "gh release create" not in release_workflow
+        or "--existing-release-json" not in release_workflow
+    ):
         errors.append("Release workflow does not publish an idempotent GitHub Release.")
-    if "git fetch origin prod" not in release_workflow or "origin/prod" not in release_workflow:
-        errors.append("Release workflow does not require the tag commit on prod.")
-    if "python scripts/build_release.py --output dist --channel stable" not in release_workflow:
-        errors.append("Release workflow does not build the Core updater archive and manifest.")
-    plugin_asset = 'cw-plugin-$(cat plugins/cw/VERSION).zip'
-    if plugin_asset not in release_workflow or 'cw-plugin-$(cat VERSION).zip' in release_workflow:
-        errors.append("Release workflow does not name the plugin asset from plugins/cw/VERSION.")
+    if "python scripts/build_release.py --output dist --channel stable --component core" not in release_workflow:
+        errors.append("Release workflow does not use the explicit Core-only release profile.")
+    if "python scripts/validate_release_assets.py --directory dist --component core" not in release_workflow:
+        errors.append("Release workflow does not validate the exact Core-only asset allowlist.")
+    if "build_plugin_candidate.py" in release_workflow or "cw-plugin-" in release_workflow:
+        errors.append("Core release workflow must not build or publish a Plugin asset.")
+    if "origin/prod" not in release_workflow or "origin/release" in release_workflow:
+        errors.append("Public release tags must be verified against origin/prod.")
+    if "dist/*" in release_workflow or "--clobber" in release_workflow:
+        errors.append("Release publication must use the verified exact asset allowlist without replacement.")
 
     versioning = (ROOT / "docs" / "versioning.md").read_text(encoding="utf-8")
     core_match = re.search(r"(?m)^- \*\*CW Core / CLI\*\*: `([^`]+)`\s*$", versioning)

@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import json
 import re
+import stat
 import sys
 from pathlib import Path
 from typing import Any
-
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "cw"
@@ -18,6 +18,7 @@ CAPABILITIES = PLUGIN / "capabilities.json"
 PLUGIN_VERSION = PLUGIN / "VERSION"
 SKILL = PLUGIN / "skills" / "cw-workflow" / "SKILL.md"
 SKILL_UI = PLUGIN / "skills" / "cw-workflow" / "agents" / "openai.yaml"
+PLUGIN_README = PLUGIN / "README.md"
 MARKETPLACE = ROOT / ".agents" / "plugins" / "marketplace.json"
 CONTRACT = ROOT / "docs" / "chatgpt-development-completion-contract.json"
 
@@ -57,6 +58,16 @@ REQUIRED_CONTRACT_IDS = {
     "high-consequence-exclusion", "security-privacy", "replay-recovery",
     "development-documentation", "future-auth-architecture",
 }
+EXPECTED_DISTRIBUTION_STATUS = {
+    "local_mcp_stdio": "IMPLEMENTED",
+    "staging_mcp_https": "IMPLEMENTED_FOR_TESTING",
+    "staging_oauth_discovery": "IMPLEMENTED_FOR_TESTING",
+    "production_mcp_https": "NOT_DEPLOYED",
+    "production_oauth": "NOT_DEPLOYED",
+    "openai_domain_verification": "NOT_COMPLETED",
+    "universal_submission": "NOT_CREATED",
+    "public_plugin_publication": "NOT_COMPLETED",
+}
 
 
 def _load(path: Path) -> Any:
@@ -92,12 +103,18 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     capability_path = plugin / "capabilities.json"
     skill_path = plugin / "skills" / "cw-workflow" / "SKILL.md"
     skill_ui_path = plugin / "skills" / "cw-workflow" / "agents" / "openai.yaml"
+    plugin_readme_path = plugin / "README.md"
     marketplace_path = root / ".agents" / "plugins" / "marketplace.json"
     contract_path = root / "docs" / "chatgpt-development-completion-contract.json"
     acceptance_path = root / "docs" / "chatgpt-development-acceptance.json"
     acceptance_evidence_path = root / "docs" / "acceptance" / "chatgpt-development-0.11.md"
+    plugin_version_path = plugin / "VERSION"
+    compatibility_policy_path = root / "cw" / "adapters" / "mcp" / "plugin-compatibility.json"
+    license_path = root / "LICENSE"
+    notice_path = root / "NOTICE"
     candidate_docs = (
         root / "docs" / "plugin-app-candidate.md",
+        root / "docs" / "plugin-installation.md",
         root / "docs" / "plugin-listing-draft.md",
         root / "docs" / "plugin-privacy.md",
         root / "docs" / "plugin-support.md",
@@ -112,7 +129,9 @@ def validation_errors(root: Path = ROOT) -> list[str]:
 
     required = (
         manifest_path, mcp_path, capability_path, skill_path, skill_ui_path,
-        marketplace_path, contract_path, *candidate_docs,
+        plugin_readme_path,
+        marketplace_path, contract_path, compatibility_policy_path,
+        license_path, notice_path, *candidate_docs,
     )
     missing = [str(path.relative_to(root)) for path in required if not path.is_file()]
     if missing:
@@ -125,15 +144,41 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         marketplace = _load(marketplace_path)
         contract = _load(contract_path)
         acceptance = _load(acceptance_path)
+        runtime_policy = _load(compatibility_policy_path)
     except (OSError, json.JSONDecodeError) as exc:
         return [f"invalid plugin JSON: {exc}"]
+    expected_policy_fields = {"schema_version", "policy_id", "plugin_version", "core", "remote_protocol"}
+    runtime_core = runtime_policy.get("core") if isinstance(runtime_policy, dict) else None
+    if (
+        not isinstance(runtime_policy, dict)
+        or set(runtime_policy) != expected_policy_fields
+        or runtime_policy.get("schema_version") != 1
+        or runtime_policy.get("policy_id") != "cw.plugin.compatibility.v1"
+        or not isinstance(runtime_core, dict)
+        or set(runtime_core) != {"minimum", "maximum_exclusive"}
+        or not all(
+            isinstance(runtime_core.get(key), str)
+            and re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", runtime_core[key])
+            for key in ("minimum", "maximum_exclusive")
+        )
+    ):
+        errors.append("runtime Plugin compatibility policy is invalid")
+    elif tuple(map(int, runtime_core["minimum"].split("."))) >= tuple(
+        map(int, runtime_core["maximum_exclusive"].split("."))
+    ):
+        errors.append("runtime Plugin compatibility policy range is invalid")
 
     core_version = (root / "VERSION").read_text(encoding="utf-8").strip()
     try:
-        plugin_version = PLUGIN_VERSION.read_text(encoding="utf-8").strip()
+        version_stat = plugin_version_path.lstat()
+        if stat.S_ISLNK(version_stat.st_mode) or not stat.S_ISREG(version_stat.st_mode):
+            raise OSError("plugins/cw/VERSION must be a regular non-symlink file")
+        plugin_version = plugin_version_path.read_text(encoding="utf-8").strip()
     except OSError as exc:
         errors.append(f"plugin VERSION file is missing: {exc}")
         plugin_version = ""
+    if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", plugin_version):
+        errors.append("plugins/cw/VERSION must contain a valid stable semantic version")
     manifest_version = str(manifest.get("version", ""))
     if manifest_version.split("+", 1)[0] != plugin_version:
         errors.append("plugin manifest base version must equal plugins/cw/VERSION")
@@ -149,16 +194,33 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         if not isinstance(cw_core, dict):
             errors.append("compatibility.cw_core must be an object")
         else:
-            if not str(cw_core.get("minimum", "")) == "0.14.0":
-                errors.append("compatibility.cw_core.minimum must currently require Core >= 0.14.0")
-            if cw_core.get("compatible_policy") != ">=0.14.0,<1.0.0":
-                errors.append("compatibility.cw_core.compatible_policy must be deliberate and explicit")
+            runtime_core = runtime_policy.get("core", {}) if isinstance(runtime_policy, dict) else {}
+            expected_policy = (
+                f">={runtime_core.get('minimum', '')},"
+                f"<{runtime_core.get('maximum_exclusive', '')}"
+            )
+            if str(cw_core.get("minimum", "")) != runtime_core.get("minimum"):
+                errors.append("compatibility.cw_core.minimum must match the runtime policy")
+            if cw_core.get("compatible_policy") != expected_policy:
+                errors.append("compatibility.cw_core.compatible_policy must match the runtime policy")
         remote_protocol = compatibility.get("remote_protocol", {})
         if not isinstance(remote_protocol, dict):
             errors.append("compatibility.remote_protocol must be an object")
         else:
             if str(remote_protocol.get("required", "")) != "cw.remote.v1":
                 errors.append("compatibility.remote_protocol.required must be cw.remote.v1")
+    if not isinstance(runtime_policy, dict) or runtime_policy.get("plugin_version") != plugin_version:
+        errors.append("runtime Plugin compatibility policy must match plugins/cw/VERSION")
+    if not isinstance(runtime_policy, dict) or runtime_policy.get("remote_protocol") != "cw.remote.v1":
+        errors.append("runtime Plugin compatibility policy must require cw.remote.v1")
+    for legal_path in (license_path, notice_path):
+        try:
+            legal_stat = legal_path.lstat()
+        except OSError as exc:
+            errors.append(f"canonical legal file is missing: {exc}")
+        else:
+            if stat.S_ISLNK(legal_stat.st_mode) or not stat.S_ISREG(legal_stat.st_mode):
+                errors.append(f"canonical legal file must be regular and non-symlink: {legal_path.name}")
     if contract.get("milestone_version") != "0.11.0":
         errors.append("ChatGPT development Completion Contract must remain historical 0.11 evidence")
     if manifest.get("name") != "cw":
@@ -173,16 +235,19 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         errors.append("plugin interface contains unsupported fields")
     if interface.get("displayName") != "CW — Codex Workflow":
         errors.append("plugin displayName must preserve the CW product identity")
-    if manifest.get("author", {}).get("name") != "Queopius":
-        errors.append("plugin author must be Queopius")
-    if interface.get("developerName") != "Queopius":
-        errors.append("plugin developerName must be Queopius")
+    if manifest.get("author") != {"name": "Fantomid LLC", "url": "https://cwcli.dev"}:
+        errors.append("plugin author must identify Fantomid LLC at the canonical product website")
+    if interface.get("developerName") != "Queopius | Fantomid LLC":
+        errors.append("plugin developerName must preserve the Queopius and Fantomid LLC identity")
+    if manifest.get("homepage") != "https://docs.cwcli.dev/en/stable/plugin-app-candidate/":
+        errors.append("plugin homepage must use the live canonical Plugin documentation URL")
     for key in ("homepage", "repository"):
         if not str(manifest.get(key, "")).startswith("https://"):
             errors.append(f"plugin {key} must use HTTPS")
-    for key in ("websiteURL", "privacyPolicyURL"):
-        if not str(interface.get(key, "")).startswith("https://"):
-            errors.append(f"plugin interface {key} must use HTTPS")
+    if interface.get("websiteURL") != "https://cwcli.dev":
+        errors.append("plugin interface websiteURL must use the canonical product website")
+    if "privacyPolicyURL" in interface or "termsOfServiceURL" in interface:
+        errors.append("draft legal documents must not be linked as final Plugin policies")
     prompts = interface.get("defaultPrompt")
     if not isinstance(prompts, list) or not 1 <= len(prompts) <= 3:
         errors.append("plugin interface requires one to three default prompts")
@@ -249,6 +314,12 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         errors.append("ChatGPT read-only profile must expose exactly the six accepted read tools")
     if "HIGH_CONSEQUENCE_AUTHORIZATION" in normalized_groups:
         errors.append("plugin must not expose HIGH_CONSEQUENCE_AUTHORIZATION")
+    if capabilities.get("distribution_status") != EXPECTED_DISTRIBUTION_STATUS:
+        errors.append("plugin distribution status must distinguish local, staging, production, and submission")
+    if capabilities.get("production_candidate", {}).get("status") != (
+        "STAGING_IMPLEMENTED_PRODUCTION_NOT_DEPLOYED"
+    ):
+        errors.append("plugin production status must not confuse staging with production")
     encoded = json.dumps({"manifest": manifest, "mcp": mcp, "capabilities": capabilities}).lower()
     for term in FORBIDDEN_TERMS:
         if term in encoded:
@@ -280,18 +351,63 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     for phrase in ("display_name:", "short_description:", "default_prompt:", "type: \"mcp\""):
         if phrase not in ui_text:
             errors.append(f"skill UI metadata is missing {phrase}")
+    plugin_readme = plugin_readme_path.read_text(encoding="utf-8")
+    for phrase in (
+        "Legal publisher:** Fantomid LLC",
+        "Technology brand:** Queopius",
+        "Queopius is a technology brand operated by Fantomid LLC",
+        "https://github.com/Queopius/cw/issues",
+        "https://github.com/Queopius/cw/security/advisories/new",
+        "Production MCP HTTPS | `NOT_DEPLOYED`",
+        "Proposed next Plugin version: `0.2.0` — **NOT AUTHORIZED**",
+        "development/evaluation source only",
+        "codex plugin marketplace add",
+        "codex plugin remove cw@cw-development",
+        "CLI `0.148.0` has no `plugin disable` command",
+    ):
+        if phrase not in plugin_readme:
+            errors.append(f"Plugin README is missing public-readiness guidance: {phrase}")
+    for broken in (
+        "https://docs.cwcli.dev/plugin-app-candidate/",
+        "https://docs.cwcli.dev/plugin-privacy/",
+        "https://docs.cwcli.dev/plugin-support/",
+        "https://docs.cwcli.dev/remote-auth/",
+    ):
+        if broken in json.dumps(manifest) or broken in plugin_readme:
+            errors.append(f"Plugin package declares a broken documentation URL: {broken}")
 
     plugins = marketplace.get("plugins")
-    if marketplace.get("name") != "cw-development" or not isinstance(plugins, list) or len(plugins) != 1:
+    if (
+        not isinstance(marketplace, dict)
+        or set(marketplace) != {"name", "interface", "plugins"}
+        or marketplace.get("name") != "cw-development"
+        or marketplace.get("interface") != {"displayName": "CW Development"}
+        or not isinstance(plugins, list)
+        or len(plugins) != 1
+    ):
         errors.append("repository marketplace must define exactly cw-development/cw")
     else:
         entry = plugins[0]
+        if not isinstance(entry, dict) or set(entry) != {"name", "source", "policy", "category"}:
+            errors.append("repository marketplace Plugin entry schema is invalid")
+            entry = {}
         if entry.get("name") != "cw" or entry.get("source") != {
             "source": "local", "path": "./plugins/cw",
         }:
             errors.append("repository marketplace source must resolve to ./plugins/cw")
         if entry.get("policy") != {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}:
             errors.append("repository marketplace must require explicit available/on-install enablement")
+        if entry.get("category") != "Coding":
+            errors.append("repository marketplace category must be Coding")
+        source_path = entry.get("source", {}).get("path") if isinstance(entry.get("source"), dict) else None
+        if isinstance(source_path, str):
+            try:
+                source = _local_path(root, source_path)
+            except ValueError as exc:
+                errors.append(str(exc))
+            else:
+                if source != plugin.resolve() or not source.is_dir():
+                    errors.append("repository marketplace source must resolve inside its root to plugins/cw")
 
     completion_target = contract.get("completion_target")
     if not isinstance(completion_target, dict):
@@ -346,7 +462,12 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         ),
     )
     for phrase in (
-        "developers.openai.com/plugins/concepts/plugins",
+        "developers.openai.com/plugins/build/plugins",
+        "developers.openai.com/plugins/deploy/connect-chatgpt",
+        "developers.openai.com/plugins/build/mcp-server",
+        "developers.openai.com/plugins/build/auth",
+        "developers.openai.com/plugins/deploy/submission",
+        "developers.openai.com/plugins/guides/security-privacy",
         "developers.openai.com/api/docs/guides/secure-mcp-tunnels",
         "PLATFORM_CAPABILITY_UNAVAILABLE",
         "Tunnels Read + Use",
@@ -357,7 +478,26 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         if phrase not in candidate_text:
             errors.append(f"plugin surface/remote classification docs are missing: {phrase}")
 
-    for path in sorted(item for item in plugin.rglob("*") if item.is_file()):
+    allowed_plugin_roots = {
+        ".codex-plugin", ".mcp.json", "README.md", "VERSION",
+        "capabilities.json", "skills", "assets",
+    }
+    forbidden_components = {
+        ".git", ".cw", "__pycache__", ".pytest_cache", "artifacts", "build", "dist", "tests",
+    }
+    for path in sorted(plugin.rglob("*")):
+        relative = path.relative_to(plugin)
+        if path.is_symlink():
+            errors.append(f"plugin package must not contain symlinks: {path.relative_to(root)}")
+            continue
+        if relative.parts and relative.parts[0] not in allowed_plugin_roots:
+            errors.append(f"plugin package contains an unexpected top-level entry: {relative.as_posix()}")
+        if any(part.casefold() in forbidden_components for part in relative.parts):
+            errors.append(f"plugin package contains a forbidden entry: {relative.as_posix()}")
+        if not path.is_file():
+            continue
+        if path.stat().st_mode & 0o111:
+            errors.append(f"plugin package contains an unexpected executable: {relative.as_posix()}")
         if path.suffix.lower() in {".ttf", ".otf", ".woff", ".woff2"}:
             errors.append(f"plugin package must not include source fonts: {path.name}")
         if path.suffix.lower() in {".json", ".md", ".yaml", ".yml"}:

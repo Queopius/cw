@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "project": "cw-dashboard",
+  "phase": "00-architecture-pivot",
+  "plan": "APPROVED",
+  "state": "REVISION_REQUIRED",
+  "validation_attempt_1": "PASS",
+  "review_attempt_1": "REVISE",
+  "review_attempt_1_path": ".cw/reviews/00-architecture-pivot-attempt-01-20260820T084229Z-67d069659fb65b21.json",
+  "review_attempt_1_sha256": "cb995baf9e70709e37fd66e53c01f30ac81d2f92963f1381101b6473aa2bf1d4",
+  "gate": false,
+  "corrected_criteria": [
+    "ARCH-001",
+    "ARCH-002",
+    "TENANT-001",
+    "SEC-001",
+    "PROTO-001",
+    "EVENT-001",
+    "FIXTURE-001",
+    "EVIDENCE-001",
+    "GOV-001",
+    "SCOPE-001"
+  ]
+}

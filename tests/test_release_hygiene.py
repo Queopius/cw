@@ -23,8 +23,11 @@ class ReleaseHygieneTests(unittest.TestCase):
         self.assertIn("python -m build", workflow)
         self.assertIn("cw version --json", workflow)
         self.assertIn("cw --version", workflow)
-        self.assertIn("python scripts/build_release.py --output dist --channel stable", workflow)
-        self.assertIn('cw-plugin-$(cat plugins/cw/VERSION).zip', workflow)
+        self.assertIn("python scripts/build_release.py --output dist --channel stable --component core", workflow)
+        self.assertIn("python scripts/validate_release_assets.py --directory dist --component core", workflow)
+        self.assertIn("validate_stable_update_path.py", workflow)
+        self.assertIn("validate_public_plugin_compatibility.py", workflow)
+        self.assertIn("b59275bb7e7a32e58c1d48202c9cf489874a6d21ce15fad3ef4cd6f202512021", workflow)
 
     def test_actions_are_pinned_to_full_commit_shas(self) -> None:
         for workflow in (ROOT / ".github/workflows").glob("*.yml"):
@@ -34,15 +37,16 @@ class ReleaseHygieneTests(unittest.TestCase):
             for reference in references:
                 self.assertRegex(reference, r"^[0-9a-f]{40}$", workflow.name)
 
-    def test_release_tags_must_come_from_release_and_match_version(self) -> None:
+    def test_release_tags_must_come_from_prod_and_publish_core_only(self) -> None:
         workflow = (ROOT / ".github/workflows/release-check.yml").read_text(encoding="utf-8")
-        self.assertIn('git fetch origin prod', workflow)
-        self.assertIn('origin/prod', workflow)
-        self.assertIn('GITHUB_REF_NAME#v', workflow)
-        self.assertIn('VERSION', workflow)
-        self.assertIn("python scripts/build_release.py --output dist --channel stable", workflow)
-        self.assertIn('cw-plugin-$(cat plugins/cw/VERSION).zip', workflow)
-        self.assertNotIn('cw-plugin-$(cat VERSION).zip', workflow)
+        self.assertIn('git fetch origin prod --no-tags', workflow)
+        self.assertIn('--branch-ref origin/prod', workflow)
+        self.assertNotIn('git fetch origin release', workflow)
+        self.assertIn("python scripts/build_release.py --output dist --channel stable --component core", workflow)
+        self.assertIn("python scripts/validate_release_assets.py --directory dist --component core", workflow)
+        self.assertNotIn('build_plugin_candidate.py', workflow)
+        self.assertNotIn('dist/*', workflow)
+        self.assertNotIn('--clobber', workflow)
 
     def test_native_managed_installations_verify_both_version_surfaces(self) -> None:
         workflow = (ROOT / ".github/workflows/cross-platform.yml").read_text(encoding="utf-8")
@@ -57,6 +61,10 @@ class ReleaseHygieneTests(unittest.TestCase):
         self.assertIn('parent.parent / "VERSION"', package)
         self.assertIn('version = {file = ["VERSION"]}', metadata)
         self.assertEqual(version, __import__("cw").__version__)
+
+    def test_safe_yaml_parser_is_a_constrained_runtime_dependency(self) -> None:
+        metadata = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('dependencies = ["PyYAML>=6.0.2,<7"]', metadata)
 
 
 if __name__ == "__main__":

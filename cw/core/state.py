@@ -50,6 +50,9 @@ def initial_state(project_id: str) -> dict[str, Any]:
         "completion_cycle": 0, "last_completion_review": None,
         "last_completion_gate": None, "extension_proposal": None,
         "history": [], "updated_at": utc_now(),
+        "active_plan_revision": None, "active_plan_revision_sha256": None,
+        "superseded_plan_revisions": [], "revision_attempt": 0,
+        "pending_rebaseline": None,
     }
 
 
@@ -91,6 +94,9 @@ def bind_plan(root: Path, state: dict[str, Any], workflow: Workflow) -> None:
         "pending_goal": None,
         "completion_cycle": 0, "last_completion_review": None,
         "last_completion_gate": None, "extension_proposal": None,
+        "active_plan_revision": None, "active_plan_revision_sha256": None,
+        "superseded_plan_revisions": [], "revision_attempt": 0,
+        "pending_rebaseline": None,
     })
     save_state(root, state)
 
@@ -117,6 +123,9 @@ def validate_state(root: Path, state: dict[str, Any], workflow: Workflow) -> Non
         from .progress import validate_progress_state
 
         validate_progress_state(root, workflow, state)
+        from .revisions import audit_revisions
+
+        audit_revisions(root, workflow, state)
     for key, prefix in (
         ("last_completion_review", ".cw/completion/reviews/"),
         ("last_completion_gate", ".cw/completion/"),
@@ -213,10 +222,12 @@ def advance_after_approval(
         )
         state["current_phase"] = None
         state["attempt"] = 0
+        state["revision_attempt"] = 0
     else:
         state["current_phase"] = next_phase.id
         state["status"] = WorkflowState.IN_PROGRESS.value
         state["attempt"] = 0
+        state["revision_attempt"] = 0
     save_state(root, state)
 
     # Runtime evidence belongs to the approved phase and cannot cross the gate.

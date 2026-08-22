@@ -19,6 +19,7 @@ from cw.core.initialize import repair
 from cw.core.locking import operation_lock
 from cw.core.progress import derive_effective_workflow_state
 from cw.core.state import load_state
+from cw.core.revisions import apply_rebaseline
 
 from .capabilities import CAPABILITIES
 from .actions import (
@@ -415,5 +416,31 @@ class CWApplication:
             raise application_error(exc) from exc
         return self._result(
             project, "completion.extension.authorize", capability.name, data,
+            request.operation_id, replay=bool(data.get("idempotent_replay")),
+        )
+
+    def rebaseline_plan(
+        self, project: ResolvedProject, proposal_id: str, request: OperationContext,
+    ) -> OperationResult:
+        """Apply one exact plan proposal through the high-consequence boundary.
+
+        This capability is intentionally absent from MCP/remote registries. A
+        trusted host must create the typed human authorization ceremony.
+        """
+        capability_name = CAPABILITIES["plan.rebaseline"].name
+        if request.requested_capability != capability_name:
+            raise application_error(CwError(
+                "Operation capability does not match", ErrorCode.AUTHORIZATION_REQUIRED,
+            ))
+        try:
+            with operation_lock(project.root, "application-plan-rebaseline"):
+                _, state, workflow = load_project_context(project.root)
+                data = apply_rebaseline(
+                    project.root, workflow, state, proposal_id, request,
+                )
+        except CwError as exc:
+            raise application_error(exc) from exc
+        return self._result(
+            project, "plan.rebaseline", capability_name, data,
             request.operation_id, replay=bool(data.get("idempotent_replay")),
         )

@@ -17,6 +17,7 @@ from cw.core.models import CompletionContract
 from scripts.build_plugin_candidate import build
 from scripts.validate_plugin_candidate import (
     EXACT_TOOLS,
+    EXPECTED_DISTRIBUTION_STATUS,
     EXPECTED_GROUPS,
     PLUGIN,
     ROOT,
@@ -39,6 +40,17 @@ class PluginCandidateTests(unittest.TestCase):
         self.assertEqual("cw", self.manifest["name"])
         self.assertEqual("CW — Codex Workflow", self.manifest["interface"]["displayName"])
         self.assertEqual("0.1.0", self.manifest["version"])
+        self.assertEqual(
+            {"name": "Fantomid LLC", "url": "https://cwcli.dev"},
+            self.manifest["author"],
+        )
+        self.assertEqual("Queopius | Fantomid LLC", self.manifest["interface"]["developerName"])
+        self.assertEqual(
+            "https://docs.cwcli.dev/en/stable/plugin-app-candidate/",
+            self.manifest["homepage"],
+        )
+        self.assertNotIn("privacyPolicyURL", self.manifest["interface"])
+        self.assertNotIn("termsOfServiceURL", self.manifest["interface"])
         self.assertFalse((PLUGIN / ".app.json").exists())
         contract_document = json.loads(
             (ROOT / "docs/chatgpt-development-completion-contract.json").read_text(encoding="utf-8")
@@ -49,12 +61,22 @@ class PluginCandidateTests(unittest.TestCase):
         skill = (PLUGIN / "skills/cw-workflow/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("No valid gate. No next phase.", skill)
         self.assertIn("Do not authorize", skill)
+        readme = (PLUGIN / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Legal publisher:** Fantomid LLC", readme)
+        self.assertIn("Queopius is a technology brand operated by Fantomid LLC", readme)
+
+    def test_distribution_status_separates_staging_from_production(self) -> None:
+        self.assertEqual(EXPECTED_DISTRIBUTION_STATUS, self.capabilities["distribution_status"])
+        self.assertEqual(
+            "STAGING_IMPLEMENTED_PRODUCTION_NOT_DEPLOYED",
+            self.capabilities["production_candidate"]["status"],
+        )
 
     def test_component_version_separation_is_explicit(self) -> None:
         plugin_version = (PLUGIN / "VERSION").read_text(encoding="utf-8").strip()
         compatibility = self.capabilities["compatibility"]
         self.assertEqual("0.1.0", plugin_version)
-        self.assertEqual("0.14.1", (ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        self.assertEqual("0.15.0", (ROOT / "VERSION").read_text(encoding="utf-8").strip())
         self.assertEqual(plugin_version, self.manifest["version"])
         self.assertEqual(plugin_version, compatibility["plugin_version"])
         self.assertEqual("0.14.0", compatibility["cw_core"]["minimum"])
