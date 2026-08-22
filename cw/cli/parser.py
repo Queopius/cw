@@ -23,10 +23,49 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("init", "start", "status", "validate", "retry", "version", "help", "changelog", "explain"):
         command = subcommands.add_parser(name, add_help=True)
         _common(command, suppress_defaults=True)
-    plan = subcommands.add_parser("plan", add_help=True)
+    plan = subcommands.add_parser(
+        "plan",
+        add_help=True,
+        description=(
+            "Propose, inspect, amend, approve, rebuild, or rebaseline a plan. "
+            "Amend can replace a PLAN_PROPOSED document or add artifacts to an active ungated phase; "
+            "it never approves execution."
+        ),
+        epilog=(
+            "Amend example: cw plan amend --file corrected-phases.yaml "
+            "--expected-workflow-sha256 sha256:<current-hash>. "
+            "Active example: cw plan amend --phase 01-example --add-artifact docs/example.md "
+            "--expected-workflow-sha256 sha256:<hash> --expected-state-sha256 sha256:<hash> "
+            "--reason 'Declare existing artifact' --dry-run. "
+            "It validates before writing, creates a backup, preserves the Completion Contract, "
+            "and still requires: cw plan approve."
+        ),
+    )
     _common(plan, suppress_defaults=True)
-    plan.add_argument("action", nargs="?", choices=("show", "approve", "rebuild"))
+    plan.add_argument("action", nargs="?", choices=("show", "approve", "rebuild", "rebaseline", "amend"))
     plan.add_argument("--goal")
+    plan.add_argument(
+        "--file",
+        help="Repository-relative corrected workflow (JSON or safe single-document YAML) for plan amend",
+    )
+    plan.add_argument(
+        "--expected-workflow-sha256",
+        help="Required optimistic-concurrency SHA-256 for plan amend",
+    )
+    plan.add_argument("--expected-state-sha256", help="Required state CAS for active plan amend")
+    plan.add_argument("--phase", help="Current phase for an artifact-only active amendment")
+    plan.add_argument("--add-artifact", action="append", help="Existing artifact to add; repeatable")
+    plan.add_argument("--dry-run", action="store_true", help="Validate and show an amendment without writes")
+    plan.add_argument("--yes", action="store_true", help="Confirm the exact active amendment")
+    plan.add_argument("--non-interactive", action="store_true", help="Disable confirmation prompts")
+    plan.add_argument("--reason", help="Mandatory audit reason for rebaseline or active amendment")
+    plan.add_argument("--proposal", help="Repository-relative proposed workflow document")
+    plan.add_argument(
+        "--apply", nargs="?", const=True, metavar="PROPOSAL_ID",
+        help="Apply an active amendment, or apply an immutable rebaseline proposal by ID",
+    )
+    plan.add_argument("--authorize", action="store_true", help="Confirm exact human authorization for --apply")
+    plan.add_argument("--operation-id", help="Stable idempotency identifier for rebaseline apply")
     completion = subcommands.add_parser("completion", add_help=True)
     _common(completion, suppress_defaults=True)
     completion.add_argument("action", nargs="?", choices=("show", "review", "approve", "reject", "adopt"))

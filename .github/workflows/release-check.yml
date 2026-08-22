@@ -21,27 +21,31 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
-      - name: Require tag commit on prod branch
+      - name: Require immutable annotated tag from prod
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          git fetch origin prod
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/prod
-      - name: Require tag to match VERSION
-        run: |
-          release_version=${GITHUB_REF_NAME#v}
-          test "$release_version" = "$(tr -d '\n' < VERSION)"
+          git fetch origin prod --no-tags
+          python scripts/validate_release_provenance.py \
+            --tag "$GITHUB_REF_NAME" \
+            --expected-commit "$GITHUB_SHA" \
+            --branch-ref origin/prod \
+            --push-before "$PUSH_BEFORE"
+      - name: Install runtime dependencies
+        run: python -m pip install .
       - name: Test release
         run: make check
       - name: Build release distributions
         run: |
           python -m pip install --upgrade build
           python -m build
-          python scripts/build_release.py --output dist --channel stable
-          python scripts/build_plugin_candidate.py --output "dist/cw-plugin-$(cat plugins/cw/VERSION).zip"
+          python scripts/build_release.py --output dist --channel stable --component core
+          python scripts/validate_release_assets.py --directory dist --component core
       - name: Upload release distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cw-${{ github.ref_name }}
-          path: dist/*
+          path: dist
           if-no-files-found: error
       - name: Publish tagged documentation as stable
         env:
@@ -63,22 +67,33 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out tagged release policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Download verified release distributions
         uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         with:
           name: cw-${{ github.ref_name }}
           path: dist
 
-      - name: Create or refresh GitHub Release
+      - name: Publish or verify immutable GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          release_version=${GITHUB_REF_NAME#v}
+          assets=(
+            "dist/codex_workflow-${release_version}-py3-none-any.whl"
+            "dist/codex_workflow-${release_version}.tar.gz"
+            "dist/cw-${release_version}-linux-x86_64.tar.gz"
+            "dist/cw-release-manifest.json"
+          )
+          python scripts/validate_release_assets.py --directory dist --component core
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --clobber
+            gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --json assets --jq '.assets' > "$RUNNER_TEMP/existing-assets.json"
+            python scripts/validate_release_assets.py --directory dist --component core \
+              --existing-release-json "$RUNNER_TEMP/existing-assets.json"
           else
-            gh release create "$GITHUB_REF_NAME" dist/* \
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --title "CW CLI $GITHUB_REF_NAME" \

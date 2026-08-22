@@ -48,9 +48,8 @@ class StateAndGateTests(unittest.TestCase):
 
     def test_gate_rejects_missing_review_evidence(self):
         self.repo.artifact()
-        create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], ".cw/reviews/missing.json")
         with self.assertRaises(CwError):
-            validate_gate(self.repo.root, self.repo.workflow, "01-phase-1")
+            create_gate(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], ".cw/reviews/missing.json")
 
     def test_gate_rejects_omitted_artifact_hash(self):
         import json
@@ -82,7 +81,8 @@ class StateAndGateTests(unittest.TestCase):
             validate_dependencies(self.repo.root, self.repo.workflow, self.repo.workflow.phases[1])
 
     def test_approve_creates_gate(self):
-        self.repo.artifact(); self.repo.ready()
+        self.repo.artifact()
+        self.repo.ready()
         report = run_review(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0], self.repo.state(), FakeAdapter(result()))
         self.assertEqual("APPROVE", report["decision"])
         self.assertTrue((self.repo.root / ".cw/gates/01-phase-1.approved.json").exists())

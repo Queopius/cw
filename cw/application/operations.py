@@ -178,7 +178,6 @@ class OperationSupervisor:
         payload: dict[str, Any],
         executor: OperationExecutor,
     ) -> OperationResult:
-        path = self._path(project, request.operation_id)
         digest = self._digest(operation, capability, payload)
         created_at = utc_now()
         record = {
@@ -202,24 +201,24 @@ class OperationSupervisor:
             "error": None,
             "updated_at": created_at,
         }
-        try:
-            atomic_json_new(path, record)
-        except FileExistsError:
-            existing = self._load(project, request.operation_id)
-            if (
-                existing.get("request_digest") != digest
-                or existing.get("operation") != operation
-                or existing.get("capability") != capability
-                or existing.get("actor_origin") != request.actor.origin.value
-            ):
-                raise ApplicationError(
-                    ApplicationErrorCode.OPERATION_CONFLICT,
-                    "operation_id was already used for a different request",
-                )
-            return self._result(existing, replay=True)
-
         key = (project.handle.repository_id, request.operation_id)
         with self._guard:
+            path = self._path(project, request.operation_id)
+            try:
+                atomic_json_new(path, record)
+            except FileExistsError:
+                existing = self._load(project, request.operation_id)
+                if (
+                    existing.get("request_digest") != digest
+                    or existing.get("operation") != operation
+                    or existing.get("capability") != capability
+                    or existing.get("actor_origin") != request.actor.origin.value
+                ):
+                    raise ApplicationError(
+                        ApplicationErrorCode.OPERATION_CONFLICT,
+                        "operation_id was already used for a different request",
+                    )
+                return self._result(existing, replay=True)
             self._futures[key] = self._executor.submit(
                 self._run, project, request.operation_id, executor,
             )

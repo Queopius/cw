@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import errno
 import os
 import signal
 import subprocess
@@ -186,8 +187,20 @@ def fsync_directory(path: Path) -> None:
 
     if os.name == "nt":
         return
-    descriptor = os.open(path, os.O_RDONLY)
+    unsupported = {errno.EINVAL, errno.ENOTSUP}
+    if hasattr(errno, "EOPNOTSUPP"):
+        unsupported.add(errno.EOPNOTSUPP)
     try:
-        os.fsync(descriptor)
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError as exc:
+        if exc.errno in unsupported:
+            return
+        raise
+    try:
+        try:
+            os.fsync(descriptor)
+        except OSError as exc:
+            if exc.errno not in unsupported:
+                raise
     finally:
         os.close(descriptor)

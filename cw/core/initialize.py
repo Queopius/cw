@@ -363,7 +363,11 @@ def initialize(root: Path) -> tuple[Project, bool]:
 
 def backup_metadata(root: Path) -> Path:
     validate_project_layout(root)
-    relatives = ("project.json", "state.json", "config.toml", "runtime", "reviews", "gates", "completion", "logs", "locks")
+    relatives = (
+        "project.json", "state.json", "config.toml", "runtime", "reviews", "gates",
+        "completion", "validation", "plan-revisions", "plan-proposals",
+        "supersessions", "evidence-supersessions", "plan-amendments", "logs", "locks",
+    )
     for relative in relatives:
         source = root / ".cw" / relative
         if source.is_dir():

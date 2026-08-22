@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -20,6 +19,13 @@ CORE_PROTECTED_PATHS = (
     ".cw/gates",
     ".cw/reviews",
     ".cw/completion",
+    ".cw/plan-revisions",
+    ".cw/plan-proposals",
+    ".cw/supersessions",
+    ".cw/evidence-supersessions",
+    ".cw/plan-amendments",
+    ".cw/runtime/plan-rebaseline-transaction.json",
+    ".cw/runtime/plan-amend-transaction.json",
     ".codex/workflow/phases.yaml",
 )
 

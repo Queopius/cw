@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.15.0",
+      "changes": [
+        "Added governed deterministic cw plan amend flows for unapproved proposals and artifact-only active-phase corrections.",
+        "Preserved Completion Contracts and historical evidence through workflow/state CAS, append-only supersession, backup, rollback, and crash recovery.",
+        "Separated Core-only publication from the immutable public Plugin 0.1.0 lifecycle and restored public tag provenance to prod."
+      ]
+    },
+    {
       "version": "0.14.1",
       "changes": [
         "Added the standard project-independent cw --version compatibility surface while retaining cw version.",

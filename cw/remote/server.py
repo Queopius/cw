@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 from cw import __version__
 from cw.adapters.mcp.runtime import TOOLS
+from cw.adapters.mcp.compatibility import ensure_plugin_compatible, load_plugin_compatibility
 from cw.core.utils import utc_now
 
 from .auth import (
@@ -55,7 +56,7 @@ def _read_plugin_version(environment: Mapping[str, str] | None = None) -> str:
             continue
         if value:
             return value
-    return "0.0.0-unknown"
+    return str(load_plugin_compatibility()["plugin_version"])
 
 
 def _dependencies() -> tuple[Any, Any, Any, Any]:
@@ -159,6 +160,10 @@ def create_gateway_app(
     from mcp.server.transport_security import TransportSecuritySettings
     resource_host = urlparse(oauth.resource).netloc
     identity = runtime_identity or GatewayRuntimeIdentity()
+    ensure_plugin_compatible(
+        core_version=identity.cw_core_version,
+        plugin_version=identity.cw_plugin_version,
+    )
     trusted_hosts = list(dict.fromkeys([
         resource_host,
         *allowed_hosts,
@@ -218,7 +223,7 @@ def create_gateway_app(
             annotations=ToolAnnotations(
                 readOnlyHint=not contract.mutation,
                 destructiveHint=False,
-                idempotentHint=True,
+                idempotentHint=not contract.mutation,
                 openWorldHint=False,
             ),
             meta={
@@ -231,40 +236,48 @@ def create_gateway_app(
             },
             structured_output=True,
         )(function)
+        registered = next(item for item in server._tool_manager.list_tools() if item.name == name)
+        registered.fn_metadata.arg_model.model_config["extra"] = "forbid"
+        registered.fn_metadata.arg_model.model_rebuild(force=True)
+        input_schema = contract.input_schema()
+        input_schema["properties"]["project_id"]["minLength"] = 1
+        input_schema["required"] = sorted(set(input_schema["required"]) | {"project_id"})
+        registered.parameters = input_schema
+        registered.fn_metadata.output_schema = contract.output_schema()
 
-    async def project_status(project_id: str, operation_id: str = "") -> dict[str, Any]:
+    async def project_status(project_id: str, operation_id: str = "") -> dict[str, object]:
         return await invoke("cw_project_status", {"project_id": project_id, "operation_id": operation_id})
 
-    async def project_inspect(project_id: str, operation_id: str = "") -> dict[str, Any]:
+    async def project_inspect(project_id: str, operation_id: str = "") -> dict[str, object]:
         return await invoke("cw_project_inspect", {"project_id": project_id, "operation_id": operation_id})
 
-    async def history(project_id: str, operation_id: str = "") -> dict[str, Any]:
+    async def history(project_id: str, operation_id: str = "") -> dict[str, object]:
         return await invoke("cw_history", {"project_id": project_id, "operation_id": operation_id})
 
-    async def explain(project_id: str, operation_id: str = "") -> dict[str, Any]:
+    async def explain(project_id: str, operation_id: str = "") -> dict[str, object]:
         return await invoke("cw_explain", {"project_id": project_id, "operation_id": operation_id})
 
-    async def completion(project_id: str, operation_id: str = "") -> dict[str, Any]:
+    async def completion(project_id: str, operation_id: str = "") -> dict[str, object]:
         return await invoke("cw_completion_status", {"project_id": project_id, "operation_id": operation_id})
 
-    async def gates(project_id: str, operation_id: str = "") -> dict[str, Any]:
+    async def gates(project_id: str, operation_id: str = "") -> dict[str, object]:
         return await invoke("cw_gate_status", {"project_id": project_id, "operation_id": operation_id})
 
-    async def phase_start(project_id: str, operation_id: str = "") -> dict[str, Any]:
+    async def phase_start(project_id: str, operation_id: str = "") -> dict[str, object]:
         return await invoke("cw_phase_start", {"project_id": project_id, "operation_id": operation_id})
 
-    async def validate(project_id: str, operation_id: str = "") -> dict[str, Any]:
+    async def validate(project_id: str, operation_id: str = "") -> dict[str, object]:
         return await invoke("cw_validate", {"project_id": project_id, "operation_id": operation_id})
 
-    async def review(project_id: str, operation_id: str = "") -> dict[str, Any]:
+    async def review(project_id: str, operation_id: str = "") -> dict[str, object]:
         return await invoke("cw_request_review", {"project_id": project_id, "operation_id": operation_id})
 
-    async def retry(project_id: str, operation_id: str = "") -> dict[str, Any]:
+    async def retry(project_id: str, operation_id: str = "") -> dict[str, object]:
         return await invoke("cw_retry", {"project_id": project_id, "operation_id": operation_id})
 
     async def operation_status(
         target_operation_id: str, project_id: str, operation_id: str = "",
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         return await invoke("cw_operation_status", {
             "project_id": project_id,
             "operation_id": operation_id,
@@ -273,7 +286,7 @@ def create_gateway_app(
 
     async def operation_cancel(
         target_operation_id: str, project_id: str, operation_id: str = "",
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         return await invoke("cw_operation_cancel", {
             "project_id": project_id,
             "operation_id": operation_id,

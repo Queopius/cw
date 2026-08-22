@@ -68,6 +68,14 @@ _HUMAN_AUTHORIZATION_ORIGINS = {
     ActorOrigin.CODEX_PLUGIN,
 }
 
+_OPERATION_ID = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+
+
+def validate_operation_id(value: str) -> str:
+    if not isinstance(value, str) or _OPERATION_ID.fullmatch(value) is None:
+        raise CwError("Operation identity is invalid", ErrorCode.OPERATION_CONFLICT)
+    return value
+
 
 def issue_user_authorization(
     *, action: str, resource_id: str, operation_id: str, actor: Actor,
@@ -79,8 +87,9 @@ def issue_user_authorization(
             ErrorCode.AUTHORIZATION_REQUIRED,
             "Ask the operator to confirm this exact action.",
         )
-    if not action or not resource_id or not operation_id or lifetime_seconds <= 0:
+    if not action or not resource_id or lifetime_seconds <= 0:
         raise CwError("Authorization scope is invalid", ErrorCode.AUTHORIZATION_REQUIRED)
+    validate_operation_id(operation_id)
     issued = datetime.now(timezone.utc).replace(microsecond=0)
     return AuthorizationGrant(
         action=action,
@@ -100,6 +109,7 @@ def validate_authorization(
         raise CwError("Explicit human authorization is required", ErrorCode.AUTHORIZATION_REQUIRED)
     if grant.action != action or grant.resource_id != resource_id:
         raise CwError("Authorization does not match this action", ErrorCode.AUTHORIZATION_REQUIRED)
+    validate_operation_id(grant.operation_id)
     if grant.actor.origin not in _HUMAN_AUTHORIZATION_ORIGINS or not grant.actor.explicit_user_intent:
         raise CwError("Internal agents cannot authorize this action", ErrorCode.AUTHORIZATION_REQUIRED)
     try:

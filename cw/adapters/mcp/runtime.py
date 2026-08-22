@@ -16,6 +16,7 @@ from cw.application import (
     ApplicationErrorCode,
     CWApplication,
     OperationContext,
+    OperationStatus,
     ResolvedProject,
 )
 from cw.application.capabilities import CAPABILITIES, CapabilityClass
@@ -25,6 +26,11 @@ from .security import sanitize
 
 DiagnosticSink = Callable[[dict[str, Any]], None]
 _OPERATION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+_PROJECT_ID = re.compile(r"[0-9a-f]{20}")
+_OUTPUT_FIELDS = {
+    "schema_version", "operation_id", "operation", "capability", "project_id",
+    "status", "idempotent_replay", "actor_origin", "data", "error",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,11 +84,60 @@ class ToolContract:
             "annotations": {
                 "readOnlyHint": not self.mutation,
                 "destructiveHint": False,
-                "idempotentHint": True,
+                "idempotentHint": not self.mutation,
                 "openWorldHint": False,
             },
             "mutation": self.mutation,
             "long_running": self.long_running,
+        }
+
+    def input_schema(self) -> dict[str, Any]:
+        properties: dict[str, Any] = {}
+        if "project_id" in self.allowed_arguments:
+            properties["project_id"] = {
+                "type": "string", "maxLength": 256,
+                "description": "Opaque authorized CW project handle; omit only for a single-project runtime.",
+            }
+        if "operation_id" in self.allowed_arguments:
+            properties["operation_id"] = {
+                "type": "string", "pattern": "^(?:|[A-Za-z0-9][A-Za-z0-9._:-]{0,127})$",
+                "description": "Stable caller operation identifier; reuse it to make retries replay-safe.",
+            }
+        if "target_operation_id" in self.allowed_arguments:
+            properties["target_operation_id"] = {
+                "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            }
+        return {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object", "additionalProperties": False,
+            "properties": properties,
+            "required": ["target_operation_id"] if "target_operation_id" in properties else [],
+        }
+
+    def output_schema(self) -> dict[str, Any]:
+        return {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object", "additionalProperties": False,
+            "required": ["schema_version", "operation_id", "status"],
+            "properties": {
+                "schema_version": {"const": 1},
+                "operation_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+                "operation": {"type": "string"},
+                "capability": {"type": "string", "minLength": 1},
+                "project_id": {"type": "string", "minLength": 1, "maxLength": 256},
+                "status": {"enum": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED"]},
+                "idempotent_replay": {"type": "boolean"},
+                "actor_origin": {"type": ["string", "null"]},
+                "data": {"type": "object"},
+                "error": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["code", "message", "retryable", "details"],
+                    "properties": {
+                        "code": {"type": "string"}, "message": {"type": "string"},
+                        "retryable": {"type": "boolean"}, "details": {"type": "object"},
+                    },
+                },
+            },
         }
 
 
@@ -215,6 +270,12 @@ class MCPRuntime:
     def tool_contracts(self) -> list[dict[str, Any]]:
         return [item.to_dict() for item in TOOLS if item.name in self._enabled_tools]
 
+    def tool_contract(self, name: str) -> ToolContract:
+        contract = self._tools.get(name)
+        if contract is None or name not in self._enabled_tools:
+            raise KeyError(name)
+        return contract
+
     def emit_diagnostic(self, payload: dict[str, Any]) -> None:
         self._diagnostic(payload)
 
@@ -258,6 +319,52 @@ class MCPRuntime:
                 "details": error.details,
             },
         }
+
+    @staticmethod
+    def _validate_output(contract: ToolContract, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict) or set(value) - _OUTPUT_FIELDS:
+            raise ApplicationError(
+                ApplicationErrorCode.STATE_INCONSISTENT,
+                "CW produced an invalid MCP output contract",
+            )
+        if value.get("schema_version") != 1 or not isinstance(value.get("operation_id"), str):
+            raise ApplicationError(ApplicationErrorCode.STATE_INCONSISTENT, "CW produced an invalid MCP output contract")
+        if _OPERATION_ID.fullmatch(value["operation_id"]) is None:
+            raise ApplicationError(ApplicationErrorCode.STATE_INCONSISTENT, "CW produced an invalid MCP output contract")
+        if value.get("status") not in {item.value for item in OperationStatus}:
+            raise ApplicationError(ApplicationErrorCode.STATE_INCONSISTENT, "CW produced an invalid MCP output contract")
+        if "operation" in value and not isinstance(value["operation"], str):
+            raise ApplicationError(ApplicationErrorCode.STATE_INCONSISTENT, "CW produced an invalid MCP output contract")
+        if "capability" in value and not isinstance(value["capability"], str):
+            raise ApplicationError(ApplicationErrorCode.STATE_INCONSISTENT, "CW produced an invalid MCP output contract")
+        if (
+            "capability" in value
+            and contract.name not in {"cw_operation_status", "cw_operation_cancel"}
+            and value["capability"] != contract.capability
+        ):
+            raise ApplicationError(ApplicationErrorCode.STATE_INCONSISTENT, "CW produced an invalid MCP output contract")
+        if "project_id" in value and (
+            not isinstance(value["project_id"], str) or _PROJECT_ID.fullmatch(value["project_id"]) is None
+        ):
+            raise ApplicationError(ApplicationErrorCode.STATE_INCONSISTENT, "CW produced an invalid MCP output contract")
+        if "idempotent_replay" in value and not isinstance(value["idempotent_replay"], bool):
+            raise ApplicationError(ApplicationErrorCode.STATE_INCONSISTENT, "CW produced an invalid MCP output contract")
+        if "actor_origin" in value and value["actor_origin"] is not None and not isinstance(value["actor_origin"], str):
+            raise ApplicationError(ApplicationErrorCode.STATE_INCONSISTENT, "CW produced an invalid MCP output contract")
+        if "data" in value and not isinstance(value["data"], dict):
+            raise ApplicationError(ApplicationErrorCode.STATE_INCONSISTENT, "CW produced an invalid MCP output contract")
+        if "error" in value:
+            error = value["error"]
+            if (
+                not isinstance(error, dict)
+                or set(error) != {"code", "message", "retryable", "details"}
+                or not isinstance(error.get("code"), str)
+                or not isinstance(error.get("message"), str)
+                or not isinstance(error.get("retryable"), bool)
+                or not isinstance(error.get("details"), dict)
+            ):
+                raise ApplicationError(ApplicationErrorCode.STATE_INCONSISTENT, "CW produced an invalid MCP output contract")
+        return value
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         supplied = {} if arguments is None else arguments
@@ -348,6 +455,7 @@ class MCPRuntime:
                     raise
             else:
                 result = method(project, request=request).to_dict()
+            result = self._validate_output(contract, result)
             payload = sanitize(result, private_roots=self.private_roots)
             self._diagnostic({
                 "event": "tool_invocation", "tool": name,

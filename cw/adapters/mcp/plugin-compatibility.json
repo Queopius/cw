@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "policy_id": "cw.plugin.compatibility.v1",
+  "plugin_version": "0.1.0",
+  "core": {
+    "minimum": "0.14.0",
+    "maximum_exclusive": "1.0.0"
+  },
+  "remote_protocol": "cw.remote.v1"
+}

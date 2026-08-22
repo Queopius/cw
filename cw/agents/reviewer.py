@@ -14,8 +14,8 @@ from cw.core.gates import artifact_hashes, create_gate, validate_approval_review
 from cw.core.models import Phase, ReviewDecision, Workflow, WorkflowState
 from cw.core.recovery import mark_infrastructure_error
 from cw.core.reviews import validate_reviewer_result
+from cw.core.revisions import artifact_revision_metadata
 from cw.core.schema import SCHEMA_VERSION
-from cw.core.severity import CriterionSeverity
 from cw.core.session import finish_session, readiness_path
 from cw.core.state import advance_after_approval, save_state, transition
 from cw.core.utils import atomic_json_new, utc_now
@@ -90,6 +90,8 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
         raise CwError("Phase is not ready for review", ErrorCode.INVALID_STATE)
 
     attempt = int(state.get("attempt", 0)) + 1
+    revision_attempt = int(state.get("revision_attempt", state.get("attempt", 0))) + 1
+    revision_metadata = artifact_revision_metadata(root, workflow, state)
     reviewer = adapter or CodexAdapter()
     schema = codex_schema("review-output.schema.json")
     try:
@@ -120,6 +122,7 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
             "schema_version": SCHEMA_VERSION, "workflow": workflow.id, "phase": phase.id,
             "attempt": attempt, "kind": "infrastructure_error", "error_code": exc.code.value,
             "error": redact(exc.message), "details": redact(exc.details), "created_at": utc_now(),
+            "revision_attempt": revision_attempt, **revision_metadata,
         }
         path = _persist_review(root, phase, report, "infrastructure")
         state["last_review"] = path.relative_to(root).as_posix()
@@ -127,6 +130,7 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
         raise
 
     state["attempt"] = attempt
+    state["revision_attempt"] = revision_attempt
     configured = {criterion.id: criterion for criterion in phase.acceptance_criteria}
     criteria = [
         {**criterion, "severity": configured[criterion["id"]].severity.value}
@@ -134,6 +138,12 @@ def run_review(root: Path, workflow: Workflow, phase: Phase, state: dict[str, An
     ]
     report = {
         "schema_version": SCHEMA_VERSION, "workflow": workflow.id, "phase": phase.id, "attempt": attempt,
+        "revision_attempt": revision_attempt, **revision_metadata,
+        "validation_evidence": {
+            "status": "PASSED",
+            "artifact_hashes": validation.artifact_hashes,
+            **revision_metadata,
+        },
         "kind": "semantic_review", "decision": decision.value, "summary": response.payload["summary"],
         "criteria": criteria, "blocking_criteria": blocking_criteria,
         "blocking_issues": issues, "artifact_hashes": validation.artifact_hashes, "created_at": utc_now(),
