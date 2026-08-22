@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.15.1",
+      "changes": [
+        "Fixed read-only compatibility for legacy projects without a .cw/supersessions directory.",
+        "Kept doctor, audit, status, history, Stop hook reads, and plan amendment dry-runs mutation-free.",
+        "Created the optional supersession directory only in a journaled apply transaction with rollback to its original absence."
+      ]
+    },
+    {
       "version": "0.15.0",
       "changes": [
         "Added governed deterministic cw plan amend flows for unapproved proposals and artifact-only active-phase corrections.",

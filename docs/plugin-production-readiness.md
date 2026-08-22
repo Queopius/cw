@@ -147,7 +147,7 @@ No final legal policy is published or linked by Plugin 0.1.0.
 
 ## Version boundary
 
-- Core: `0.15.0`
+- Core: `0.15.1`
 - Plugin: `0.1.0`
 - Remote protocol: `cw.remote.v1`
 - Proposed next Plugin version: `0.2.0`

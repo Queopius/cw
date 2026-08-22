@@ -4,6 +4,16 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.15.1 — 2026-08-22
+
+- Fix compatibility with legacy projects where `.cw/supersessions` does not
+  yet exist, while preserving mutation-free read and dry-run operations.
+- Treat the missing review-supersession namespace as an empty index, retain
+  fail-closed validation for unsafe or malformed paths, and create the
+  directory only inside a journaled active `cw plan amend --apply` transaction.
+- Restore the directory's original absence during rollback and recovery; no
+  manual directory workaround is required or supported.
+
 ## 0.15.0 — 2026-08-21
 
 - Add public `cw plan amend --file ... --expected-workflow-sha256 ...` support

@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -84,6 +85,7 @@ class ActiveArtifactRepo:
         reviews: int = 3,
         phase_id: str = "01-phase-1",
         addition: str = "tests/Fixtures/Contracts/example.graphql",
+        legacy_missing_supersessions: bool = False,
     ) -> None:
         self.repo = TempRepo(name="generic-marketplace-bridge", phases=2)
         self.root = self.repo.root
@@ -161,6 +163,8 @@ class ActiveArtifactRepo:
         state["revision_attempt"] = reviews
         state["status"] = WorkflowState.REVISION_REQUIRED.value
         save_state(self.root, state)
+        if legacy_missing_supersessions:
+            shutil.rmtree(self.root / ".cw/supersessions")
 
     @property
     def workflow_sha(self) -> str:
@@ -759,6 +763,34 @@ class ActiveArtifactAmendmentTests(unittest.TestCase):
             if path.is_file() and not path.is_symlink() and ".git" not in path.parts
         }
 
+    def filesystem_inventory(self) -> tuple[dict[str, tuple[int, int, int, str | None]], str, str, str]:
+        inventory: dict[str, tuple[int, int, int, str | None]] = {}
+        for path in sorted(self.case.root.rglob("*")):
+            if ".git" in path.parts:
+                continue
+            metadata = path.lstat()
+            digest = sha256_file(path) if path.is_file() and not path.is_symlink() else None
+            inventory[path.relative_to(self.case.root).as_posix()] = (
+                stat.S_IFMT(metadata.st_mode) | stat.S_IMODE(metadata.st_mode),
+                metadata.st_size,
+                metadata.st_mtime_ns,
+                digest,
+            )
+        status = subprocess.run(
+            ["git", "status", "--porcelain=v1"], cwd=self.case.root,
+            text=True, capture_output=True, check=True,
+        ).stdout
+        head_result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"], cwd=self.case.root,
+            text=True, capture_output=True, check=False,
+        )
+        head = head_result.stdout.strip() if head_result.returncode == 0 else "UNBORN"
+        index = subprocess.run(
+            ["git", "ls-files", "--stage"], cwd=self.case.root,
+            text=True, capture_output=True, check=True,
+        ).stdout
+        return inventory, status, head, index
+
     def test_generic_active_amendment_preserves_contract_and_supersedes_evidence(self) -> None:
         before_contract = contract_hash(load_workflow(self.case.root).completion_target) if load_workflow(self.case.root).completion_target else None
         original = {
@@ -788,6 +820,79 @@ class ActiveArtifactAmendmentTests(unittest.TestCase):
         self.assertEqual(5, audit_evidence_supersessions(self.case.root, workflow, state))
         self.assertEqual(5, len(list((self.case.root / ".cw/evidence-supersessions").glob("*.json"))))
         validate_state(self.case.root, state, workflow)
+
+    def test_legacy_missing_supersessions_dry_run_is_mutation_free_and_apply_creates_it(self) -> None:
+        self.case.close()
+        self.case = ActiveArtifactRepo(legacy_missing_supersessions=True)
+        directory = self.case.root / ".cw/supersessions"
+        before = self.tree()
+        output = prepare_active_artifact_amendment(
+            self.case.root, self.case.phase_id, [self.case.addition],
+            self.case.workflow_sha, self.case.state_sha,
+            "Declare an existing omitted contract artifact",
+        )
+        self.assertEqual(before, self.tree())
+        self.assertFalse(directory.exists())
+        self.assertEqual([self.case.addition], output["added_artifacts"])
+        self.assertEqual([], output["removed_artifacts"])
+        self.assertEqual([], output["other_changes"])
+        self.assertTrue(output["completion_contract_preserved"])
+        applied = self.case.apply()
+        self.assertTrue(directory.is_dir())
+        self.assertFalse(directory.is_symlink())
+        self.assertEqual([], list(directory.iterdir()))
+        self.assertEqual("PLAN_PROPOSED", load_state(self.case.root)["status"])
+        self.assertFalse(applied["automatic_approval"])
+
+    def test_legacy_read_surfaces_are_byte_timestamp_and_git_exact(self) -> None:
+        self.case.close()
+        self.case = TempRepo(name="legacy-cw-0141-read-surfaces")
+        shutil.rmtree(self.case.root / ".cw/supersessions")
+        before = self.filesystem_inventory()
+        previous = Path.cwd()
+        os.chdir(self.case.root)
+        try:
+            for command in (("status", "--json"), ("history", "--json")):
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(0, main(command))
+            with (
+                patch("cw.cli.commands.read.shutil.which", return_value="/fixture/bin/tool"),
+                patch("cw.adapters.codex.CodexAdapter.smoke_test", return_value=None),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(0, main(("doctor", "--reviewer", "--json")))
+            from cw.core.audit import audit_history
+
+            audit_history(self.case.root, load_workflow(self.case.root), load_state(self.case.root))
+        finally:
+            os.chdir(previous)
+        self.assertEqual(before, self.filesystem_inventory())
+        self.assertFalse((self.case.root / ".cw/supersessions").exists())
+
+    def test_legacy_missing_supersessions_rolls_back_to_absence_at_every_boundary(self) -> None:
+        stages = (
+            "supersession_directory_created", "old_revision_persisted",
+            "new_revision_persisted", "operation_record_persisted",
+            "supersessions_persisted", "active_evidence_removed",
+            "workflow_activated", "state_activated", "audit_completed",
+        )
+        for stage in stages:
+            with self.subTest(stage=stage):
+                case = ActiveArtifactRepo(legacy_missing_supersessions=True)
+                before_workflow = (case.root / ".codex/workflow/phases.yaml").read_bytes()
+                before_state = (case.root / ".cw/state.json").read_bytes()
+                def fail(name: str) -> None:
+                    if name == stage:
+                        raise RuntimeError(stage)
+                try:
+                    with self.assertRaises(CwError):
+                        case.apply(failure_injector=fail)
+                    self.assertFalse((case.root / ".cw/supersessions").exists())
+                    self.assertEqual(before_workflow, (case.root / ".codex/workflow/phases.yaml").read_bytes())
+                    self.assertEqual(before_state, (case.root / ".cw/state.json").read_bytes())
+                    self.assertFalse((case.root / TRANSACTION).exists())
+                finally:
+                    case.close()
 
     def test_dry_run_is_byte_exact_mutation_free_and_reports_both_cas_hashes(self) -> None:
         before = self.tree()
@@ -972,7 +1077,17 @@ class ActiveArtifactAmendmentTests(unittest.TestCase):
         self.case = ActiveArtifactRepo(
             phase_id="01-provider-contract-baseline-and-billing-intent-adr",
             addition="tests/Fixtures/Contracts/moloni-on-schema-2026-08-21.graphql",
+            legacy_missing_supersessions=True,
         )
+        before = self.tree()
+        preview = prepare_active_artifact_amendment(
+            self.case.root, self.case.phase_id, [self.case.addition],
+            self.case.workflow_sha, self.case.state_sha,
+            "Declare an existing omitted contract artifact",
+        )
+        self.assertEqual(before, self.tree())
+        self.assertFalse((self.case.root / ".cw/supersessions").exists())
+        self.assertEqual(1, len(preview["added_artifacts"]))
         output = self.case.apply()
         self.assertEqual(1, len(output["added_artifacts"]))
         self.assertEqual([], output["removed_artifacts"])
