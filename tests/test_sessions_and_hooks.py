@@ -5,10 +5,14 @@ import os
 import subprocess
 import sys
 import unittest
+import io
+import shutil
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 from cw.agents.reviewer import run_review
+from cw.cli.main import main
 from cw.checks.deterministic import validate_phase
 from cw.core.errors import CwError, ErrorCode
 from cw.core.session import create_session, session_path
@@ -56,6 +60,20 @@ class SessionAndHookTests(unittest.TestCase):
         output = json.loads(completed.stdout)
         self.assertFalse(output["continue"])
         self.assertIn("not recurse", output["stopReason"])
+
+    def test_stop_hook_path_does_not_internal_error_when_legacy_supersessions_are_absent(self):
+        shutil.rmtree(self.repo.root / ".cw/supersessions")
+        previous = Path.cwd()
+        os.chdir(self.repo.root)
+        output = io.StringIO()
+        try:
+            with redirect_stdout(output):
+                code = main(("review", "--hook"))
+        finally:
+            os.chdir(previous)
+        self.assertNotIn("INTERNAL_ERROR", output.getvalue())
+        self.assertIn(code, {0, 3})
+        self.assertFalse((self.repo.root / ".cw/supersessions").exists())
 
     def test_readiness_must_match_active_session(self):
         self.repo.artifact()

@@ -51,6 +51,7 @@ nav:
       - Release Governance: governance.md
       - Updating: updating.md
       - Core 0.15.0 Migration Notes: releases/core-0.15.0.md
+      - Core 0.15.1 Migration Notes: releases/core-0.15.1.md
       - Troubleshooting: troubleshooting.md
       - Error Reference: errors.md
   - Engineering:

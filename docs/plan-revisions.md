@@ -58,6 +58,15 @@ reinterpret evidence against a changed phase contract. If an amendment journal
 remains after interruption, preserve it and its backup and rerun the exact
 supported operation; `cw doctor` verifies the recovered history.
 
+Projects created before review supersessions were introduced may legitimately
+have no `.cw/supersessions` directory. Core `0.15.1` treats that absence as an
+empty read index without creating it during doctor, audit, status, history,
+Stop-hook handling, or dry-run. Existing paths remain fail-closed: files,
+symlinks, special files, malformed records, and inconsistent identities are
+rejected. A valid active amendment creates the directory only after CAS,
+backup, exclusive locking, and transaction journaling; rollback restores its
+original absence. Do not create this directory as a manual workaround.
+
 This public CLI addition is released as Core `0.15.0` under SemVer. It changes
 neither Plugin `0.1.0` nor `cw.remote.v1` and remains unavailable through MCP
 and Remote.

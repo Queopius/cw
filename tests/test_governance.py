@@ -255,7 +255,7 @@ class GovernanceTests(unittest.TestCase):
 
     def test_component_boundaries_remain_independent(self) -> None:
         repository = Path(__file__).resolve().parents[1]
-        self.assertEqual("0.15.0", (repository / "VERSION").read_text().strip())
+        self.assertEqual("0.15.1", (repository / "VERSION").read_text().strip())
         self.assertEqual("0.1.0", (repository / "plugins/cw/VERSION").read_text().strip())
         self.assertIn("cw.remote.v1", (repository / "cw/remote/protocol.py").read_text())
 

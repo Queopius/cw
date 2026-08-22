@@ -76,7 +76,7 @@ class PluginCandidateTests(unittest.TestCase):
         plugin_version = (PLUGIN / "VERSION").read_text(encoding="utf-8").strip()
         compatibility = self.capabilities["compatibility"]
         self.assertEqual("0.1.0", plugin_version)
-        self.assertEqual("0.15.0", (ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        self.assertEqual("0.15.1", (ROOT / "VERSION").read_text(encoding="utf-8").strip())
         self.assertEqual(plugin_version, self.manifest["version"])
         self.assertEqual(plugin_version, compatibility["plugin_version"])
         self.assertEqual("0.14.0", compatibility["cw_core"]["minimum"])
