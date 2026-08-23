@@ -58,14 +58,21 @@ reinterpret evidence against a changed phase contract. If an amendment journal
 remains after interruption, preserve it and its backup and rerun the exact
 supported operation; `cw doctor` verifies the recovered history.
 
-Projects created before review supersessions were introduced may legitimately
-have no `.cw/supersessions` directory. Core `0.15.1` treats that absence as an
-empty read index without creating it during doctor, audit, status, history,
-Stop-hook handling, or dry-run. Existing paths remain fail-closed: files,
-symlinks, special files, malformed records, and inconsistent identities are
-rejected. A valid active amendment creates the directory only after CAS,
-backup, exclusive locking, and transaction journaling; rollback restores its
-original absence. Do not create this directory as a manual workaround.
+Projects created before review supersessions and persisted plan revisions were
+introduced may legitimately have no `.cw/supersessions` or
+`.cw/plan-revisions` directory. Core `0.15.2` treats the missing
+supersession namespace as an empty read index. It treats a missing
+plan-revision namespace as empty only when state and history prove a coherent
+legacy project: no active revision, no active revision hash, no superseded
+revisions, and no historical event that requires persisted snapshots.
+
+Read-only paths never create either directory during doctor, audit, status,
+history, Stop-hook handling, or dry-run. Existing paths remain fail-closed:
+files, symlinks, special files, malformed records, inconsistent identities, and
+deleted namespaces in current-version projects are rejected. A valid active
+amendment creates missing directories only after CAS, backup, exclusive
+locking, and transaction journaling; rollback restores their original absence.
+Do not create these directories as a manual workaround.
 
 This public CLI addition is released as Core `0.15.0` under SemVer. It changes
 neither Plugin `0.1.0` nor `cw.remote.v1` and remains unavailable through MCP
@@ -117,7 +124,8 @@ goal, schema/CW version, actor, parent revision, and canonical hashes.
 Legacy schema-1 projects remain readable without mutation. Until an authorized
 write needs a snapshot, CW deterministically derives the legacy identity from
 the current document. Read-only status, explain, history, and doctor never
-silently migrate it.
+silently migrate it. If state declares an active or superseded revision, CW
+requires the matching snapshot files and fails closed when they are absent.
 
 ## Ceremony
 

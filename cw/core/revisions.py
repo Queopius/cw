@@ -176,13 +176,126 @@ def create_supersession_directory(root: Path) -> Path:
     return validated
 
 
+def plan_revision_directory(root: Path) -> Path | None:
+    """Return the validated plan-revision directory when it exists."""
+
+    runtime = root / ".cw"
+    try:
+        runtime_metadata = runtime.lstat()
+    except OSError as exc:
+        raise CwError(
+            "CW metadata directory cannot be inspected",
+            ErrorCode.PLAN_REVISION_INVALID,
+            details=str(exc),
+        ) from exc
+    if not stat.S_ISDIR(runtime_metadata.st_mode):
+        raise CwError("CW metadata directory is unsafe", ErrorCode.PLAN_REVISION_INVALID)
+    directory = runtime / "plan-revisions"
+    try:
+        metadata = directory.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise CwError(
+            "Plan revision directory cannot be inspected",
+            ErrorCode.PLAN_REVISION_INVALID,
+            details=str(exc),
+        ) from exc
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise CwError("Plan revision directory is unsafe", ErrorCode.PLAN_REVISION_INVALID)
+    return directory
+
+
+def create_plan_revision_directory(root: Path) -> Path:
+    """Create the optional plan-revision directory for a journaled mutation."""
+
+    existing = plan_revision_directory(root)
+    if existing is not None:
+        return existing
+    directory = root / ".cw" / "plan-revisions"
+    try:
+        directory.mkdir(mode=0o700)
+    except FileExistsError as exc:
+        raise CwError(
+            "Plan revision directory changed during the operation",
+            ErrorCode.OPERATION_CONFLICT,
+        ) from exc
+    except OSError as exc:
+        raise CwError(
+            "Plan revision directory could not be created safely",
+            ErrorCode.PLAN_REVISION_INVALID,
+            details=str(exc),
+        ) from exc
+    validated = plan_revision_directory(root)
+    if validated is None:
+        raise CwError(
+            "Plan revision directory creation was not durable",
+            ErrorCode.PLAN_REVISION_INVALID,
+        )
+    fsync_directory(directory.parent)
+    return validated
+
+
+def _version_tuple(value: str) -> tuple[int, int, int] | None:
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:[.+-].*)?", value)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def _legacy_missing_plan_revisions_allowed(state: dict[str, Any]) -> bool:
+    if state.get("active_plan_revision") is not None or state.get("active_plan_revision_sha256") is not None:
+        return False
+    superseded = state.get("superseded_plan_revisions", [])
+    if superseded not in (None, []):
+        return False
+    version_value = state.get("created_with_cw_version")
+    if version_value is None:
+        version_value = state.get("cw_version")
+    if isinstance(version_value, str) and version_value:
+        parsed = _version_tuple(version_value)
+        if parsed is None or parsed >= (0, 15, 0):
+            return False
+    elif version_value is not None:
+        return False
+    revision_actions = {
+        "plan_revision_activated",
+        "phase_artifacts_amended",
+        "plan_rebaseline_authorized",
+        "review_superseded",
+    }
+    for event in state.get("history", []):
+        if not isinstance(event, dict):
+            continue
+        action = event.get("action")
+        if action == "plan_rebaseline_proposed":
+            continue
+        if action in revision_actions:
+            return False
+        if any(
+            key in event
+            for key in (
+                "plan_revision_id",
+                "old_plan_revision_id",
+                "new_plan_revision_id",
+                "previous_plan_revision",
+                "new_plan_revision",
+            )
+        ):
+            return False
+    return True
+
+
 def active_revision(root: Path, state: dict[str, Any], workflow: Workflow | None = None) -> tuple[str, str]:
     identifier = state.get("active_plan_revision")
     canonical = state.get("active_plan_revision_sha256")
     if identifier is not None or canonical is not None:
         if not isinstance(identifier, str) or REVISION_ID.fullmatch(identifier) is None or not isinstance(canonical, str):
             raise CwError("Active plan revision metadata is invalid", ErrorCode.PLAN_REVISION_INVALID)
-        snapshot = load_revision(root, identifier)
+        try:
+            snapshot = load_revision(root, identifier)
+        except CwError as exc:
+            raise CwError("Active plan revision snapshot is invalid or missing", ErrorCode.PLAN_REVISION_INVALID) from exc
         if snapshot["canonical_workflow_sha256"] != canonical:
             raise CwError("Active plan revision hash is inconsistent", ErrorCode.PLAN_REVISION_INVALID)
         return identifier, canonical
@@ -226,7 +339,7 @@ def revision_payload(
 
 def persist_revision(root: Path, payload: dict[str, Any]) -> tuple[Path, bool]:
     validated = validate_revision_payload(root, payload)
-    directory = safe_directory(root / ".cw" / "plan-revisions", ".cw/plan-revisions", create=True)
+    directory = create_plan_revision_directory(root)
     path = directory / f"{validated['plan_revision_id']}.json"
     if path.exists():
         existing = load_json(safe_file(path, "Plan revision", required=True))
@@ -460,14 +573,15 @@ def _validate_transaction(root: Path, journal: dict[str, Any]) -> None:
     required = {
         "schema_version", "kind", "status", "stage", "operation_id", "proposal_id",
         "old_plan_revision_id", "new_plan_revision_id", "supersession_id",
-        "old_workflow", "old_state", "created_files", "backup", "created_at",
-        "journal_sha256",
+        "old_workflow", "old_state", "created_files", "created_directories",
+        "backup", "created_at", "journal_sha256",
     }
+    legacy_required = required - {"created_directories"}
     unhashed = {key: value for key, value in journal.items() if key != "journal_sha256"}
     old_state = journal.get("old_state")
     old_workflow = journal.get("old_workflow")
     if (
-        set(journal) != required
+        frozenset(journal) not in {frozenset(required), frozenset(legacy_required)}
         or journal.get("kind") != "plan_rebaseline_transaction"
         or journal.get("status") not in {"PREPARED", "COMMITTED"}
         or not isinstance(journal.get("stage"), str)
@@ -506,6 +620,9 @@ def _validate_transaction(root: Path, journal: dict[str, Any]) -> None:
         not isinstance(created, list)
         or len(created) != len(set(created))
         or any(not isinstance(reference, str) or reference not in allowed for reference in created)
+        or not isinstance(journal.get("created_directories"), list)
+        or len(journal.get("created_directories")) != len(set(journal.get("created_directories")))
+        or any(reference not in {".cw/supersessions", ".cw/plan-revisions"} for reference in journal.get("created_directories"))
     ):
         raise CwError("Rebaseline transaction targets are invalid", ErrorCode.TRANSACTION_RECOVERY_REQUIRED)
 
@@ -530,6 +647,31 @@ def recover_rebaseline_transaction(root: Path) -> dict[str, Any] | None:
             candidate = safe_project_path(root, reference)
             if candidate.is_file() and not candidate.is_symlink():
                 candidate.unlink()
+    for reference in reversed(journal.get("created_directories", [])):
+        if reference not in {".cw/supersessions", ".cw/plan-revisions"}:
+            raise CwError("Rebaseline transaction directory is invalid", ErrorCode.TRANSACTION_RECOVERY_REQUIRED)
+        directory = root / reference
+        try:
+            metadata = directory.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise CwError(
+                "Rebaseline transaction directory cannot be inspected",
+                ErrorCode.TRANSACTION_RECOVERY_REQUIRED,
+                details=str(exc),
+            ) from exc
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise CwError("Rebaseline transaction directory is unsafe", ErrorCode.TRANSACTION_RECOVERY_REQUIRED)
+        try:
+            directory.rmdir()
+            fsync_directory(directory.parent)
+        except OSError as exc:
+            raise CwError(
+                "Rebaseline transaction directory is not empty",
+                ErrorCode.TRANSACTION_RECOVERY_REQUIRED,
+                details=str(exc),
+            ) from exc
     path.unlink()
     return {"recovered": True, "committed": False, "operation_id": journal.get("operation_id")}
 
@@ -593,6 +735,8 @@ def apply_rebaseline(
 
     audit_history(root, workflow, state)
     backup = backup_metadata(root)
+    review_supersessions_existed = supersession_directory(root) is not None
+    plan_revisions_existed = plan_revision_directory(root) is not None
     old_document = _read_document(root / ".codex/workflow/phases.yaml")
     old_state = copy.deepcopy(state)
     old_revision = (
@@ -672,6 +816,14 @@ def apply_rebaseline(
         # crash between a write and its checkpoint can therefore be rolled
         # back without leaving an unreferenced revision or supersession.
         "created_files": planned_files,
+        "created_directories": [
+            reference
+            for reference, existed in (
+                (".cw/supersessions", review_supersessions_existed),
+                (".cw/plan-revisions", plan_revisions_existed),
+            )
+            if not existed
+        ],
         "backup": backup.relative_to(root).as_posix(),
         "created_at": utc_now(),
     }
@@ -684,6 +836,22 @@ def apply_rebaseline(
             failure_injector(name)
 
     try:
+        if not review_supersessions_existed:
+            if supersession_directory(root) is not None:
+                raise CwError(
+                    "Review supersession directory changed during the operation",
+                    ErrorCode.OPERATION_CONFLICT,
+                )
+            create_supersession_directory(root)
+            step("supersession_directory_created")
+        if not plan_revisions_existed:
+            if plan_revision_directory(root) is not None:
+                raise CwError(
+                    "Plan revision directory changed during the operation",
+                    ErrorCode.OPERATION_CONFLICT,
+                )
+            create_plan_revision_directory(root)
+            step("plan_revision_directory_created")
         persist_revision(root, old_revision)
         step("old_revision_persisted")
         persist_revision(root, new_revision)
@@ -1002,20 +1170,54 @@ def audit_revisions(root: Path, workflow: Workflow, state: dict[str, Any]) -> di
         or active_id in superseded
     ):
         raise CwError("Superseded plan revision state is invalid", ErrorCode.PLAN_REVISION_INVALID)
-    revision_directory = safe_directory(root / ".cw/plan-revisions", ".cw/plan-revisions")
+    revision_directory = plan_revision_directory(root)
     observed_revisions: set[str] = set()
-    for path in revision_directory.iterdir():
-        identifier = path.stem
+    if revision_directory is None:
+        if not _legacy_missing_plan_revisions_allowed(state):
+            raise CwError("Plan revision directory is missing for non-legacy state", ErrorCode.PLAN_REVISION_INVALID)
+    else:
         if (
-            path.is_symlink()
-            or not path.is_file()
-            or path.suffix != ".json"
-            or REVISION_ID.fullmatch(identifier) is None
-        ):
-            raise CwError("Unexpected plan revision artifact", ErrorCode.PLAN_REVISION_INVALID)
-        if load_revision(root, identifier)["plan_revision_id"] != identifier:
-            raise CwError("Plan revision filename is inconsistent", ErrorCode.PLAN_REVISION_INVALID)
-        observed_revisions.add(identifier)
+            initial := revision_directory.lstat()
+        ) and not stat.S_ISDIR(initial.st_mode):
+            raise CwError("Plan revision directory is unsafe", ErrorCode.PLAN_REVISION_INVALID)
+        try:
+            entries = sorted(revision_directory.iterdir())
+        except OSError as exc:
+            raise CwError(
+                "Plan revision directory cannot be read",
+                ErrorCode.PLAN_REVISION_INVALID,
+                details=str(exc),
+            ) from exc
+        for path in entries:
+            try:
+                metadata = path.lstat()
+            except OSError as exc:
+                raise CwError(
+                    "Plan revision entry cannot be inspected",
+                    ErrorCode.PLAN_REVISION_INVALID,
+                    details=str(exc),
+                ) from exc
+            identifier = path.stem
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or path.suffix != ".json"
+                or REVISION_ID.fullmatch(identifier) is None
+            ):
+                raise CwError("Unexpected plan revision artifact", ErrorCode.PLAN_REVISION_INVALID)
+            if load_revision(root, identifier)["plan_revision_id"] != identifier:
+                raise CwError("Plan revision filename is inconsistent", ErrorCode.PLAN_REVISION_INVALID)
+            observed_revisions.add(identifier)
+        try:
+            final = revision_directory.lstat()
+        except OSError as exc:
+            raise CwError(
+                "Plan revision directory changed while being read",
+                ErrorCode.PLAN_REVISION_INVALID,
+                details=str(exc),
+            ) from exc
+        if (initial.st_dev, initial.st_ino) != (final.st_dev, final.st_ino):
+            raise CwError("Plan revision directory changed while being read", ErrorCode.PLAN_REVISION_INVALID)
     expected_revisions = ({active_id} | set(superseded)) if explicit else set()
     if observed_revisions != expected_revisions:
         raise CwError("Plan revision artifacts are orphaned or missing", ErrorCode.PLAN_REVISION_INVALID)

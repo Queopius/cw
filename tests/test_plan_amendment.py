@@ -86,6 +86,7 @@ class ActiveArtifactRepo:
         phase_id: str = "01-phase-1",
         addition: str = "tests/Fixtures/Contracts/example.graphql",
         legacy_missing_supersessions: bool = False,
+        legacy_missing_plan_revisions: bool = False,
     ) -> None:
         self.repo = TempRepo(name="generic-marketplace-bridge", phases=2)
         self.root = self.repo.root
@@ -162,9 +163,16 @@ class ActiveArtifactRepo:
         state["attempt"] = reviews
         state["revision_attempt"] = reviews
         state["status"] = WorkflowState.REVISION_REQUIRED.value
+        if legacy_missing_supersessions or legacy_missing_plan_revisions:
+            state["created_with_cw_version"] = "0.14.1"
+            state["active_plan_revision"] = None
+            state["active_plan_revision_sha256"] = None
+            state["superseded_plan_revisions"] = []
         save_state(self.root, state)
         if legacy_missing_supersessions:
             shutil.rmtree(self.root / ".cw/supersessions")
+        if legacy_missing_plan_revisions:
+            shutil.rmtree(self.root / ".cw/plan-revisions")
 
     @property
     def workflow_sha(self) -> str:
@@ -823,8 +831,12 @@ class ActiveArtifactAmendmentTests(unittest.TestCase):
 
     def test_legacy_missing_supersessions_dry_run_is_mutation_free_and_apply_creates_it(self) -> None:
         self.case.close()
-        self.case = ActiveArtifactRepo(legacy_missing_supersessions=True)
-        directory = self.case.root / ".cw/supersessions"
+        self.case = ActiveArtifactRepo(
+            legacy_missing_supersessions=True,
+            legacy_missing_plan_revisions=True,
+        )
+        supersessions = self.case.root / ".cw/supersessions"
+        plan_revisions = self.case.root / ".cw/plan-revisions"
         before = self.tree()
         output = prepare_active_artifact_amendment(
             self.case.root, self.case.phase_id, [self.case.addition],
@@ -832,22 +844,33 @@ class ActiveArtifactAmendmentTests(unittest.TestCase):
             "Declare an existing omitted contract artifact",
         )
         self.assertEqual(before, self.tree())
-        self.assertFalse(directory.exists())
+        self.assertFalse(supersessions.exists())
+        self.assertFalse(plan_revisions.exists())
         self.assertEqual([self.case.addition], output["added_artifacts"])
         self.assertEqual([], output["removed_artifacts"])
         self.assertEqual([], output["other_changes"])
         self.assertTrue(output["completion_contract_preserved"])
         applied = self.case.apply()
-        self.assertTrue(directory.is_dir())
-        self.assertFalse(directory.is_symlink())
-        self.assertEqual([], list(directory.iterdir()))
+        self.assertTrue(supersessions.is_dir())
+        self.assertFalse(supersessions.is_symlink())
+        self.assertEqual([], list(supersessions.iterdir()))
+        self.assertTrue(plan_revisions.is_dir())
+        self.assertFalse(plan_revisions.is_symlink())
+        self.assertEqual(2, len(list(plan_revisions.iterdir())))
         self.assertEqual("PLAN_PROPOSED", load_state(self.case.root)["status"])
         self.assertFalse(applied["automatic_approval"])
 
     def test_legacy_read_surfaces_are_byte_timestamp_and_git_exact(self) -> None:
         self.case.close()
         self.case = TempRepo(name="legacy-cw-0141-read-surfaces")
+        state = load_state(self.case.root)
+        state["created_with_cw_version"] = "0.14.1"
+        state["active_plan_revision"] = None
+        state["active_plan_revision_sha256"] = None
+        state["superseded_plan_revisions"] = []
+        save_state(self.case.root, state)
         shutil.rmtree(self.case.root / ".cw/supersessions")
+        shutil.rmtree(self.case.root / ".cw/plan-revisions")
         before = self.filesystem_inventory()
         previous = Path.cwd()
         os.chdir(self.case.root)
@@ -868,17 +891,21 @@ class ActiveArtifactAmendmentTests(unittest.TestCase):
             os.chdir(previous)
         self.assertEqual(before, self.filesystem_inventory())
         self.assertFalse((self.case.root / ".cw/supersessions").exists())
+        self.assertFalse((self.case.root / ".cw/plan-revisions").exists())
 
     def test_legacy_missing_supersessions_rolls_back_to_absence_at_every_boundary(self) -> None:
         stages = (
-            "supersession_directory_created", "old_revision_persisted",
+            "supersession_directory_created", "plan_revision_directory_created", "old_revision_persisted",
             "new_revision_persisted", "operation_record_persisted",
             "supersessions_persisted", "active_evidence_removed",
             "workflow_activated", "state_activated", "audit_completed",
         )
         for stage in stages:
             with self.subTest(stage=stage):
-                case = ActiveArtifactRepo(legacy_missing_supersessions=True)
+                case = ActiveArtifactRepo(
+                    legacy_missing_supersessions=True,
+                    legacy_missing_plan_revisions=True,
+                )
                 before_workflow = (case.root / ".codex/workflow/phases.yaml").read_bytes()
                 before_state = (case.root / ".cw/state.json").read_bytes()
                 def fail(name: str) -> None:
@@ -888,6 +915,7 @@ class ActiveArtifactAmendmentTests(unittest.TestCase):
                     with self.assertRaises(CwError):
                         case.apply(failure_injector=fail)
                     self.assertFalse((case.root / ".cw/supersessions").exists())
+                    self.assertFalse((case.root / ".cw/plan-revisions").exists())
                     self.assertEqual(before_workflow, (case.root / ".codex/workflow/phases.yaml").read_bytes())
                     self.assertEqual(before_state, (case.root / ".cw/state.json").read_bytes())
                     self.assertFalse((case.root / TRANSACTION).exists())
