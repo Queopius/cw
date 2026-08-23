@@ -4,7 +4,7 @@ For the supported development/evaluation marketplace, immutable Git source,
 safe ZIP staging, removal, and rollback flows, see
 [Plugin packaging and installation](plugin-installation.md).
 
-CW Core `0.15.1` and the immutable public CW Plugin `0.1.0` retain the proven local plugin package
+CW Core `0.15.2` and the immutable public CW Plugin `0.1.0` retain the proven local plugin package
 and bounded ChatGPT Developer Mode connection profile. The Plugin remains a
 local, reviewable OpenAI plugin candidate. It is text/tool-first: one production
 skill, one bundled stdio MCP server, official CW assets, a package README, and a
