@@ -101,7 +101,7 @@ names, sizes, and SHA-256 digests already match; assets are never replaced with
 `--clobber`.
 
 Plugin validation remains a separate CI job. Its outputs are unpublished
-candidates outside the Core release directory. Core `0.15.1` does not build or
+candidates outside the Core release directory. Core `0.15.2` does not build or
 attach `cw-plugin-0.1.0.zip`; the existing public asset remains canonical at
 SHA-256 `b59275bb7e7a32e58c1d48202c9cf489874a6d21ce15fad3ef4cd6f202512021`.
 Publishing current Plugin source requires a separately authorized Plugin

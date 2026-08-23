@@ -32,6 +32,7 @@ from cw.core.revisions import (
     audit_revisions,
     authorization_resource,
     create_rebaseline_proposal,
+    plan_revision_directory,
     recover_rebaseline_transaction,
     supersession_index,
 )
@@ -111,6 +112,103 @@ class LegacySupersessionIndexTests(unittest.TestCase):
         with self.assertRaises(CwError) as entry_error:
             supersession_index(self.repo.root)
         self.assertEqual(ErrorCode.SUPERSESSION_INVALID, entry_error.exception.code)
+
+
+class LegacyPlanRevisionIndexTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.repo = TempRepo(name="legacy-plan-revisions")
+        self.directory = self.repo.root / ".cw/plan-revisions"
+        shutil.rmtree(self.directory)
+        state = load_state(self.repo.root)
+        state["created_with_cw_version"] = "0.14.1"
+        state["active_plan_revision"] = None
+        state["active_plan_revision_sha256"] = None
+        state["superseded_plan_revisions"] = []
+        save_state(self.repo.root, state)
+
+    def tearDown(self) -> None:
+        self.repo.close()
+
+    def test_missing_directory_is_empty_index_for_coherent_legacy_state(self) -> None:
+        workflow = load_workflow(self.repo.root)
+        state = load_state(self.repo.root)
+        outcome = audit_revisions(self.repo.root, workflow, state)
+        self.assertTrue(outcome["legacy_derived"])
+        self.assertFalse(self.directory.exists())
+        self.assertIsNone(plan_revision_directory(self.repo.root))
+
+    def test_empty_directory_is_valid_for_legacy_state(self) -> None:
+        self.directory.mkdir()
+        workflow = load_workflow(self.repo.root)
+        state = load_state(self.repo.root)
+        outcome = audit_revisions(self.repo.root, workflow, state)
+        self.assertTrue(outcome["legacy_derived"])
+
+    def test_missing_directory_fails_when_state_declares_revision(self) -> None:
+        state = load_state(self.repo.root)
+        state["active_plan_revision"] = "pr-" + "0" * 64
+        state["active_plan_revision_sha256"] = "sha256:" + "0" * 64
+        save_state(self.repo.root, state)
+        with self.assertRaises(CwError) as raised:
+            audit_revisions(self.repo.root, load_workflow(self.repo.root), load_state(self.repo.root))
+        self.assertEqual(ErrorCode.PLAN_REVISION_INVALID, raised.exception.code)
+
+    def test_missing_directory_fails_for_current_version_state(self) -> None:
+        state = load_state(self.repo.root)
+        state["created_with_cw_version"] = "0.15.2"
+        save_state(self.repo.root, state)
+        with self.assertRaises(CwError) as raised:
+            audit_revisions(self.repo.root, load_workflow(self.repo.root), load_state(self.repo.root))
+        self.assertEqual(ErrorCode.PLAN_REVISION_INVALID, raised.exception.code)
+
+    def test_missing_directory_fails_when_history_requires_revisions(self) -> None:
+        state = load_state(self.repo.root)
+        state.setdefault("history", []).append({
+            "timestamp": "2026-08-23T00:00:00Z",
+            "phase": "01-phase-1",
+            "action": "phase_artifacts_amended",
+        })
+        save_state(self.repo.root, state)
+        with self.assertRaises(CwError) as raised:
+            audit_revisions(self.repo.root, load_workflow(self.repo.root), load_state(self.repo.root))
+        self.assertEqual(ErrorCode.PLAN_REVISION_INVALID, raised.exception.code)
+
+    def test_file_symlink_and_unexpected_entries_fail_closed(self) -> None:
+        target = self.repo.root / "revision-target"
+        target.mkdir()
+        cases = ("file", "directory-symlink", "dangling-symlink", "unexpected-entry")
+        for kind in cases:
+            with self.subTest(kind=kind):
+                if self.directory.exists() or self.directory.is_symlink():
+                    if self.directory.is_dir() and not self.directory.is_symlink():
+                        shutil.rmtree(self.directory)
+                    else:
+                        self.directory.unlink()
+                if kind == "file":
+                    self.directory.write_text("not a directory\n", encoding="utf-8")
+                elif kind == "directory-symlink":
+                    self.directory.symlink_to(target, target_is_directory=True)
+                elif kind == "dangling-symlink":
+                    self.directory.symlink_to(self.repo.root / "missing-target", target_is_directory=True)
+                else:
+                    self.directory.mkdir()
+                    (self.directory / "unexpected.txt").write_text("{}\n", encoding="utf-8")
+                with self.assertRaises(CwError) as raised:
+                    audit_revisions(self.repo.root, load_workflow(self.repo.root), load_state(self.repo.root))
+                self.assertEqual(ErrorCode.PLAN_REVISION_INVALID, raised.exception.code)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO creation is unavailable")
+    def test_fifo_directory_and_entry_fail_closed(self) -> None:
+        os.mkfifo(self.directory)
+        with self.assertRaises(CwError) as directory_error:
+            audit_revisions(self.repo.root, load_workflow(self.repo.root), load_state(self.repo.root))
+        self.assertEqual(ErrorCode.PLAN_REVISION_INVALID, directory_error.exception.code)
+        self.directory.unlink()
+        self.directory.mkdir()
+        os.mkfifo(self.directory / ("pr-" + "0" * 64 + ".json"))
+        with self.assertRaises(CwError) as entry_error:
+            audit_revisions(self.repo.root, load_workflow(self.repo.root), load_state(self.repo.root))
+        self.assertEqual(ErrorCode.PLAN_REVISION_INVALID, entry_error.exception.code)
 
 
 class RebaselineCase:
@@ -510,6 +608,34 @@ class PlanRevisionTransactionTests(unittest.TestCase):
                 finally:
                     case.close()
 
+    def test_legacy_missing_revision_and_supersession_directories_rollback_to_absence(self) -> None:
+        stages = ("supersession_directory_created", "plan_revision_directory_created")
+        for stage in stages:
+            with self.subTest(stage=stage):
+                case = RebaselineCase()
+                try:
+                    state = load_state(case.repo.root)
+                    state["created_with_cw_version"] = "0.14.1"
+                    state["active_plan_revision"] = None
+                    state["active_plan_revision_sha256"] = None
+                    state["superseded_plan_revisions"] = []
+                    save_state(case.repo.root, state)
+                    shutil.rmtree(case.repo.root / ".cw/supersessions")
+                    shutil.rmtree(case.repo.root / ".cw/plan-revisions")
+                    proposal = case.preview()
+
+                    def fail(current: str) -> None:
+                        if current == stage:
+                            raise RuntimeError(f"injected:{stage}")
+
+                    with self.assertRaisesRegex(RuntimeError, stage):
+                        case.apply(proposal, operation_id=f"legacy-missing-{stage}", failure_injector=fail)
+                    self.assertFalse((case.repo.root / ".cw/supersessions").exists())
+                    self.assertFalse((case.repo.root / ".cw/plan-revisions").exists())
+                    self.assertFalse((case.repo.root / TRANSACTION).exists())
+                finally:
+                    case.close()
+
     def test_explicit_recovery_restores_prepared_journal(self) -> None:
         case = RebaselineCase()
         try:
@@ -523,7 +649,8 @@ class PlanRevisionTransactionTests(unittest.TestCase):
                 "old_plan_revision_id": old_id, "new_plan_revision_id": "pr-" + "0" * 64,
                 "supersession_id": "ps-" + "0" * 64,
                 "operation_id": "crashed", "old_workflow": plan, "old_state": state,
-                "created_files": [], "backup": backup.relative_to(case.repo.root).as_posix(),
+                "created_files": [], "created_directories": [],
+                "backup": backup.relative_to(case.repo.root).as_posix(),
                 "created_at": "2026-08-20T00:00:00Z",
             }
             _write_transaction(case.repo.root, journal)
@@ -551,6 +678,7 @@ class PlanRevisionTransactionTests(unittest.TestCase):
                 "old_plan_revision_id": old_id, "new_plan_revision_id": "pr-" + "0" * 64,
                 "supersession_id": "ps-" + "0" * 64, "operation_id": "malicious",
                 "old_workflow": plan, "old_state": state, "created_files": ["README.md"],
+                "created_directories": [],
                 "backup": backup.relative_to(case.repo.root).as_posix(),
                 "created_at": "2026-08-20T00:00:00Z",
             }

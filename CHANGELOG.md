@@ -4,6 +4,18 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.15.2 — 2026-08-23
+
+- Fix compatibility with legacy projects where `.cw/plan-revisions` does not
+  yet exist alongside `.cw/supersessions`, while preserving mutation-free read
+  and dry-run operations.
+- Treat a missing plan-revision namespace as an empty index only for coherent
+  pre-revision legacy state; fail closed when state or history declares
+  revisions that require persisted snapshots.
+- Create missing revision and supersession indexes only inside the authorized
+  active `cw plan amend --apply` transaction, inventory both directories for
+  rollback and recovery, and restore their original absence after failure.
+
 ## 0.15.1 — 2026-08-22
 
 - Fix compatibility with legacy projects where `.cw/supersessions` does not
