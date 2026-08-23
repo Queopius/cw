@@ -1,6 +1,6 @@
 # MCP tool contract
 
-CW Core 0.15.1 implements the stdio read and controlled-action subset below.
+CW Core 0.15.2 implements the stdio read and controlled-action subset below.
 CW Plugin 0.1.0 may advertise only the six primary reads on a restricted ChatGPT development
 surface, but it never adds another tool. All
 tools have narrow schemas, opaque project scope, structured application results,

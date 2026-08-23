@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.15.2",
+      "changes": [
+        "Fixed read-only compatibility for coherent legacy projects without a .cw/plan-revisions directory.",
+        "Kept status, history, doctor, audit, Stop hook reads, and plan amendment dry-runs mutation-free when legacy indexes are absent.",
+        "Created missing supersession and plan-revision indexes only in the journaled apply transaction with rollback to original absence."
+      ]
+    },
+    {
       "version": "0.15.1",
       "changes": [
         "Fixed read-only compatibility for legacy projects without a .cw/supersessions directory.",

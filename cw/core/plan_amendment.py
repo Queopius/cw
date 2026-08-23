@@ -322,10 +322,16 @@ def _restore(root: Path, transaction: dict[str, Any]) -> None:
                 "Plan amendment restore inventory is invalid",
                 ErrorCode.PLAN_AMEND_ROLLBACK_FAILED,
             )
-        expected_directory_inventory = [{
-            "path": ".cw/supersessions",
-            "existed": ".cw/supersessions" not in transaction.get("created_directories", []),
-        }]
+        expected_directory_inventory = [
+            {
+                "path": ".cw/supersessions",
+                "existed": ".cw/supersessions" not in transaction.get("created_directories", []),
+            },
+            {
+                "path": ".cw/plan-revisions",
+                "existed": ".cw/plan-revisions" not in transaction.get("created_directories", []),
+            },
+        ]
         if (
             ("directories" in manifest_keys and directory_inventory != expected_directory_inventory)
             or (
@@ -369,7 +375,7 @@ def _restore(root: Path, transaction: dict[str, Any]) -> None:
         if target.is_file() and not target.is_symlink():
             target.unlink()
     for reference in reversed(transaction.get("created_directories", [])):
-        if reference != ".cw/supersessions":
+        if reference not in {".cw/supersessions", ".cw/plan-revisions"}:
             raise CwError(
                 "Plan amendment rollback directory is invalid",
                 ErrorCode.PLAN_AMEND_ROLLBACK_FAILED,
@@ -447,7 +453,9 @@ def _validate_active_transaction(transaction: dict[str, Any]) -> None:
         or not isinstance(created, list)
         or len(created) != len(set(created))
         or any(not isinstance(item, str) or allowed_created.fullmatch(item) is None for item in created)
-        or transaction.get("created_directories", []) not in ([], [".cw/supersessions"])
+        or not isinstance(transaction.get("created_directories", []), list)
+        or len(transaction.get("created_directories", [])) != len(set(transaction.get("created_directories", [])))
+        or any(item not in {".cw/supersessions", ".cw/plan-revisions"} for item in transaction.get("created_directories", []))
     ):
         raise CwError(
             "Plan amendment transaction schema is invalid",
@@ -1132,9 +1140,10 @@ def _apply_active_artifact_amendment_locked(
     backup = backup_metadata(root)
     backup_relative = backup.relative_to(root).as_posix()
     evidence = prepared["evidence"]
-    from .revisions import supersession_directory, supersession_index
+    from .revisions import plan_revision_directory, supersession_directory, supersession_index
 
     review_supersessions_existed = supersession_directory(root) is not None
+    plan_revisions_existed = plan_revision_directory(root) is not None
     inventory = {
         "schema_version": 1,
         "kind": "plan_artifact_amend_restore_manifest",
@@ -1145,10 +1154,16 @@ def _apply_active_artifact_amendment_locked(
         "state": {"path": ".cw/state.json", "sha256": prepared["expected_state_sha256"]},
         "evidence": evidence,
         "proposal_id": prepared["proposal_id"],
-        "directories": [{
-            "path": ".cw/supersessions",
-            "existed": review_supersessions_existed,
-        }],
+        "directories": [
+            {
+                "path": ".cw/supersessions",
+                "existed": review_supersessions_existed,
+            },
+            {
+                "path": ".cw/plan-revisions",
+                "existed": plan_revisions_existed,
+            },
+        ],
     }
     atomic_json(backup / "plan-amend-restore-manifest.json", inventory)
     # Second CAS and file-identity check occur after backup and immediately
@@ -1169,10 +1184,18 @@ def _apply_active_artifact_amendment_locked(
             ErrorCode.OPERATION_CONFLICT,
             exit_code=4,
         )
+    if (plan_revision_directory(root) is not None) != plan_revisions_existed:
+        raise CwError(
+            "Plan revision directory changed during the operation",
+            ErrorCode.OPERATION_CONFLICT,
+            exit_code=4,
+        )
 
     from .revisions import (
+        create_plan_revision_directory,
         create_supersession_directory,
         load_revision,
+        plan_revision_directory,
         persist_revision,
         revision_path,
         revision_payload,
@@ -1276,9 +1299,14 @@ def _apply_active_artifact_amendment_locked(
         "previous_state_sha256": prepared["expected_state_sha256"],
         "superseded_evidence": [item["path"] for item in evidence],
         "created_files": created_files,
-        "created_directories": (
-            [] if review_supersessions_existed else [".cw/supersessions"]
-        ),
+        "created_directories": [
+            reference
+            for reference, existed in (
+                (".cw/supersessions", review_supersessions_existed),
+                (".cw/plan-revisions", plan_revisions_existed),
+            )
+            if not existed
+        ],
         "proposal_id": prepared["proposal_id"],
     }
     transaction["transaction_sha256"] = sha256_bytes(json.dumps(
@@ -1300,6 +1328,14 @@ def _apply_active_artifact_amendment_locked(
                 )
             create_supersession_directory(root)
             step("supersession_directory_created")
+        if not plan_revisions_existed:
+            if plan_revision_directory(root) is not None:
+                raise CwError(
+                    "Plan revision directory changed during the operation",
+                    ErrorCode.OPERATION_CONFLICT,
+                )
+            create_plan_revision_directory(root)
+            step("plan_revision_directory_created")
         persist_revision(root, old_revision)
         step("old_revision_persisted")
         persist_revision(root, new_revision)
