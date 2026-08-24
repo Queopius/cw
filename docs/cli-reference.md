@@ -14,6 +14,12 @@ Every named command accepts these presentation options:
 | Option | Behavior |
 | --- | --- |
 | `--json` | Emit stable machine-readable output where the operation supports it. |
+| `--output=human|json|jsonl` | Select human or versioned `cw.output.v1` output explicitly. |
+| `--llm` | Emit compact, bounded `cw.output.v1` JSON. |
+| `--fields` / `-f` | Select allowlisted fields on supported read commands. |
+| `--limit` / `--cursor` / `--all` | Page supported listings with explicit truncation. |
+| `--debug` | Write expanded redacted diagnostics to stderr. |
+| `--expand` | Return the complete canonical data projection in a machine mode. |
 | `--verbose` | Include diagnostic detail and expanded evidence. |
 | `--quiet` | Suppress normal human progress while retaining critical failures. |
 | `--no-color` | Disable ANSI color; `NO_COLOR` and non-TTY output are also respected. |
@@ -42,6 +48,7 @@ returns `3`; and an interrupted foreground operation returns `130`.
 | `cw repair` | Reconcile CW metadata from validated evidence. |
 | `cw config` / `cw integrations` | Inspect policy and integration state. |
 | `cw governance` | Configure and validate release review governance. |
+| `cw capabilities` / `cw schema` | Discover machine-readable output capabilities and schemas. |
 | `cw update` / `cw changelog` | Manage verified CW releases and release history. |
 | `cw version` / `cw --version` / `cw help` | Inspect the build or command index. |
 
@@ -206,6 +213,22 @@ cw status --json
 
 This read operation explains inconsistent evidence and directs the user to
 `cw repair` without silently mutating it.
+
+See [Agent output protocol](llm-output.md) for versioned envelopes, fields,
+pagination, redaction, exit codes, and LLM examples.
+
+## cw capabilities
+
+**Syntax:** `cw capabilities [--output=json|jsonl] [--llm] [--fields LIST]`
+
+Reports Core, Plugin, Remote, schema, formatter, pagination, and command
+capabilities without reading or modifying a project.
+
+## cw schema
+
+**Syntax:** `cw schema show cw.output.v1 [--output=json|jsonl] [--llm] [--fields LIST]`
+
+Returns the closed JSON Schema for the selected public output contract.
 
 ## cw run
 

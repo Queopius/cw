@@ -99,6 +99,7 @@ def _render_global_toml(document: dict[str, Any]) -> str:
         lines.append(f"{key} = {_toml_value(value)}")
     ordered_sections = {
         "updates": ("channel", "check", "check_interval_hours"),
+        "output": ("mode",),
         "execution": (
             "default_phases", "recommended_max_phases", "hard_max_phases",
             "default_max_time", "max_semantic_revisions_per_phase",
