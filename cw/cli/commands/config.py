@@ -14,6 +14,7 @@ from cw.ui.console import Console, emit_json
 from cw.execution.config import load_execution_settings, set_execution_setting
 from cw.execution.observability import load_observability_settings, set_observability_setting
 from cw.update.config import load_update_settings, set_update_setting
+from cw.output_protocol import load_output_settings, set_output_setting
 
 
 RootResolver = Callable[[], Path]
@@ -41,6 +42,24 @@ def _render_value(value: Any) -> Any:
 
 
 def command_config(args: argparse.Namespace, console: Console, *, root_resolver: RootResolver) -> int:
+    if args.action == "set" and isinstance(args.key, str) and args.key.startswith("output."):
+        if args.value is None:
+            raise CwError("Configuration value is required", ErrorCode.USAGE_ERROR, exit_code=2)
+        value, settings = set_output_setting(args.key, args.value)
+        payload = {
+            "scope": "global", "setting": args.key, "value": value,
+            "output": {"mode": settings.mode.value},
+            "path": "~/.config/cw/config.toml",
+        }
+        if args.json:
+            emit_json(payload)
+        else:
+            console.header("Configuration")
+            console.item("✓", "Global output setting updated")
+            console.field("Setting", args.key)
+            console.field("Value", value)
+            console.field("File", "~/.config/cw/config.toml")
+        return 0
     if args.action == "set" and isinstance(args.key, str) and args.key.startswith("observability."):
         if args.value is None:
             raise CwError("Configuration value is required", ErrorCode.USAGE_ERROR, exit_code=2)
@@ -155,6 +174,7 @@ def command_config(args: argparse.Namespace, console: Console, *, root_resolver:
         "heartbeat_seconds": observability.heartbeat_seconds,
         "quiet_threshold_seconds": observability.quiet_threshold_seconds,
     }
+    config["output"] = {"mode": load_output_settings().mode.value}
     if args.json:
         emit_json(config)
     else:

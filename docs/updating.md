@@ -39,7 +39,7 @@ available source/build provenance. Core's
 updater preserves this metadata but ignores it when selecting or installing a
 Core platform archive. Manifests without the section remain valid.
 
-Core `0.15.2` deliberately publishes a Core-only manifest without `signature`.
+Core `0.16.0` deliberately publishes a Core-only manifest without `signature`.
 The 0.14.1 updater accepts this shape and treats omission as “no Plugin asset in
 this Core release,” never as an uninstall or replacement instruction. Update,
 rollback, and re-update affect only the managed Core runtime; Plugin sources,

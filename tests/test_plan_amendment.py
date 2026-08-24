@@ -1053,6 +1053,10 @@ class ActiveArtifactAmendmentTests(unittest.TestCase):
         previous = Path.cwd()
         os.chdir(self.case.root)
         try:
+            before = (
+                (self.case.root / ".codex/workflow/phases.yaml").read_bytes(),
+                (self.case.root / ".cw/state.json").read_bytes(),
+            )
             dry = io.StringIO()
             with redirect_stdout(dry):
                 self.assertEqual(0, main((
@@ -1060,10 +1064,17 @@ class ActiveArtifactAmendmentTests(unittest.TestCase):
                     "--add-artifact", self.case.addition,
                     "--expected-workflow-sha256", self.case.workflow_sha,
                     "--expected-state-sha256", self.case.state_sha,
-                    "--reason", "Declare omitted artifact", "--dry-run", "--json",
+                    "--reason", "Declare omitted artifact", "--dry-run", "--llm",
                 )))
-            payload = json.loads(dry.getvalue())
+            envelope = json.loads(dry.getvalue())
+            self.assertEqual("cw.output.v1", envelope["schema"])
+            self.assertFalse(envelope["changed"])
+            payload = envelope["data"]
             self.assertTrue(payload["dry_run"])
+            self.assertEqual(before, (
+                (self.case.root / ".codex/workflow/phases.yaml").read_bytes(),
+                (self.case.root / ".cw/state.json").read_bytes(),
+            ))
             applied = io.StringIO()
             with redirect_stdout(applied):
                 self.assertEqual(0, main((
@@ -1072,9 +1083,11 @@ class ActiveArtifactAmendmentTests(unittest.TestCase):
                     "--expected-workflow-sha256", self.case.workflow_sha,
                     "--expected-state-sha256", self.case.state_sha,
                     "--reason", "Declare omitted artifact", "--apply", "--yes",
-                    "--non-interactive", "--json",
+                    "--non-interactive", "--llm",
                 )))
-            self.assertEqual("PLAN_PROPOSED", json.loads(applied.getvalue())["status"])
+            applied_payload = json.loads(applied.getvalue())
+            self.assertTrue(applied_payload["changed"])
+            self.assertEqual("PLAN_PROPOSED", applied_payload["data"]["status"])
         finally:
             os.chdir(previous)
 

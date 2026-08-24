@@ -1,0 +1,24 @@
+{
+  "schema": "cw.token-benchmark.v1",
+  "core": "0.15.2",
+  "plugin": "0.1.0",
+  "tokenizer": "tiktoken:o200k_base",
+  "measured_at": "2026-08-24",
+  "results": {
+    "status": {"bytes": 2549, "characters": 1572, "tokens": 371, "latency_ms": 230.694},
+    "doctor": {"bytes": 1615, "characters": 1089, "tokens": 260, "latency_ms": 181.986},
+    "doctor_reviewer": {"bytes": 1714, "characters": 1186, "tokens": 278, "latency_ms": 193.031},
+    "history": {"bytes": 603, "characters": 275, "tokens": 43, "latency_ms": 190.364},
+    "plan_show": {"bytes": 920, "characters": 578, "tokens": 196, "latency_ms": 182.968},
+    "plan_amend_dry_run": {"bytes": 1076, "characters": 749, "tokens": 214, "latency_ms": 178.383},
+    "cas_error": {"bytes": 191, "characters": 191, "tokens": 47, "latency_ms": 183.406},
+    "validation_error": {"bytes": 185, "characters": 185, "tokens": 48, "latency_ms": 187.482},
+    "mcp_metadata": {"bytes": 20363, "characters": 20363, "tokens": 5074, "tool_count": 12},
+    "representative_workflow": {"bytes": 27130, "characters": 24630, "tokens": 6158, "latency_ms": 964.395}
+  },
+  "notes": [
+    "Counts were measured with tiktoken o200k_base; they are not character estimates.",
+    "The fixture is synthetic, contains 16 phases, and contains no consumer repository data.",
+    "Plugin metadata is a Wave B baseline and is not modified by Wave A."
+  ]
+}
