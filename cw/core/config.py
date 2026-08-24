@@ -92,7 +92,10 @@ def load_config(root: Path, *, workflow: Workflow | None = None) -> dict[str, An
     for path in (global_path, project_path):
         source = _toml(path)
         if path == global_path:
-            source = {key: value for key, value in source.items() if key not in {"updates", "execution"}}
+            source = {
+                key: value for key, value in source.items()
+                if key not in {"updates", "execution", "observability", "output"}
+            }
         else:
             source = {key: value for key, value in source.items() if key not in {"integrations", "execution"}}
         _validate(source, path)
@@ -233,7 +236,10 @@ def set_project_config(root: Path, workflow: Workflow, key: str, raw_value: str)
         "command_timeout": workflow.command_timeout,
         "review_timeout": workflow.review_timeout,
     })
-    global_config = {key: value for key, value in _toml(global_path).items() if key not in {"updates", "execution"}}
+    global_config = {
+        key: value for key, value in _toml(global_path).items()
+        if key not in {"updates", "execution", "observability", "output"}
+    }
     _validate(global_config, global_path)
     effective.update(global_config)
     effective.update(project)

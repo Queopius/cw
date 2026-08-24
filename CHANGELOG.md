@@ -4,6 +4,18 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.16.0 — 2026-08-24
+
+- Add the closed, versioned `cw.output.v1` envelope and explicit
+  `--output=human|json|jsonl`, `--llm`, and `CW_OUTPUT_MODE` selection while
+  retaining human output and the legacy `--json` payload contract.
+- Add central deterministic error projection, mandatory redaction, allowlisted
+  field selection, bounded cursor pagination, and capability/schema discovery;
+  machine stdout stays JSON-only and domain execution remains format-neutral.
+- Add reproducible token benchmarks and semantic-equivalence tests. Core moves
+  to `0.16.0`; Plugin `0.1.0`, `cw.remote.v1`, project schema `1`, and governance
+  evidence schema `2` remain unchanged.
+
 ## 0.15.2 — 2026-08-23
 
 - Fix compatibility with legacy projects where `.cw/plan-revisions` does not

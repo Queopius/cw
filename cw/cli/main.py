@@ -26,7 +26,8 @@ from cw.core.errors import CwError
 from cw.core.platform import interrupt_bridge
 from cw.core.project import repository_root
 from cw.core.state import validate_state
-from cw.ui.console import Console
+from cw.ui.console import Console, emit_json
+from cw.output_protocol import output_schema_document
 
 
 def parser() -> argparse.ArgumentParser:
@@ -98,6 +99,59 @@ def command_status(args: argparse.Namespace, console: Console) -> int:
     return read_commands.command_status(
         args, console, root_resolver=_root, context=_raw_context, record_error=_record_error,
     )
+
+
+def command_capabilities(args: argparse.Namespace, console: Console) -> int:
+    from cw import __version__
+    from cw.adapters.mcp.compatibility import load_plugin_compatibility
+    from cw.adapters.mcp.runtime import TOOLS
+    from cw.remote.protocol import PROTOCOL_VERSION
+
+    plugin = load_plugin_compatibility()
+    payload = {
+        "core": __version__,
+        "plugin": plugin["plugin_version"],
+        "remote_protocol": PROTOCOL_VERSION,
+        "schemas": {
+            "project": 1,
+            "governance_evidence": 2,
+            "output": "cw.output.v1",
+        },
+        "output": {
+            "modes": ["human", "json", "jsonl", "llm"],
+            "environment": "CW_OUTPUT_MODE",
+            "fields": True,
+            "expansion": True,
+            "pagination": {"default_llm_limit": 10, "maximum_limit": 100},
+        },
+        "commands": sorted([*COMMANDS, "help"]),
+        "plugin_compatibility": {
+            "minimum_core": plugin["core"]["minimum"],
+            "maximum_core_exclusive": plugin["core"]["maximum_exclusive"],
+            "tool_count": len(TOOLS),
+        },
+    }
+    if args.json:
+        emit_json(payload)
+    else:
+        console.header("Capabilities")
+        console.field("Core", payload["core"])
+        console.field("Output schema", "cw.output.v1")
+        console.field("Formats", ", ".join(payload["output"]["modes"]))
+        console.field("Plugin", f"{payload['plugin']} · {len(TOOLS)} tools")
+        console.field("Remote", payload["remote_protocol"])
+    return 0
+
+
+def command_schema(args: argparse.Namespace, console: Console) -> int:
+    payload = {"name": args.schema_name, "schema": output_schema_document()}
+    if args.json:
+        emit_json(payload)
+    else:
+        console.header("Schema")
+        console.field("Name", args.schema_name)
+        console.line(json.dumps(payload["schema"], ensure_ascii=False, sort_keys=True, indent=2))
+    return 0
 
 
 def command_explain(args: argparse.Namespace, console: Console) -> int:
@@ -422,6 +476,8 @@ COMMANDS = {
     "logs": command_logs,
     "mcp": command_mcp,
     "remote": command_remote,
+    "capabilities": command_capabilities,
+    "schema": command_schema,
 }
 
 

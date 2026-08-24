@@ -14,7 +14,10 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / "docs" / "cli-reference.snapshot.json"
 REFERENCE = ROOT / "docs" / "cli-reference.md"
-COMMON_OPTIONS = {"--json", "--verbose", "--quiet", "--no-color"}
+COMMON_OPTIONS = {
+    "--json", "--output", "--llm", "--fields", "--limit", "--cursor", "--all", "--debug", "--expand",
+    "--verbose", "--quiet", "--no-color",
+}
 
 
 def _source_parser() -> argparse.ArgumentParser:

@@ -4,8 +4,16 @@
     {
       "name": "init",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -14,8 +22,16 @@
     {
       "name": "start",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -24,8 +40,16 @@
     {
       "name": "status",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -34,8 +58,16 @@
     {
       "name": "validate",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -44,8 +76,16 @@
     {
       "name": "retry",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -54,8 +94,16 @@
     {
       "name": "version",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -64,8 +112,16 @@
     {
       "name": "help",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -74,8 +130,16 @@
     {
       "name": "changelog",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -84,8 +148,34 @@
     {
       "name": "explain",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": []
+    },
+    {
+      "name": "capabilities",
+      "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
+        "--json",
+        "--limit",
+        "--llm",
+        "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -95,17 +185,25 @@
       "name": "plan",
       "options": [
         "--add-artifact",
+        "--all",
         "--apply",
         "--authorize",
+        "--cursor",
+        "--debug",
         "--dry-run",
+        "--expand",
         "--expected-state-sha256",
         "--expected-workflow-sha256",
+        "--fields",
         "--file",
         "--goal",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
         "--non-interactive",
         "--operation-id",
+        "--output",
         "--phase",
         "--proposal",
         "--quiet",
@@ -130,8 +228,16 @@
     {
       "name": "completion",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--target",
         "--verbose"
@@ -153,9 +259,17 @@
     {
       "name": "review",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--human-approve",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -164,8 +278,16 @@
     {
       "name": "history",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--phase",
         "--quiet",
         "--verbose"
@@ -175,10 +297,18 @@
     {
       "name": "doctor",
       "options": [
+        "--all",
         "--codex",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--integrations",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--performance",
         "--processes",
         "--quiet",
@@ -190,8 +320,16 @@
     {
       "name": "error",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--raw",
         "--verbose"
@@ -201,8 +339,16 @@
     {
       "name": "repair",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--reopen",
         "--verbose"
@@ -212,8 +358,16 @@
     {
       "name": "config",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -240,12 +394,20 @@
     {
       "name": "governance",
       "options": [
+        "--all",
         "--base-sha",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--head-sha",
         "--json",
+        "--limit",
+        "--llm",
         "--mode",
         "--no-color",
         "--non-interactive",
+        "--output",
         "--pr",
         "--quiet",
         "--reason",
@@ -270,11 +432,19 @@
     {
       "name": "update",
       "options": [
+        "--all",
         "--channel",
         "--check",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--info",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose",
         "--version"
@@ -292,8 +462,16 @@
     {
       "name": "integrations",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -317,8 +495,16 @@
     {
       "name": "inspect",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--verbose"
       ],
@@ -342,8 +528,16 @@
     {
       "name": "logs",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--quiet",
         "--run",
         "--verbose"
@@ -351,11 +545,52 @@
       "positionals": []
     },
     {
+      "name": "schema",
+      "options": [
+        "--all",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
+        "--json",
+        "--limit",
+        "--llm",
+        "--no-color",
+        "--output",
+        "--quiet",
+        "--verbose"
+      ],
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "show"
+          ],
+          "required": true
+        },
+        {
+          "name": "schema_name",
+          "choices": [
+            "cw.output.v1"
+          ],
+          "required": true
+        }
+      ]
+    },
+    {
       "name": "mcp",
       "options": [
+        "--all",
         "--allowed-root",
+        "--cursor",
+        "--debug",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--project",
         "--quiet",
         "--surface",
@@ -375,16 +610,24 @@
     {
       "name": "remote",
       "options": [
+        "--all",
         "--allowed-root",
         "--credentials",
+        "--cursor",
         "--database",
+        "--debug",
         "--device-name",
+        "--expand",
+        "--fields",
         "--gateway-url",
         "--host",
         "--issuer-url",
         "--json",
         "--jwks-url",
+        "--limit",
+        "--llm",
         "--no-color",
+        "--output",
         "--port",
         "--project",
         "--quiet",
@@ -408,11 +651,19 @@
     {
       "name": "run",
       "options": [
+        "--all",
+        "--cursor",
+        "--debug",
         "--dry-run",
+        "--expand",
+        "--fields",
         "--json",
+        "--limit",
+        "--llm",
         "--max-time",
         "--no-color",
         "--non-interactive",
+        "--output",
         "--phases",
         "--quiet",
         "--resume",
