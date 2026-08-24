@@ -5,8 +5,12 @@
 CW keeps terminal presentation separate from workflow behavior. Commands build
 structured domain payloads; `cw.ui` renders those payloads through a centralized
 console, semantic theme, bounded layout, progress model, and command renderers.
-JSON is emitted directly from domain payloads and never parsed from terminal
-text.
+JSON is emitted directly from domain payloads and never derived from terminal
+text. `cw.output_protocol` projects canonical command data into the closed
+`cw.output.v1` envelope, then applies redaction, allowlisted field selection,
+bounded pagination, and deterministic serialization. `cw.cli.runner` captures
+only the existing structured command channel; services never branch on output
+mode, so presentation cannot alter execution or evidence.
 
 The CLI intentionally uses only the Python standard library. A dependency
 such as Rich was not added because the current visual system needs deterministic
@@ -23,6 +27,7 @@ cw.cli.commands  independently testable command implementations
 cw.application UI-independent project scope, capabilities, operation results,
                authorization context, and stable adapter facade
 cw.ui       text/ANSI/JSON presentation
+cw.output_protocol versioned projection, redaction, pagination, serialization
 cw.core     project identity, workflow, state, locks, gates, completion, persistence
 cw.planning repository inspection and plan proposal
 cw.checks   deterministic validation

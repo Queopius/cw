@@ -39,6 +39,7 @@ nav:
       - Planning: planning.md
       - Workflow: workflow.md
       - CLI Reference: cli-reference.md
+      - Agent Output Protocol: llm-output.md
   - Core Workflow:
       - Gates and Reviews: gates-and-reviews.md
       - Plan Revisions: plan-revisions.md
@@ -52,6 +53,8 @@ nav:
       - Updating: updating.md
       - Core 0.15.0 Migration Notes: releases/core-0.15.0.md
       - Core 0.15.1 Migration Notes: releases/core-0.15.1.md
+      - Core 0.15.2 Migration Notes: releases/core-0.15.2.md
+      - Core 0.16.0 Release Notes: releases/core-0.16.0.md
       - Troubleshooting: troubleshooting.md
       - Error Reference: errors.md
   - Engineering:
@@ -108,6 +111,7 @@ nav:
       - Platform Support: testing/platform-support.md
       - Windows VM Acceptance: testing/windows-vm-acceptance.md
       - Security: security.md
+      - Versioning: versioning.md
       - Release Process: release-process.md
   - Project:
       - Brand Assets: assets/brand/README.md

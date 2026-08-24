@@ -10,6 +10,38 @@ from cw import __version__
 def _common(parser: argparse.ArgumentParser, *, suppress_defaults: bool = False) -> None:
     default = argparse.SUPPRESS if suppress_defaults else False
     parser.add_argument("--json", action="store_true", default=default, help="Emit stable JSON")
+    parser.add_argument(
+        "--output", choices=("human", "json", "jsonl"), default=argparse.SUPPRESS if suppress_defaults else None,
+        help="Select human, JSON, or JSONL output",
+    )
+    parser.add_argument(
+        "--llm", action="store_true", default=default,
+        help="Emit compact, bounded cw.output.v1 JSON for an LLM",
+    )
+    parser.add_argument(
+        "--fields", "-f", default=argparse.SUPPRESS if suppress_defaults else None,
+        help="Comma-separated allowlisted data fields for supported read commands",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=argparse.SUPPRESS if suppress_defaults else None,
+        help="Limit supported list results",
+    )
+    parser.add_argument(
+        "--cursor", default=argparse.SUPPRESS if suppress_defaults else None,
+        help="Continue a supported list from an opaque cursor",
+    )
+    parser.add_argument(
+        "--all", action="store_true", default=default,
+        help="Return all items where an unbounded read is explicitly safe",
+    )
+    parser.add_argument(
+        "--debug", action="store_true", default=default,
+        help="Write expanded redacted diagnostics to stderr",
+    )
+    parser.add_argument(
+        "--expand", action="store_true", default=default,
+        help="Return the complete canonical data projection in machine modes",
+    )
     parser.add_argument("--verbose", action="store_true", default=default, help="Show diagnostic detail")
     parser.add_argument("--quiet", action="store_true", default=default, help="Suppress normal text output")
     parser.add_argument("--no-color", action="store_true", default=default, help="Disable ANSI color")
@@ -20,7 +52,10 @@ def build_parser() -> argparse.ArgumentParser:
     _common(root)
     root.add_argument("--version", action="version", version=f"CW {__version__}")
     subcommands = root.add_subparsers(dest="command")
-    for name in ("init", "start", "status", "validate", "retry", "version", "help", "changelog", "explain"):
+    for name in (
+        "init", "start", "status", "validate", "retry", "version", "help", "changelog", "explain",
+        "capabilities",
+    ):
         command = subcommands.add_parser(name, add_help=True)
         _common(command, suppress_defaults=True)
     plan = subcommands.add_parser(
@@ -131,6 +166,10 @@ def build_parser() -> argparse.ArgumentParser:
     logs = subcommands.add_parser("logs", add_help=True)
     _common(logs, suppress_defaults=True)
     logs.add_argument("--run", dest="run_id")
+    schema = subcommands.add_parser("schema", add_help=True)
+    _common(schema, suppress_defaults=True)
+    schema.add_argument("action", choices=("show",))
+    schema.add_argument("schema_name", choices=("cw.output.v1",))
     mcp = subcommands.add_parser("mcp", add_help=True)
     _common(mcp, suppress_defaults=True)
     mcp.add_argument(
