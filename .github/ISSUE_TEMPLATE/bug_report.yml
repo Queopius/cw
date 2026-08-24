@@ -1,0 +1,116 @@
+name: Bug report
+description: Report reproducible CW behavior that is incorrect or unexpected.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve CW.
+
+        Do not include secrets, credentials, proprietary source code, or unredacted logs.
+        Suspected vulnerabilities must be reported privately through
+        [GitHub Security Advisories](https://github.com/Queopius/cw/security/advisories/new).
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checks
+      options:
+        - label: This report does not describe an unpatched security vulnerability.
+          required: true
+        - label: I removed secrets, credentials, personal data, and proprietary code from the report.
+          required: true
+        - label: I searched the existing issues for the same behavior.
+          required: true
+
+  - type: input
+    id: cw_version
+    attributes:
+      label: CW version
+      description: Paste the output of `cw version --verbose`.
+      placeholder: "CW 0.16.0 ..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation method
+      options:
+        - Managed installer
+        - Python package or wheel
+        - Source checkout
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, architecture, Python version, Codex version, and shell.
+      placeholder: "Ubuntu 24.04, x86_64, Python 3.12, Codex ..., zsh"
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The CW command that exposed the problem.
+      placeholder: "cw doctor"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should CW have done?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include the exact error after redacting sensitive data.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest safe, repeatable sequence that demonstrates the issue.
+      placeholder: |
+        1. Create an isolated test repository
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Paste relevant output from `cw doctor`, `cw status`, or `cw history`. Remove sensitive data first.
+      render: shell
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Frequency
+      options:
+        - Every time
+        - Intermittent
+        - Once
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add any other information that may help reproduce or understand the problem.
