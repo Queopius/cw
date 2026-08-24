@@ -53,6 +53,20 @@ environment surface is `CW_NO_UPDATE_CHECK=1` and
 `CW_UPDATE_CHANNEL=stable|beta|dev`; CI suppresses automatic checks by default.
 Stable never selects prereleases.
 
+## Output preferences
+
+The versioned agent output protocol is an explicit global presentation choice:
+
+```toml
+[output]
+mode = "human"
+```
+
+Set it with `cw config set output.mode human|json|jsonl|llm`, or override it for
+one process with `CW_OUTPUT_MODE`. CLI `--output=...` or `--llm` has highest
+precedence. The default is always `human`; pipes and non-TTY stdout do not
+silently enable compact output. See [Agent output protocol](llm-output.md).
+
 ## Live execution observability
 
 Live execution uses conservative global observability thresholds:

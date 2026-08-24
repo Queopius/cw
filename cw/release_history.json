@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.16.0",
+      "changes": [
+        "Added the versioned cw.output.v1 protocol with explicit human, JSON, JSONL, and LLM output selection.",
+        "Added deterministic compact errors, allowlisted field projection, bounded pagination, and capability/schema discovery without changing domain operations.",
+        "Preserved legacy --json payloads, exit codes, governance invariants, transactional behavior, and the immutable public Plugin 0.1.0 boundary."
+      ]
+    },
+    {
       "version": "0.15.2",
       "changes": [
         "Fixed read-only compatibility for coherent legacy projects without a .cw/plan-revisions directory.",
