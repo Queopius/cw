@@ -966,14 +966,65 @@ class RebaselineRecoveryTests(unittest.TestCase):
 
     def test_doctor_and_history_accept_the_recovered_state(self) -> None:
         self.case.apply()
+        original_path = os.environ.get("PATH", "")
+        with tempfile.TemporaryDirectory(prefix="cw-test-codex-") as name:
+            binary_directory = Path(name) / "bin"
+            binary_directory.mkdir()
+            codex = binary_directory / "codex"
+            codex.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$#\" -eq 1 ] && [ \"$1\" = \"--version\" ]; then\n"
+                "    printf 'codex test fixture\\n'\n"
+                "    exit 0\n"
+                "fi\n"
+                "exit 64\n",
+                encoding="utf-8",
+            )
+            codex.chmod(0o700)
+            stub_path = os.pathsep.join((str(binary_directory), original_path))
+            with mock.patch.dict(os.environ, {"PATH": stub_path}, clear=False):
+                self.assertEqual(str(codex), shutil.which("codex"))
+                version = subprocess.run(
+                    [str(codex), "--version"], check=True, capture_output=True,
+                    text=True, encoding="utf-8", errors="strict",
+                )
+                self.assertEqual("codex test fixture\n", version.stdout)
+                previous = Path.cwd()
+                try:
+                    os.chdir(self.case.repo.root)
+                    for command in (["doctor", "--json"], ["history", "--json"]):
+                        with self.subTest(command=command), redirect_stdout(io.StringIO()):
+                            self.assertEqual(0, main(command))
+                finally:
+                    os.chdir(previous)
+            self.assertEqual(original_path, os.environ.get("PATH", ""))
+        self.assertFalse(codex.exists())
+
+    def test_doctor_reports_missing_codex_without_test_fixture(self) -> None:
+        self.case.apply()
+
+        def executable(name: str) -> str | None:
+            return "/usr/bin/git" if name == "git" else None
+
+        output = io.StringIO()
         previous = Path.cwd()
         try:
             os.chdir(self.case.repo.root)
-            for command in (["doctor", "--json"], ["history", "--json"]):
-                with self.subTest(command=command), redirect_stdout(io.StringIO()):
-                    self.assertEqual(0, main(command))
+            with (
+                mock.patch("cw.cli.commands.read.shutil.which", side_effect=executable),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(1, main(["doctor", "--json"]))
         finally:
             os.chdir(previous)
+        payload = json.loads(output.getvalue())
+        codex_check = next(
+            item for item in payload["checks"] if item["name"] == "Codex"
+        )
+        self.assertEqual({"status": "error", "detail": "not found"}, {
+            "status": codex_check["status"], "detail": codex_check["detail"],
+        })
+        self.assertEqual(1, payload["result"]["errors"])
 
     def test_0141_to_0170_rollback_and_reupdate_preserve_project_evidence(self) -> None:
         from tests.test_update import UpdateFixture
