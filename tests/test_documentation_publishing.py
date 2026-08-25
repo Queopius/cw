@@ -4,6 +4,7 @@ import re
 import unittest
 from pathlib import Path
 
+from scripts.check_docs_navigation import navigation_errors, snapshot_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -75,6 +76,25 @@ class DocumentationPublishingTests(unittest.TestCase):
         self.assertEqual(1, workflow.count("  docs:\n"))
         self.assertIn('python-version: "3.13"', workflow)
         self.assertIn("run: mkdocs build --strict", workflow)
+        self.assertIn("python scripts/check_docs_navigation.py", workflow)
+
+    def test_navigation_architecture_preserves_every_document_and_url(self):
+        self.assertEqual([], navigation_errors())
+        snapshot = snapshot_payload()
+        self.assertEqual(snapshot["documents"], snapshot["navigation_paths"])
+
+    def test_navigation_uses_supported_native_material_features(self):
+        configuration = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+        for feature in (
+            "navigation.indexes",
+            "navigation.path",
+            "navigation.prune",
+            "navigation.top",
+            "navigation.tracking",
+        ):
+            self.assertIn(f"- {feature}", configuration)
+        self.assertNotIn("- navigation.expand", configuration)
+        self.assertNotIn("- navigation.sections", configuration)
 
 
 if __name__ == "__main__":
