@@ -34,6 +34,13 @@
   display: none;
 }
 
+/* Keep the active mobile navigation level at AA contrast in both palettes. */
+@media screen and (max-width: 76.234375em) {
+  .md-nav--primary .md-nav__title {
+    color: var(--md-default-fg-color);
+  }
+}
+
 .md-typeset a:focus-visible,
 .md-nav__link:focus-visible,
 .md-header__button:focus-visible,
