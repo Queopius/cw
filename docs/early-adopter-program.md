@@ -75,7 +75,7 @@ logs into public reports.
 
 ## Reporting feedback
 
-Use the repository's structured issue forms:
+Use the repository's [structured issue forms](https://github.com/Queopius/cw/issues):
 
 - open a **Bug report** for incorrect or unexpected reproducible behavior;
 - open a **Feature request** for a concrete workflow or documentation
