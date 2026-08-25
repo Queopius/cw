@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import copy
+import fnmatch
 import json
 import re
 import stat
 import subprocess
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from cw import __version__
 
@@ -411,6 +413,86 @@ def _criteria_contract(document: dict[str, Any], phase_id: str) -> bytes:
     raise CwError("Current phase is absent from proposed plan", ErrorCode.PLAN_REVISION_INVALID)
 
 
+def _planned_path_covered(value: str, patterns: tuple[str, ...]) -> bool:
+    normalized_value = value.replace("\\", "/").removeprefix("./")
+    for pattern in patterns:
+        normalized = pattern.replace("\\", "/").removeprefix("./")
+        if normalized_value == normalized or fnmatch.fnmatchcase(normalized_value, normalized):
+            return True
+        if "/**/" in normalized:
+            prefix = normalized.split("/**/", 1)[0].rstrip("/")
+            if normalized_value.startswith(prefix + "/"):
+                return True
+    return False
+
+
+def _validate_future_planned_artifact(root: Path, value: str, review_paths: tuple[str, ...]) -> None:
+    if (
+        not value
+        or value != Path(value).as_posix()
+        or value.startswith("./")
+        or "\\" in value
+        or any(character in value for character in "*?[\x00")
+    ):
+        raise CwError("Planned artifact path is not canonical", ErrorCode.INVALID_ARTIFACT)
+    path = safe_project_path(root, value)
+    if not _planned_path_covered(value, review_paths):
+        raise CwError("Planned artifact is outside review_paths", ErrorCode.INVALID_ARTIFACT)
+    current = root
+    for part in Path(value).parts[:-1]:
+        current /= part
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            break
+        except OSError as exc:
+            raise CwError("Planned artifact parent cannot be inspected", ErrorCode.INVALID_ARTIFACT, details=str(exc)) from exc
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise CwError("Planned artifact parent is unsafe", ErrorCode.INVALID_ARTIFACT)
+    if path.exists():
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise CwError("Planned artifact is unsafe", ErrorCode.INVALID_ARTIFACT)
+
+
+def _validate_rebaseline_scope(
+    root: Path,
+    current_document: dict[str, Any],
+    proposed: dict[str, Any],
+    current_workflow: Workflow,
+    proposed_workflow: Workflow,
+    phase_id: str,
+) -> None:
+    if tuple(phase.id for phase in proposed_workflow.phases) != tuple(phase.id for phase in current_workflow.phases):
+        raise CwError("Rebaseline cannot add, remove, or reorder phases", ErrorCode.PLAN_REVISION_INVALID)
+    current_index = current_workflow.index(phase_id)
+    for index, (before, after) in enumerate(zip(current_document["phases"], proposed["phases"], strict=True)):
+        if index != current_index and _canonical_bytes(before) != _canonical_bytes(after):
+            label = "already approved" if index < current_index else "future"
+            raise CwError(f"Rebaseline cannot alter a {label} phase", ErrorCode.INVALID_GATE)
+    before_phase = current_workflow.phase(phase_id)
+    after_phase = proposed_workflow.phase(phase_id)
+    if not set(before_phase.artifacts).issubset(after_phase.artifacts):
+        raise CwError("Rebaseline cannot remove planned artifacts", ErrorCode.FORBIDDEN_PLAN_CHANGE)
+    if not set(before_phase.review_paths).issubset(after_phase.review_paths):
+        raise CwError("Rebaseline cannot remove review paths", ErrorCode.FORBIDDEN_PLAN_CHANGE)
+    for artifact in after_phase.artifacts:
+        _validate_future_planned_artifact(root, artifact, after_phase.review_paths)
+    before_top = copy.deepcopy(current_document)
+    after_top = copy.deepcopy(proposed)
+    before_top.pop("phases", None)
+    after_top.pop("phases", None)
+    before_workflow = before_top.get("workflow")
+    after_workflow = after_top.get("workflow")
+    if isinstance(before_workflow, dict) and isinstance(after_workflow, dict):
+        before_workflow.pop("version", None)
+        before_workflow.pop("status", None)
+        after_workflow.pop("version", None)
+        after_workflow.pop("status", None)
+    if _canonical_bytes(before_top) != _canonical_bytes(after_top):
+        raise CwError("Rebaseline cannot alter policy or the Completion Contract", ErrorCode.COMPLETION_CONTRACT_CHANGE_REQUIRES_REBUILD)
+
+
 def _review_for_rebaseline(root: Path, workflow: Workflow, state: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     reference = state.get("last_review")
     if not isinstance(reference, str) or not reference.startswith(".cw/reviews/"):
@@ -456,12 +538,9 @@ def create_rebaseline_proposal(
     proposed_workflow = workflow_from_document(root, proposed)
     if proposed_workflow.id != current_workflow.id:
         raise CwError("Proposed plan belongs to another project", ErrorCode.WORKFLOW_PROJECT_MISMATCH)
-    current_index = current_workflow.index(phase_id)
-    if tuple(phase.id for phase in proposed_workflow.phases) != tuple(phase.id for phase in current_workflow.phases):
-        raise CwError("Rebaseline cannot add, remove, or reorder phases", ErrorCode.PLAN_REVISION_INVALID)
-    for index in range(current_index):
-        if _canonical_bytes(current_document["phases"][index]) != _canonical_bytes(proposed["phases"][index]):
-            raise CwError("Rebaseline cannot alter an already approved phase", ErrorCode.INVALID_GATE)
+    _validate_rebaseline_scope(
+        root, current_document, proposed, current_workflow, proposed_workflow, phase_id,
+    )
     if _criteria_contract(current_document, phase_id) == _criteria_contract(proposed, phase_id):
         raise CwError("Rebaseline requires an explicit contract change", ErrorCode.PLAN_REBASELINE_REQUIRED)
     old_id, old_hash = active_revision(root, state, current_workflow)
@@ -616,13 +695,14 @@ def _validate_transaction(root: Path, journal: dict[str, Any]) -> None:
         supersession_path(root, str(journal["supersession_id"])).relative_to(root).as_posix(),
     }
     created = journal.get("created_files")
+    created_directories = journal.get("created_directories")
     if (
         not isinstance(created, list)
         or len(created) != len(set(created))
         or any(not isinstance(reference, str) or reference not in allowed for reference in created)
-        or not isinstance(journal.get("created_directories"), list)
-        or len(journal.get("created_directories")) != len(set(journal.get("created_directories")))
-        or any(reference not in {".cw/supersessions", ".cw/plan-revisions"} for reference in journal.get("created_directories"))
+        or not isinstance(created_directories, list)
+        or len(created_directories) != len(set(created_directories))
+        or any(reference not in {".cw/supersessions", ".cw/plan-revisions"} for reference in created_directories)
     ):
         raise CwError("Rebaseline transaction targets are invalid", ErrorCode.TRANSACTION_RECOVERY_REQUIRED)
 

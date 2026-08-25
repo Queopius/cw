@@ -117,6 +117,23 @@ independent explicit bound. Any default LLM projection sets
 `truncation.reason=llm_projection` rather than pretending the compact view is
 the complete evidence.
 
+### Rebaseline recovery replay
+
+For `cw plan rebaseline recover`, `changed` means whether the current
+invocation performed a persistent project mutation. Preview reports
+`changed=false`; the first apply reports `changed=true`; and an exact replay
+reports `changed=false` with `idempotent_replay=true`. Compact replay output
+retains recovery identity, phase/review and CAS digests, resulting state,
+receipt or backup references, and `next_action`; it may include
+`mutation: "none"` to make the absence of writes explicit.
+
+Recovery supports the shared `--fields` allowlist in JSON and JSONL modes.
+Public fields include `changed`, `idempotent_replay`, `recovery_id`, `phase`,
+`review_reference`, `review_sha256`, `workflow_sha256`, `state_sha256`,
+`previous_status`, `resulting_status`, `backup`, `recovery_receipt`, and
+`next_action`. Unknown or unavailable fields fail closed; envelope and
+integrity invariants remain present.
+
 ## CI and agent examples
 
 ```bash

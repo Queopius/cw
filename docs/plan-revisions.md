@@ -53,6 +53,11 @@ No planner, implementer, reviewer, hook or agent runs. A human must separately
 run `cw plan approve` before execution may continue. An exact replay is
 idempotent; changed hashes, artifacts, operator or reason are a conflict.
 
+In `cw.output.v1`, `changed` means that the current invocation performed a
+persistent project mutation. An exact recovery replay therefore reports
+`idempotent_replay=true` with `changed=false`, while retaining its recovered
+domain status and recovery evidence references.
+
 Do not manually edit `.cw`, and do not repeat `cw repair` or `cw start` to
 reinterpret evidence against a changed phase contract. If an amendment journal
 remains after interruption, preserve it and its backup and rerun the exact
@@ -128,6 +133,50 @@ silently migrate it. If state declares an active or superseded revision, CW
 requires the matching snapshot files and fails closed when they are absent.
 
 ## Ceremony
+
+### Recovering a proven post-reopen REVISE context
+
+`repair --reopen` intentionally invalidates the active transition. When a
+phase had already produced a valid `REVISE` review and a later protected-path
+error required reopen, use the explicit recovery preview rather than editing
+`.cw` metadata:
+
+```bash
+cw plan rebaseline recover \
+  --phase 02-active \
+  --review-ref .cw/reviews/02-active-attempt-01.json \
+  --expected-review-sha256 sha256:<review-hash> \
+  --expected-workflow-sha256 sha256:<workflow-hash> \
+  --expected-state-sha256 sha256:<state-hash> \
+  --expected-prior-gate-ref .cw/gates/01-previous.approved.json \
+  --expected-prior-gate-sha256 sha256:<prior-gate-hash> \
+  --reason "Restore the proven REVISE transition" \
+  --dry-run \
+  --llm
+```
+
+Every recovery request must use exactly one mutually exclusive prior-gate
+authority mode. When a prior gate exists, supply both its canonical POSIX
+repository-relative reference and `--expected-prior-gate-sha256`; neither
+value is valid alone. Use `--no-prior-gate` instead only when the active phase
+truly has no prior gate. Do not combine `--no-prior-gate` with the reference or
+digest form. CW validates the selected assertion against live gate evidence and
+fails closed if it is missing, incomplete, contradictory, or false.
+
+Apply repeats the same request with `--apply`. CW accepts it only when the
+reopen provenance is proven by an append-only receipt whose full digest is
+bound from protected history. An older reopen with only a mutable backup is not
+eligible for recovery because it cannot independently prove review identity.
+It rejects a different,
+altered, superseded, linked, ambiguous, cross-phase, cross-workflow, or
+cross-revision review; active readiness, sessions, runs, locks, journals,
+attempts, or a current-phase gate also fail closed.
+
+Recovery does not perform rebaseline. It restores `REVISION_REQUIRED`, the
+explicit review reference and the last fully validated gate prefix, writes a
+recovery receipt, and leaves the workflow and Completion Contract unchanged.
+The proposal command below remains a separate operation, and its apply retains
+its independent exact authorization boundary.
 
 After an independent `REVISE`, create a proposal:
 

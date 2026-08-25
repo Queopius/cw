@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from cw.adapters.codex import CodexAdapter
+from cw.core.authorization import (
+    Actor,
+    ActorOrigin,
+    OperationContext,
+    issue_user_authorization,
+)
 from cw.core.diagnostics import state_error
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import gate_path, validate_gate
-from cw.core.initialize import backup_metadata, initialize, repair as repair_metadata
+from cw.core.initialize import backup_metadata, initialize
+from cw.core.initialize import repair as repair_metadata
 from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
 from cw.core.plan_amendment import (
@@ -17,11 +26,13 @@ from cw.core.plan_amendment import (
     apply_active_artifact_amendment,
     prepare_active_artifact_amendment,
 )
+from cw.core.rebaseline_recovery import (
+    apply_rebaseline_recovery,
+    preview_rebaseline_recovery,
+    recover_rebaseline_recovery_transaction,
+    write_reopen_receipt,
+)
 from cw.core.recovery import mark_infrastructure_error
-from cw.core.state import bind_plan, initial_state, save_state, transition
-from cw.core.utils import safe_project_path, utc_now
-from cw.core.workflow import _read_document, load_workflow, set_plan_status, write_workflow, workflow_hash
-from cw.core.authorization import Actor, ActorOrigin, OperationContext, issue_user_authorization
 from cw.core.revisions import (
     apply_rebaseline,
     authorization_resource,
@@ -30,9 +41,17 @@ from cw.core.revisions import (
     persist_revision,
     revision_payload,
 )
+from cw.core.state import bind_plan, initial_state, save_state, transition
+from cw.core.utils import safe_project_path, utc_now
+from cw.core.workflow import (
+    _read_document,
+    load_workflow,
+    set_plan_status,
+    workflow_hash,
+    write_workflow,
+)
 from cw.planning.planner import Planner
 from cw.ui.console import Console, emit_json
-
 
 RootResolver = Callable[[], Path]
 ContextLoader = Callable[[Path], tuple[Any, dict[str, Any], Any]]
@@ -194,6 +213,83 @@ def command_plan(
     context: ContextLoader,
 ) -> int:
     root = root_resolver()
+    if args.action == "rebaseline" and getattr(args, "rebaseline_action", None) == "recover":
+        recovery_required = (
+            args.phase, args.review_ref, args.expected_review_sha256,
+            args.expected_workflow_sha256, args.expected_state_sha256, args.reason,
+        )
+        prior_gate_complete = (
+            (bool(args.no_prior_gate) and not (args.expected_prior_gate_ref or args.expected_prior_gate_sha256))
+            or (
+                not args.no_prior_gate
+                and bool(args.expected_prior_gate_ref and args.expected_prior_gate_sha256)
+            )
+        )
+        if not all(recovery_required) or not prior_gate_complete or bool(args.dry_run) == bool(args.apply is True):
+            raise CwError(
+                "Rebaseline recovery requires phase, review reference, three CAS values, prior-gate authority, reason, and exactly one of --dry-run or --apply",
+                ErrorCode.USAGE_ERROR,
+                exit_code=2,
+            )
+        if isinstance(args.apply, str):
+            raise CwError("Rebaseline recovery --apply does not accept a value", ErrorCode.USAGE_ERROR, exit_code=2)
+        if args.goal or args.proposal or args.authorize or args.add_artifact or args.file:
+            raise CwError("Rebaseline recovery received options for another operation", ErrorCode.USAGE_ERROR, exit_code=2)
+        if args.dry_run:
+            payload = preview_rebaseline_recovery(
+                root, args.phase, args.review_ref, args.expected_review_sha256,
+                args.expected_workflow_sha256, args.expected_state_sha256, args.reason,
+                expected_prior_gate_reference=None if args.no_prior_gate else args.expected_prior_gate_ref,
+                expected_prior_gate_sha256=None if args.no_prior_gate else args.expected_prior_gate_sha256,
+            )
+        else:
+            with operation_lock(root, "plan-rebaseline-recover"):
+                recover_rebaseline_recovery_transaction(root)
+                payload = apply_rebaseline_recovery(
+                    root, args.phase, args.review_ref, args.expected_review_sha256,
+                    args.expected_workflow_sha256, args.expected_state_sha256, args.reason,
+                    expected_prior_gate_reference=None if args.no_prior_gate else args.expected_prior_gate_ref,
+                    expected_prior_gate_sha256=None if args.no_prior_gate else args.expected_prior_gate_sha256,
+                )
+        if args.json:
+            emit_json(payload)
+        else:
+            console.header("Plan rebaseline recovery")
+            console.field("Status", payload["status"])
+            console.field("Phase", payload["phase"])
+            console.field("Review", payload["review_reference"])
+            console.field("Review SHA-256", payload["review_sha256"])
+            console.field("Workflow CAS", payload["workflow_sha256"])
+            console.field("State CAS", payload["state_sha256"])
+            console.field("Previous state", payload["previous_status"])
+            console.field("Resulting state", payload["resulting_status"])
+            if payload.get("idempotent_replay") is True:
+                console.item("↻", "Recovery already applied — idempotent replay; no project changes were made.")
+                console.field("Recovery ID", payload.get("recovery_id"))
+            if payload.get("backup"):
+                console.field("Backup", payload["backup"])
+            if payload.get("recovery_receipt"):
+                console.field("Recovery receipt", payload["recovery_receipt"])
+            console.action(
+                "cw plan rebaseline --proposal <file> --reason <reason>",
+                "Create a separate proposal requiring independent apply authorization",
+            )
+        return 0
+    if getattr(args, "rebaseline_action", None) is not None:
+        raise CwError("Recovery requires 'cw plan rebaseline recover'", ErrorCode.USAGE_ERROR, exit_code=2)
+    recovery_options = (
+        getattr(args, "review_ref", None),
+        getattr(args, "expected_review_sha256", None),
+        getattr(args, "expected_prior_gate_ref", None),
+        getattr(args, "expected_prior_gate_sha256", None),
+        getattr(args, "no_prior_gate", False),
+    )
+    if any(value not in {None, False} for value in recovery_options):
+        raise CwError(
+            "Review recovery options require 'cw plan rebaseline recover'",
+            ErrorCode.USAGE_ERROR,
+            exit_code=2,
+        )
     amend_options = (
         getattr(args, "file", None),
         getattr(args, "expected_workflow_sha256", None),
@@ -495,6 +591,7 @@ def command_repair(
     with operation_lock(root, "repair"):
         if args.reopen:
             _, state, workflow = context(root)
+            before_state = copy.deepcopy(state)
             try:
                 target = workflow.phase(args.reopen)
             except KeyError as exc:
@@ -516,6 +613,7 @@ def command_repair(
                 "current_phase": target.id,
                 "status": WorkflowState.IN_PROGRESS.value,
                 "attempt": 0,
+                "revision_attempt": 0,
                 "last_review": None,
                 "last_gate": None,
                 "last_error": None,
@@ -528,6 +626,14 @@ def command_repair(
                 "backup": backup.relative_to(root).as_posix(),
             })
             save_state(root, state)
+            receipt = write_reopen_receipt(
+                root, phase_id=target.id, before_state=before_state,
+                after_state=state, backup=backup,
+            )
+            if receipt is not None:
+                state["history"][-1]["receipt"] = receipt[0]
+                state["history"][-1]["receipt_sha256"] = receipt[1]
+                save_state(root, state)
             reopened = target.id
         else:
             backup = repair_metadata(root, report=repair_report)

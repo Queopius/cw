@@ -7,13 +7,12 @@ from typing import Any
 
 from .errors import CwError, ErrorCode
 from .gates import validate_gate
+from .layout import validate_tree
 from .legacy_evidence import is_legacy_review, validate_legacy_review
 from .models import Workflow
 from .reviews import validate_reviewer_result
 from .schema import schema_version
-from .layout import validate_tree
-from .utils import load_json, safe_project_path
-
+from .utils import load_json, safe_project_path, sha256_file
 
 SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
 EVENT_ACTIONS = {
@@ -26,6 +25,7 @@ EVENT_ACTIONS = {
     "review_superseded", "plan_revision_activated",
     "plan_amended",
     "phase_artifacts_amended",
+    "rebaseline_recovery_applied",
 }
 
 
@@ -173,9 +173,75 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
             backup = event.get("backup")
             if not isinstance(backup, str) or not backup.startswith(".cw/backups/"):
                 raise CwError(f"Workflow history backup is invalid: {index}", ErrorCode.INVALID_STATE)
-        if action in {"infrastructure_error", "infrastructure_error_migrated"}:
-            if not isinstance(event.get("error_code"), str) or not isinstance(event.get("operation"), str):
-                raise CwError(f"Workflow infrastructure event is invalid: {index}", ErrorCode.INVALID_STATE)
+            receipt = event.get("receipt")
+            if receipt is not None:
+                if not isinstance(receipt, str) or not receipt.startswith(".cw/repair-receipts/"):
+                    raise CwError(f"Workflow reopen receipt is invalid: {index}", ErrorCode.INVALID_STATE)
+                receipt_payload = load_json(safe_project_path(root, receipt, must_exist=True))
+                receipt_sha256 = event.get("receipt_sha256")
+                if (
+                    not isinstance(receipt_payload, dict)
+                    or receipt_payload.get("kind") != "repair_reopen_receipt"
+                    or receipt_payload.get("phase") != phase
+                    or receipt_payload.get("backup") != backup
+                    or not isinstance(receipt_payload.get("review_reference"), str)
+                    or receipt_payload.get("review_reference") not in review_references
+                    or not isinstance(receipt_payload.get("review_sha256"), str)
+                    or SHA256.fullmatch(receipt_payload["review_sha256"]) is None
+                    or not isinstance(receipt_sha256, str)
+                    or SHA256.fullmatch(receipt_sha256) is None
+                    or sha256_file(safe_project_path(root, receipt, must_exist=True)) != receipt_sha256
+                    or sha256_file(safe_project_path(
+                        root, receipt_payload["review_reference"], must_exist=True,
+                    )) != receipt_payload["review_sha256"]
+                ):
+                    raise CwError(f"Workflow reopen receipt is inconsistent: {index}", ErrorCode.INVALID_STATE)
+        if action == "rebaseline_recovery_applied":
+            recovery = event.get("recovery")
+            review = event.get("review")
+            digest = event.get("review_sha256")
+            backup = event.get("backup")
+            operation_id = event.get("operation_id")
+            correlation_id = event.get("correlation_id")
+            event_id = event.get("event_id")
+            if (
+                not isinstance(recovery, str)
+                or not recovery.startswith(".cw/rebaseline-recoveries/")
+                or not isinstance(review, str)
+                or review not in review_references
+                or not isinstance(digest, str)
+                or SHA256.fullmatch(digest) is None
+                or not isinstance(backup, str)
+                or not backup.startswith(".cw/backups/")
+                or not isinstance(operation_id, str)
+                or not isinstance(correlation_id, str)
+                or correlation_id != operation_id
+                or not isinstance(event_id, str)
+                or re.fullmatch(r"rre-[0-9a-f]{64}", event_id) is None
+            ):
+                raise CwError(f"Rebaseline recovery event is invalid: {index}", ErrorCode.INVALID_STATE)
+            receipt = load_json(safe_project_path(root, recovery, must_exist=True))
+            request = receipt.get("request") if isinstance(receipt, dict) else None
+            transition = receipt.get("transition") if isinstance(receipt, dict) else None
+            if (
+                not isinstance(receipt, dict)
+                or not isinstance(request, dict)
+                or not isinstance(transition, dict)
+                or receipt.get("kind") != "rebaseline_recovery_receipt"
+                or request.get("phase") != phase
+                or request.get("review_reference") != review
+                or request.get("review_sha256") != digest
+                or receipt.get("backup") != backup
+                or receipt.get("operation_id") != operation_id
+                or receipt.get("correlation_id") != correlation_id
+                or transition.get("event_id") != event_id
+            ):
+                raise CwError(f"Rebaseline recovery event is inconsistent: {index}", ErrorCode.INVALID_STATE)
+        if (
+            action in {"infrastructure_error", "infrastructure_error_migrated"}
+            and (not isinstance(event.get("error_code"), str) or not isinstance(event.get("operation"), str))
+        ):
+            raise CwError(f"Workflow infrastructure event is invalid: {index}", ErrorCode.INVALID_STATE)
         if action in {"retry_started", "readiness_resume_started"} and not isinstance(event.get("operation"), str):
             raise CwError(f"Workflow retry event is invalid: {index}", ErrorCode.INVALID_STATE)
         if action == "plan_rebaseline_proposed":
@@ -227,7 +293,6 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
             raise CwError(f"Plan amendment event is invalid: {index}", ErrorCode.INVALID_STATE)
         if action == "plan_amended":
             from .completion import contract_hash
-            from .utils import sha256_file
 
             backup = safe_project_path(root, event["backup"], must_exist=True)
             backup_workflow = backup / "phases.yaml"
@@ -263,7 +328,6 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
                 raise CwError(f"Active plan amendment event is invalid: {index}", ErrorCode.INVALID_STATE)
             from .completion import contract_hash
             from .revisions import load_revision
-            from .utils import sha256_file
 
             backup = safe_project_path(root, str(event["backup"]), must_exist=True)
             previous = load_revision(root, str(event["previous_plan_revision"]))
@@ -299,9 +363,11 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
             ):
                 raise CwError(f"Active plan amendment evidence is inconsistent: {index}", ErrorCode.INVALID_STATE)
     from .completion import audit_completion_history
-    from .revisions import audit_revisions
     from .plan_amendment import audit_evidence_supersessions
+    from .rebaseline_recovery import _validate_recovery_receipts
+    from .revisions import audit_revisions
 
+    _validate_recovery_receipts(root, state)
     completion = audit_completion_history(root, workflow)
     revision_audit = audit_revisions(root, workflow, state)
     evidence_supersessions = audit_evidence_supersessions(root, workflow, state)

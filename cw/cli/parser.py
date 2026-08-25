@@ -78,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _common(plan, suppress_defaults=True)
     plan.add_argument("action", nargs="?", choices=("show", "approve", "rebuild", "rebaseline", "amend"))
+    plan.add_argument(
+        "rebaseline_action", nargs="?", choices=("recover",),
+        help="Recover an explicitly selected REVISE review after a proven repair --reopen",
+    )
     plan.add_argument("--goal")
     plan.add_argument(
         "--file",
@@ -88,6 +92,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Required optimistic-concurrency SHA-256 for plan amend",
     )
     plan.add_argument("--expected-state-sha256", help="Required state CAS for active plan amend")
+    plan.add_argument("--expected-prior-gate-ref", help="Externally authorized canonical prior gate reference for recovery")
+    plan.add_argument("--expected-prior-gate-sha256", help="Externally authorized SHA-256 of the prior gate")
+    plan.add_argument("--no-prior-gate", action="store_true", help="Explicitly authorize that no prior gate exists")
+    plan.add_argument("--review-ref", help="Canonical .cw/reviews reference for rebaseline recovery")
+    plan.add_argument("--expected-review-sha256", help="Required SHA-256 of the selected REVISE review")
     plan.add_argument("--phase", help="Current phase for an artifact-only active amendment")
     plan.add_argument("--add-artifact", action="append", help="Existing artifact to add; repeatable")
     plan.add_argument("--dry-run", action="store_true", help="Validate and show an amendment without writes")

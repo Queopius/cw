@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.17.0",
+      "changes": [
+        "Added explicit, CAS-bound rebaseline recovery for a proven post-reopen state without changing the workflow or approving execution.",
+        "Added append-only reopen and recovery receipts, prior-gate reconciliation, deterministic rollback, and fail-closed review provenance validation.",
+        "Restricted subsequent rebaseline proposals to monotonic active-phase contract expansion while preserving prior/future phases and the Completion Contract."
+      ]
+    },
+    {
       "version": "0.16.0",
       "changes": [
         "Added the versioned cw.output.v1 protocol with explicit human, JSON, JSONL, and LLM output selection.",
