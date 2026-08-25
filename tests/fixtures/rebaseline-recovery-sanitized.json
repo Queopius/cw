@@ -1,0 +1,29 @@
+{
+  "fixture": "synthetic-marketplace-rebaseline-recovery",
+  "phase": "02-amazon-inventory-vector",
+  "review_paths_to_add": [
+    "src/MoloniMarketplaceServiceProvider.php",
+    "src/Marketplaces/Amazon/Inventory/**/*",
+    "tests/Unit/Marketplaces/Amazon/AmazonInventoryClientTest.php",
+    "tests/Feature/InventorySynchronizationTest.php",
+    "tests/Concurrency/PostgresRedisPilotAcceptanceTest.php",
+    "tests/Integration/AmazonOrdersApiSpikeTest.php",
+    "tests/Feature/ServiceProviderTest.php"
+  ],
+  "existing_artifacts": [
+    "src/MoloniMarketplaceServiceProvider.php",
+    "tests/Unit/Marketplaces/Amazon/AmazonInventoryClientTest.php",
+    "tests/Feature/InventorySynchronizationTest.php",
+    "tests/Concurrency/PostgresRedisPilotAcceptanceTest.php",
+    "tests/Integration/AmazonOrdersApiSpikeTest.php",
+    "tests/Feature/ServiceProviderTest.php"
+  ],
+  "future_artifact": "src/Marketplaces/Amazon/Inventory/OfficialAmazonVector.php",
+  "immutable_prior_phase_evidence": "tests/Fixtures/Contracts/provider-contract-provenance.json",
+  "expected": {
+    "semantic_additions": 8,
+    "semantic_removals": 0,
+    "completion_contract_changed": false,
+    "automatic_approval": false
+  }
+}

@@ -366,7 +366,8 @@ def backup_metadata(root: Path) -> Path:
     relatives = (
         "project.json", "state.json", "config.toml", "runtime", "reviews", "gates",
         "completion", "validation", "plan-revisions", "plan-proposals",
-        "supersessions", "evidence-supersessions", "plan-amendments", "logs", "locks",
+        "supersessions", "evidence-supersessions", "plan-amendments", "repair-receipts",
+        "rebaseline-recoveries", "logs", "locks",
     )
     for relative in relatives:
         source = root / ".cw" / relative
@@ -582,7 +583,11 @@ def repair(root: Path, *, report: dict | None = None) -> Path:
     if recovered_extension:
         atomic_json(state_path, state)
         workflow = load_workflow(root)
-    from .progress import derive_effective_workflow_state, normalize_legacy_progress, valid_gate_ids
+    from .progress import (
+        derive_effective_workflow_state,
+        normalize_legacy_progress,
+        valid_gate_ids,
+    )
     verified = valid_gate_ids(root, workflow)
     history_before = len(state.get("history", [])) if isinstance(state.get("history"), list) else 0
     workflow, progress_changed = normalize_legacy_progress(root, workflow, state)

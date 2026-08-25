@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "kind": "rebaseline_recovery_contract_baseline",
+  "source": {
+    "tag": "v0.15.2",
+    "tag_type": "annotated",
+    "tag_object": "d7a31e9a4b319971785d413982a565e35560e719",
+    "peeled_commit": "9a84eee61c54c06f54b32f474614b19c7cd95a2e",
+    "tree": "556e6b0efc4e6e0ed3d5dfc2c75a7491f65f5832",
+    "version": "0.15.2"
+  },
+  "fixture": "synthetic-two-phase-post-reopen",
+  "observed": {
+    "phase_01_gate_preserved_in_backup": true,
+    "phase_02_review_decision": "REVISE",
+    "phase_02_gate_exists": false,
+    "post_reopen_status": "IN_PROGRESS",
+    "post_reopen_attempt": 0,
+    "post_reopen_revision_attempt": 1,
+    "post_reopen_last_review": null,
+    "post_reopen_last_gate": null,
+    "repair_reconciled_revision_attempt": 0,
+    "repair_reconciled_last_review": "phase-01-approved-review",
+    "rebaseline_error": "PLAN_REBASELINE_REQUIRED",
+    "rebaseline_message": "Plan rebaseline is allowed only after REVISE"
+  },
+  "package": {
+    "wheel_sha256": "eb3b44e08771fcfe9fdf8e22f8f246430a1b60287593a0ed0862ef29eb010d3d",
+    "installed_record_sha256": "7a11f5bd21a6c4d993329d7e8eaa1152cc78702343999613e4a8492d50a4896f",
+    "pyyaml_version": "6.0.3",
+    "pyyaml_record_sha256": "cb890276e02f3e482232f5c91a958e43830ffe7d7f9c26109ce7d6249607c735",
+    "executable_sha256": "731c2f9ec9210480a24e1f576e8fbb007564d15bd496ce968f8d11a7eabd41d9",
+    "invocation": "absolute-venv-executable"
+  },
+  "consumer_data": false
+}

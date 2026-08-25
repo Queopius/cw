@@ -102,6 +102,7 @@ server. The corresponding controls are:
 | Forged or replayed review supersession | Exact old/new revision and review hashes, human-origin grant, expiry, single-use nonce, operation ID, append-only record, lock, backup and audit cross-links |
 | Review or gate laundering across revisions | Validation, review and gate revision/candidate equality; prior gates survive only for byte-equivalent earlier phase contracts |
 | Partial rebaseline writes | Protected, closed-schema, integrity-hashed transaction journal with an exact deletion allowlist; atomic individual writes, backup-before-activation and deterministic rollback/recovery |
+| Post-reopen rebaseline recovery | Explicit review reference/digest, workflow and state CAS, SHA-bound reopen provenance, full backup inventory digest, safe non-linked namespaces, validated prior gate chain, exclusive lock, backup-first journal and externally bound append-only recovery receipt; backup-only legacy recovery fails closed |
 | Active plan artifact amendment | Positive semantic allowlist, workflow/state CAS, regular-file identity recheck, exclusive lock, immutable revisions, byte-exact evidence backup, hashed journal and append-only supersession |
 | Revision collision or hash confusion | Full SHA-256-derived identifiers plus canonical JSON hashing and collision-content equality checks |
 | Concurrent CLI and adapter writes | The same cross-platform project operation lock |

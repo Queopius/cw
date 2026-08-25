@@ -39,7 +39,7 @@ artifact["url"] = archive.as_uri()
 local_manifest = root / "candidate-manifest.json"
 local_manifest.write_text(json.dumps(document), encoding="utf-8")
 parsed = ReleaseManifest.from_dict(document)
-assert str(parsed.version) == "0.16.0"
+assert str(parsed.version) == "0.17.0"
 
 paths = InstallPaths(root / "managed", root / "bin")
 stable = paths.versions / "0.14.1"
@@ -54,22 +54,22 @@ service = UpdateService(
 )
 
 info, installed = service.install()
-assert str(info.installed) == "0.14.1" and str(info.latest) == "0.16.0"
-assert installed is not None and installed.current == "0.16.0"
-candidate = paths.versions / "0.16.0"
+assert str(info.installed) == "0.14.1" and str(info.latest) == "0.17.0"
+assert installed is not None and installed.current == "0.17.0"
+candidate = paths.versions / "0.17.0"
 build = json.loads((candidate / "BUILD.json").read_text(encoding="utf-8"))
 assert build == {"schema_version": 1, "commit": candidate_commit, "source": "release-artifact"}
 rolled_back = service.rollback()
 assert rolled_back.current == "0.14.1"
-_, reinstalled = service.install(requested_version="0.16.0")
-assert reinstalled is not None and reinstalled.current == "0.16.0"
+_, reinstalled = service.install(requested_version="0.17.0")
+assert reinstalled is not None and reinstalled.current == "0.17.0"
 sentinel = root / "consumer" / "sentinel.txt"
 assert sentinel.read_text(encoding="utf-8") == "preserve\n"
 assert not (root / "consumer" / ".cw").exists()
 print(json.dumps({
     "stable_consumer": __version__, "core_only_manifest": True,
-    "update": "0.14.1 -> 0.16.0", "rollback": "0.16.0 -> 0.14.1",
-    "reupdate": "0.14.1 -> 0.16.0", "build_commit": build["commit"],
+    "update": "0.14.1 -> 0.17.0", "rollback": "0.17.0 -> 0.14.1",
+    "reupdate": "0.14.1 -> 0.17.0", "build_commit": build["commit"],
     "projects_preserved": True,
 }, sort_keys=True))
 '''
