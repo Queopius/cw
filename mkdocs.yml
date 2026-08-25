@@ -36,6 +36,7 @@ nav:
   - Home: index.md
   - Getting Started:
       - Getting Started: getting-started.md
+      - Early Adopter Program: early-adopter-program.md
       - Planning: planning.md
       - Workflow: workflow.md
       - CLI Reference: cli-reference.md
