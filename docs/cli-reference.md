@@ -93,12 +93,16 @@ not silently launch a mutating agent.
 
 ## cw plan
 
-**Syntax:** `cw plan [show|approve|rebuild|rebaseline|amend] [--goal TEXT] [--file PATH] [--phase ID] [--add-artifact PATH] [--expected-workflow-sha256 SHA256] [--expected-state-sha256 SHA256] [--reason TEXT] [--dry-run|--apply [ID]] [--yes] [--non-interactive] [--proposal PATH] [--authorize] [--operation-id ID]`
+**Syntax:** `cw plan [show|approve|rebuild|rebaseline [recover]|amend] [--goal TEXT] [--file PATH] [--phase ID] [--review-ref PATH] [--expected-review-sha256 SHA256] [--add-artifact PATH] [--expected-workflow-sha256 SHA256] [--expected-state-sha256 SHA256] [--expected-prior-gate-ref PATH] [--expected-prior-gate-sha256 SHA256] [--no-prior-gate] [--reason TEXT] [--dry-run|--apply [ID]] [--yes] [--non-interactive] [--proposal PATH] [--authorize] [--operation-id ID]`
 
 - `--goal TEXT` supplies an explicit planning goal.
 - `--file PATH` supplies the repository-relative corrected proposal for `amend`.
 - `--expected-workflow-sha256 SHA256` supplies the mandatory compare-and-swap guard for `amend`.
 - `--expected-state-sha256 SHA256` supplies the second mandatory CAS guard for active amendment.
+- `--expected-prior-gate-ref PATH` and `--expected-prior-gate-sha256 SHA256` bind recovery to externally authorized prior-gate identity; use `--no-prior-gate` for explicit absence.
+- `--review-ref PATH` and `--expected-review-sha256 SHA256` select one exact,
+  canonical REVISE review for `rebaseline recover`; CW never substitutes a
+  different review.
 - `--phase ID` selects the current phase; `--add-artifact PATH` adds one explicit existing file and is repeatable.
 - `--dry-run` validates without writing. Bare `--apply` selects active amendment; `--apply ID` retains rebaseline apply.
 - `--yes` explicitly confirms the exact active amendment.
@@ -117,7 +121,24 @@ not silently launch a mutating agent.
 - `rebaseline --goal ... --reason ...` asks the planner for a corrected proposal.
 - `rebaseline --proposal PATH --reason ...` validates a supplied repository-local proposal.
 - `rebaseline --apply ID --authorize` binds explicit human authority to the exact immutable proposal hash.
+- `rebaseline recover --phase ID --review-ref PATH --expected-review-sha256
+  SHA256 --expected-workflow-sha256 SHA256 --expected-state-sha256 SHA256
+  --reason TEXT --dry-run|--apply` is a separate recovery operation for a
+  cryptographically proven post-`repair --reopen` state. Preview is
+  mutation-free. Apply restores the selected REVISE context and prior valid
+  gate pointer, but does not alter the workflow, create a revision, supersede
+  evidence, start work, or approve a phase.
 - `--operation-id ID` supplies replay-safe operation identity for apply.
+
+Recovery output defines `changed` as persistence performed by the current
+invocation: preview is `false`, first apply is `true`, and an exact replay is
+`false` with `idempotent_replay=true`. Human and non-TTY output state that the
+recovery was already applied and no project changes were made. JSON, JSONL and
+LLM output retain recovery identity, review/CAS digests, resulting state,
+evidence references and next action. JSON/JSONL recovery also uses the shared
+field selection allowlist (`changed`, `idempotent_replay`, `recovery_id`,
+`phase`, review/CAS fields, state result, evidence references and
+`next_action`); unknown or unavailable fields are rejected.
 
 The public options `--reason`, `--proposal`, `--apply`, `--authorize`, and
 `--operation-id` are valid only in the `rebaseline` combinations described
@@ -131,6 +152,7 @@ cw plan amend --phase 01-example --add-artifact docs/example.md --expected-workf
 cw plan approve
 cw plan rebaseline --proposal corrected-plan.json --reason "Remove circular criteria" --json
 cw plan rebaseline --apply pp-... --authorize --operation-id operator-change-42 --json
+cw plan rebaseline recover --phase 02-active --review-ref .cw/reviews/02-active-attempt-01.json --expected-review-sha256 sha256:<review-hash> --expected-workflow-sha256 sha256:<workflow-hash> --expected-state-sha256 sha256:<state-hash> --expected-prior-gate-ref .cw/gates/01-previous.approved.json --expected-prior-gate-sha256 sha256:<gate-hash> --reason "Restore the proven REVISE transition" --dry-run --llm
 ```
 
 Planner infrastructure failures preserve the pending goal for `cw retry`; an

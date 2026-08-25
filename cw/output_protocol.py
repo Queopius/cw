@@ -6,15 +6,15 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from cw.core.diagnostics import redact
 from cw.core.errors import CwError, ErrorCode
 from cw.update.config import load_global_document, write_global_document
-
 
 OUTPUT_SCHEMA = "cw.output.v1"
 LLM_DEFAULT_LIMIT = 10
@@ -78,6 +78,11 @@ _FIELD_ALLOWLISTS: dict[str, frozenset[str]] = {
         "core", "plugin", "remote_protocol", "schemas", "output", "commands", "plugin_compatibility",
     }),
     "schema.show": frozenset({"name", "schema"}),
+    "plan.rebaseline.recover": frozenset({
+        "changed", "idempotent_replay", "recovery_id", "operation_id", "phase",
+        "review_reference", "review_sha256", "workflow_sha256", "state_sha256",
+        "previous_status", "resulting_status", "backup", "recovery_receipt", "next_action",
+    }),
 }
 
 _INVARIANT_KEYS = frozenset({
@@ -179,6 +184,8 @@ def resolve_output_mode(args: argparse.Namespace) -> OutputMode:
 def command_name(args: argparse.Namespace) -> str:
     command = str(getattr(args, "command", None) or "help")
     action = getattr(args, "action", None)
+    if command == "plan" and action == "rebaseline" and getattr(args, "rebaseline_action", None):
+        return f"plan.rebaseline.{args.rebaseline_action}"
     if command in {"plan", "completion", "governance", "schema"} and action:
         return f"{command}.{action}"
     if command == "doctor" and getattr(args, "reviewer", False):
@@ -262,11 +269,11 @@ def sanitize_output(value: Any, *, private_roots: Iterable[Path] = ()) -> Any:
         if isinstance(item, (list, tuple)):
             return [clean(child) for child in item]
         if isinstance(item, str):
-            result = redact(item) or ""
+            redacted = redact(item) or ""
             for root in sorted(set(roots), key=len, reverse=True):
-                result = re.sub(re.escape(root), "<PROJECT_ROOT>", result, flags=re.IGNORECASE)
-            result = _WINDOWS_HOME.sub("~", result)
-            return _HOME_PATH.sub("~", result)
+                redacted = re.sub(re.escape(root), "<PROJECT_ROOT>", redacted, flags=re.IGNORECASE)
+            redacted = _WINDOWS_HOME.sub("~", redacted)
+            return _HOME_PATH.sub("~", redacted)
         return item
 
     return clean(value)
@@ -320,6 +327,21 @@ def _invariant_paths(value: Any, prefix: str = "") -> tuple[str, ...]:
 def compact_llm_data(command: str, data: Any) -> Any:
     if not isinstance(data, dict):
         return data
+    if command == "plan.rebaseline.recover":
+        compact = {
+            key: data[key] for key in (
+                "phase", "review_reference", "review_sha256", "workflow_sha256",
+                "state_sha256", "previous_status", "resulting_status", "last_gate",
+                "changed", "idempotent_replay", "recovery_id", "backup", "recovery_receipt", "next_action",
+            ) if key in data and data[key] is not None
+        }
+        if compact.get("idempotent_replay") is True:
+            compact["mutation"] = "none"
+        if "next_action" in compact:
+            compact["next_action"] = (
+                "Create a separate rebaseline proposal; apply requires independent authorization."
+            )
+        return compact
     if command == "doctor" or command == "doctor.reviewer":
         compact = dict(data)
         checks = compact.get("checks")
@@ -475,10 +497,16 @@ def envelope(
 def changed_for(command: str, status: OutputStatus, data: Any) -> bool:
     if status in {OutputStatus.ERROR, OutputStatus.BLOCKED, OutputStatus.AUTHORIZATION_REQUIRED, OutputStatus.CANCELLED, OutputStatus.NOOP}:
         return False
-    if command in _READ_COMMANDS or command.endswith(".show") or command.endswith(".diagnose") or command.endswith(".remote-plan"):
+    if command in _READ_COMMANDS or command.endswith((".show", ".diagnose", ".remote-plan")):
         return False
     if command == "plan.amend" and isinstance(data, dict) and data.get("dry_run") is True:
         return False
+    if command == "plan.rebaseline.recover" and isinstance(data, dict):
+        # `changed` describes persistence performed by this invocation. An
+        # exact replay reports the recovered domain result but performs no write.
+        if data.get("idempotent_replay") is True:
+            return False
+        return data.get("changed") is True
     return True
 
 
