@@ -10,8 +10,7 @@ from .models import Phase, ReviewDecision, Workflow, WorkflowState
 from .reviews import validate_reviewer_result
 from .schema import schema_version
 from .state import load_state
-from .utils import load_json, safe_project_path, sha256_file
-from .utils import sha256_bytes
+from .utils import load_json, safe_project_path, sha256_bytes, sha256_file
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,7 +283,8 @@ def _validate_state_evolution(
             raise CwError("Semantic review history event is invalid", ErrorCode.PROTECTED_PATH_MODIFIED)
         expected_action = (
             "human_review_required"
-            if decision == ReviewDecision.HUMAN_REVIEW_REQUIRED.value or phase.requires_human_approval
+            if decision == ReviewDecision.HUMAN_REVIEW_REQUIRED.value
+            or (decision == ReviewDecision.APPROVE.value and phase.requires_human_approval)
             else "approved" if decision == ReviewDecision.APPROVE.value
             else "revision_required"
         )

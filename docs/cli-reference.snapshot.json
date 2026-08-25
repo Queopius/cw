@@ -192,6 +192,9 @@
         "--debug",
         "--dry-run",
         "--expand",
+        "--expected-prior-gate-ref",
+        "--expected-prior-gate-sha256",
+        "--expected-review-sha256",
         "--expected-state-sha256",
         "--expected-workflow-sha256",
         "--fields",
@@ -201,6 +204,7 @@
         "--limit",
         "--llm",
         "--no-color",
+        "--no-prior-gate",
         "--non-interactive",
         "--operation-id",
         "--output",
@@ -208,6 +212,7 @@
         "--proposal",
         "--quiet",
         "--reason",
+        "--review-ref",
         "--verbose",
         "--yes"
       ],
@@ -220,6 +225,13 @@
             "rebuild",
             "rebaseline",
             "amend"
+          ],
+          "required": false
+        },
+        {
+          "name": "rebaseline_action",
+          "choices": [
+            "recover"
           ],
           "required": false
         }

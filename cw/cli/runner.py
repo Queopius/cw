@@ -91,7 +91,7 @@ def _emit_protocol(payload: dict[str, object]) -> None:
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")), flush=True)
 
 
-def _debug(error: CwError, *, roots: tuple[object, ...] = ()) -> None:
+def _debug(error: CwError, *, roots: tuple[Path, ...] = ()) -> None:
     detail = sanitize_output(error.details or error.message, private_roots=roots)
     print(f"{error.code.value}: {detail}", file=sys.stderr, flush=True)
 
@@ -274,9 +274,9 @@ def _run_machine(
         else:
             data = {"events": records}
         data = sanitize_output(data, private_roots=(Path.cwd(), Path.home()))
+        operation_id = data.get("operation_id") if isinstance(data, dict) and isinstance(data.get("operation_id"), str) else None
         data, page, truncation_reason = prepare_data(identifier, data, args, mode)
         status = result_status(identifier, result, data)
-        operation_id = data.get("operation_id") if isinstance(data, dict) and isinstance(data.get("operation_id"), str) else None
         if mode is OutputMode.JSONL and len(records) > 1:
             for index, record in enumerate(records):
                 line_status = status if index == len(records) - 1 else OutputStatus.PARTIAL

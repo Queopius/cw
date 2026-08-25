@@ -4,6 +4,22 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+- Add explicit `cw plan rebaseline recover` preview/apply flows for a proven
+  `repair --reopen` state. Recovery requires the exact REVISE review digest,
+  workflow/state CAS values and an audit reason; it restores only
+  `REVISION_REQUIRED`, `last_review`, and the validated prior gate chain.
+- Persist append-only reopen/recovery receipts and a crash-recoverable,
+  backup-first recovery transaction. Reset both attempt counters on reopen and
+  reject ambiguous reviews, unsafe namespaces, active execution, stale CAS,
+  missing provenance, or a gate on the active phase.
+- Restrict the separate rebaseline proposal to monotonic changes in the active
+  phase contract. Earlier and future phases and the Completion Contract remain
+  byte-semantic equivalents; future planned artifacts may be absent only when
+  their canonical safe paths are covered by review paths.
+- Recommend Core `0.17.0` for the new public governed transition. Plugin
+  `0.1.0`, `cw.remote.v1`, project schema `1`, governance schema `2`, and
+  `cw.output.v1` remain unchanged.
+
 ## 0.16.0 — 2026-08-24
 
 - Add the closed, versioned `cw.output.v1` envelope and explicit
