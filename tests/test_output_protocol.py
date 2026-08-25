@@ -15,7 +15,12 @@ from cw.cli.main import main
 from cw.cli.parser import parse_args
 from cw.cli.runner import run
 from cw.core.errors import CwError, ErrorCode
-from cw.output_protocol import OUTPUT_SCHEMA, output_schema_document
+from cw.output_protocol import (
+    OUTPUT_SCHEMA,
+    OutputStatus,
+    changed_for,
+    output_schema_document,
+)
 from cw.ui.console import emit_json
 from tests.helpers import TempRepo
 
@@ -252,6 +257,10 @@ class OutputProtocolTests(unittest.TestCase):
         self.assertEqual("noop", payload["status"])
         self.assertFalse(payload["changed"])
         self.assertEqual("same-operation", payload["operation_id"])
+
+    def test_rebaseline_replay_projects_changed_false(self):
+        data = {"changed": True, "idempotent_replay": True, "status": "RECOVERED"}
+        self.assertFalse(changed_for("plan.rebaseline.recover", OutputStatus.SUCCESS, data))
 
     def test_authorization_gate_keeps_exact_head_and_base_identity(self):
         details = json.dumps({

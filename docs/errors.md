@@ -142,4 +142,7 @@ cw explain
 Use `cw retry` only when the diagnostic marks the operation retryable. Use
 `cw repair` for evidence-backed metadata reconciliation, and reserve
 `cw repair --reopen PHASE` for an intentional invalidation of that phase and its
-dependents.
+dependents. If that reopen follows a valid REVISE review, do not edit state:
+preview `cw plan rebaseline recover` with the exact review, review digest,
+workflow/state CAS values and reason. Missing provenance or any identity
+conflict fails closed.
