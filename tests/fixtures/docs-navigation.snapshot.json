@@ -1,0 +1,530 @@
+{
+  "schema_version": 1,
+  "top_level": [
+    "Home",
+    "Start Here",
+    "Using CW",
+    "Workflow & Governance",
+    "Operations & Recovery",
+    "Platform",
+    "Engineering Reference",
+    "Releases",
+    "Project"
+  ],
+  "documents": [
+    "acceptance/chatgpt-development-0.11.md",
+    "acceptance/chatgpt-plugin-0.12.md",
+    "acceptance/remote-gateway-0.13.md",
+    "acceptance/staging-bootstrap-0.14.md",
+    "adr/0001-multi-adapter-engine.md",
+    "adr/0002-mcp-transport.md",
+    "adr/0003-plugin-candidate.md",
+    "adr/0004-chatgpt-development-and-public-runtime.md",
+    "adr/0005-production-mcp-relay.md",
+    "adr/0006-gateway-agent-long-poll.md",
+    "adr/0007-remote-identity-provider.md",
+    "adr/0008-device-identity-pairing.md",
+    "adr/0009-remote-persistence.md",
+    "adr/0010-render-staging-hosting.md",
+    "adr/0011-plan-revision-identity.md",
+    "adr/0012-review-supersession.md",
+    "architecture.md",
+    "assets/brand/README.md",
+    "auth0-staging.md",
+    "batch-execution.md",
+    "chatgpt-development.md",
+    "cli-reference.md",
+    "completion-contracts.md",
+    "configuration.md",
+    "early-adopter-program.md",
+    "engineering-reference/index.md",
+    "errors.md",
+    "gates-and-reviews.md",
+    "getting-started.md",
+    "governance.md",
+    "index.md",
+    "integrations.md",
+    "live-execution.md",
+    "llm-output.md",
+    "mcp-runtime.md",
+    "mcp-tool-contract.md",
+    "operations-recovery/index.md",
+    "operations/agent-runbook.md",
+    "operations/backup-restore.md",
+    "operations/gateway-runbook.md",
+    "operations/incident-response.md",
+    "operations/key-rotation.md",
+    "operations/oauth-runbook.md",
+    "operations/plan-rebaseline-recovery.md",
+    "operations/staging-deploy.md",
+    "plan-revisions.md",
+    "planning.md",
+    "platform/index.md",
+    "plugin-app-candidate.md",
+    "plugin-auth.md",
+    "plugin-deployment.md",
+    "plugin-installation.md",
+    "plugin-listing-draft.md",
+    "plugin-privacy.md",
+    "plugin-production-readiness.md",
+    "plugin-readiness.md",
+    "plugin-security.md",
+    "plugin-submission.md",
+    "plugin-support.md",
+    "project-layout.md",
+    "project/index.md",
+    "release-process.md",
+    "releases/core-0.15.0.md",
+    "releases/core-0.15.1.md",
+    "releases/core-0.15.2.md",
+    "releases/core-0.16.0.md",
+    "releases/index.md",
+    "remote-agent.md",
+    "remote-auth.md",
+    "remote-gateway.md",
+    "remote-operations.md",
+    "remote-pairing.md",
+    "remote-privacy.md",
+    "remote-project-grants.md",
+    "remote-security.md",
+    "security.md",
+    "staging-environment.md",
+    "start-here/index.md",
+    "testing/platform-support.md",
+    "testing/windows-vm-acceptance.md",
+    "troubleshooting.md",
+    "updating.md",
+    "using-cw/index.md",
+    "versioning.md",
+    "workflow-governance/index.md",
+    "workflow.md"
+  ],
+  "navigation_paths": [
+    "acceptance/chatgpt-development-0.11.md",
+    "acceptance/chatgpt-plugin-0.12.md",
+    "acceptance/remote-gateway-0.13.md",
+    "acceptance/staging-bootstrap-0.14.md",
+    "adr/0001-multi-adapter-engine.md",
+    "adr/0002-mcp-transport.md",
+    "adr/0003-plugin-candidate.md",
+    "adr/0004-chatgpt-development-and-public-runtime.md",
+    "adr/0005-production-mcp-relay.md",
+    "adr/0006-gateway-agent-long-poll.md",
+    "adr/0007-remote-identity-provider.md",
+    "adr/0008-device-identity-pairing.md",
+    "adr/0009-remote-persistence.md",
+    "adr/0010-render-staging-hosting.md",
+    "adr/0011-plan-revision-identity.md",
+    "adr/0012-review-supersession.md",
+    "architecture.md",
+    "assets/brand/README.md",
+    "auth0-staging.md",
+    "batch-execution.md",
+    "chatgpt-development.md",
+    "cli-reference.md",
+    "completion-contracts.md",
+    "configuration.md",
+    "early-adopter-program.md",
+    "engineering-reference/index.md",
+    "errors.md",
+    "gates-and-reviews.md",
+    "getting-started.md",
+    "governance.md",
+    "index.md",
+    "integrations.md",
+    "live-execution.md",
+    "llm-output.md",
+    "mcp-runtime.md",
+    "mcp-tool-contract.md",
+    "operations-recovery/index.md",
+    "operations/agent-runbook.md",
+    "operations/backup-restore.md",
+    "operations/gateway-runbook.md",
+    "operations/incident-response.md",
+    "operations/key-rotation.md",
+    "operations/oauth-runbook.md",
+    "operations/plan-rebaseline-recovery.md",
+    "operations/staging-deploy.md",
+    "plan-revisions.md",
+    "planning.md",
+    "platform/index.md",
+    "plugin-app-candidate.md",
+    "plugin-auth.md",
+    "plugin-deployment.md",
+    "plugin-installation.md",
+    "plugin-listing-draft.md",
+    "plugin-privacy.md",
+    "plugin-production-readiness.md",
+    "plugin-readiness.md",
+    "plugin-security.md",
+    "plugin-submission.md",
+    "plugin-support.md",
+    "project-layout.md",
+    "project/index.md",
+    "release-process.md",
+    "releases/core-0.15.0.md",
+    "releases/core-0.15.1.md",
+    "releases/core-0.15.2.md",
+    "releases/core-0.16.0.md",
+    "releases/index.md",
+    "remote-agent.md",
+    "remote-auth.md",
+    "remote-gateway.md",
+    "remote-operations.md",
+    "remote-pairing.md",
+    "remote-privacy.md",
+    "remote-project-grants.md",
+    "remote-security.md",
+    "security.md",
+    "staging-environment.md",
+    "start-here/index.md",
+    "testing/platform-support.md",
+    "testing/windows-vm-acceptance.md",
+    "troubleshooting.md",
+    "updating.md",
+    "using-cw/index.md",
+    "versioning.md",
+    "workflow-governance/index.md",
+    "workflow.md"
+  ],
+  "nav": [
+    {
+      "Home": "index.md"
+    },
+    {
+      "Start Here": [
+        {
+          "Start Here": "start-here/index.md"
+        },
+        {
+          "Getting Started": "getting-started.md"
+        },
+        {
+          "Early Adopter Program": "early-adopter-program.md"
+        },
+        {
+          "Planning": "planning.md"
+        },
+        {
+          "Workflow": "workflow.md"
+        }
+      ]
+    },
+    {
+      "Using CW": [
+        {
+          "Using CW": "using-cw/index.md"
+        },
+        {
+          "CLI Reference": "cli-reference.md"
+        },
+        {
+          "Agent Output Protocol": "llm-output.md"
+        },
+        {
+          "Configuration": "configuration.md"
+        },
+        {
+          "Batch Execution": "batch-execution.md"
+        },
+        {
+          "Live Execution": "live-execution.md"
+        },
+        {
+          "Integrations": "integrations.md"
+        }
+      ]
+    },
+    {
+      "Workflow & Governance": [
+        {
+          "Workflow & Governance": "workflow-governance/index.md"
+        },
+        {
+          "Gates and Reviews": "gates-and-reviews.md"
+        },
+        {
+          "Plan Revisions": "plan-revisions.md"
+        },
+        {
+          "Plan Rebaseline Recovery": "operations/plan-rebaseline-recovery.md"
+        },
+        {
+          "Completion Contracts": "completion-contracts.md"
+        },
+        {
+          "Release Governance": "governance.md"
+        }
+      ]
+    },
+    {
+      "Operations & Recovery": [
+        {
+          "Operations & Recovery": "operations-recovery/index.md"
+        },
+        {
+          "Updating": "updating.md"
+        },
+        {
+          "Troubleshooting": "troubleshooting.md"
+        },
+        {
+          "Error Reference": "errors.md"
+        },
+        {
+          "Runbooks": [
+            {
+              "Staging Deployment": "operations/staging-deploy.md"
+            },
+            {
+              "Gateway": "operations/gateway-runbook.md"
+            },
+            {
+              "Local Agent": "operations/agent-runbook.md"
+            },
+            {
+              "OAuth": "operations/oauth-runbook.md"
+            },
+            {
+              "Incident Response": "operations/incident-response.md"
+            },
+            {
+              "Backup and Restore": "operations/backup-restore.md"
+            },
+            {
+              "Key Rotation": "operations/key-rotation.md"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "Platform": [
+        {
+          "Platform": "platform/index.md"
+        },
+        {
+          "MCP": [
+            {
+              "Runtime": "mcp-runtime.md"
+            },
+            {
+              "Tool Contract": "mcp-tool-contract.md"
+            }
+          ]
+        },
+        {
+          "Plugin": [
+            {
+              "Readiness": "plugin-readiness.md"
+            },
+            {
+              "App Candidate": "plugin-app-candidate.md"
+            },
+            {
+              "Installation": "plugin-installation.md"
+            },
+            {
+              "Production Readiness": "plugin-production-readiness.md"
+            },
+            {
+              "Authentication": "plugin-auth.md"
+            },
+            {
+              "Deployment": "plugin-deployment.md"
+            },
+            {
+              "Submission": "plugin-submission.md"
+            },
+            {
+              "ChatGPT Development": "chatgpt-development.md"
+            }
+          ]
+        },
+        {
+          "Plugin Publication & Support": [
+            {
+              "Listing Draft": "plugin-listing-draft.md"
+            },
+            {
+              "Privacy": "plugin-privacy.md"
+            },
+            {
+              "Support": "plugin-support.md"
+            },
+            {
+              "Security Review": "plugin-security.md"
+            }
+          ]
+        },
+        {
+          "Remote": [
+            {
+              "Gateway": "remote-gateway.md"
+            },
+            {
+              "Agent": "remote-agent.md"
+            },
+            {
+              "Authentication": "remote-auth.md"
+            },
+            {
+              "Pairing": "remote-pairing.md"
+            },
+            {
+              "Project Grants": "remote-project-grants.md"
+            },
+            {
+              "Security": "remote-security.md"
+            },
+            {
+              "Privacy": "remote-privacy.md"
+            },
+            {
+              "Operations": "remote-operations.md"
+            }
+          ]
+        },
+        {
+          "Staging": [
+            {
+              "Environment": "staging-environment.md"
+            },
+            {
+              "Auth0": "auth0-staging.md"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "Engineering Reference": [
+        {
+          "Engineering Reference": "engineering-reference/index.md"
+        },
+        {
+          "Architecture & Layout": [
+            {
+              "Architecture": "architecture.md"
+            },
+            {
+              "Project Layout": "project-layout.md"
+            }
+          ]
+        },
+        {
+          "Security": "security.md"
+        },
+        {
+          "Platform Support": [
+            {
+              "Platform Support": "testing/platform-support.md"
+            },
+            {
+              "Windows Acceptance": "testing/windows-vm-acceptance.md"
+            }
+          ]
+        },
+        {
+          "Versioning": [
+            {
+              "Versioning": "versioning.md"
+            },
+            {
+              "Release Process": "release-process.md"
+            }
+          ]
+        },
+        {
+          "Core Architecture Decisions": [
+            {
+              "ADR 0001 — Multi-adapter Engine": "adr/0001-multi-adapter-engine.md"
+            },
+            {
+              "ADR 0002 — MCP Transport": "adr/0002-mcp-transport.md"
+            },
+            {
+              "ADR 0011 — Plan Revision Identity": "adr/0011-plan-revision-identity.md"
+            },
+            {
+              "ADR 0012 — Review Supersession": "adr/0012-review-supersession.md"
+            }
+          ]
+        },
+        {
+          "Platform Architecture Decisions": [
+            {
+              "ADR 0003 — Plugin Candidate": "adr/0003-plugin-candidate.md"
+            },
+            {
+              "ADR 0004 — ChatGPT Development": "adr/0004-chatgpt-development-and-public-runtime.md"
+            },
+            {
+              "ADR 0005 — Production MCP Relay": "adr/0005-production-mcp-relay.md"
+            },
+            {
+              "ADR 0006 — Gateway Agent Transport": "adr/0006-gateway-agent-long-poll.md"
+            },
+            {
+              "ADR 0007 — Remote Identity Provider": "adr/0007-remote-identity-provider.md"
+            },
+            {
+              "ADR 0008 — Device Identity and Pairing": "adr/0008-device-identity-pairing.md"
+            },
+            {
+              "ADR 0009 — Remote Persistence": "adr/0009-remote-persistence.md"
+            },
+            {
+              "ADR 0010 — Render Staging Hosting": "adr/0010-render-staging-hosting.md"
+            }
+          ]
+        },
+        {
+          "Acceptance Evidence": [
+            {
+              "ChatGPT Development 0.11": "acceptance/chatgpt-development-0.11.md"
+            },
+            {
+              "ChatGPT Plugin 0.12": "acceptance/chatgpt-plugin-0.12.md"
+            },
+            {
+              "Remote Gateway 0.13": "acceptance/remote-gateway-0.13.md"
+            },
+            {
+              "Staging Bootstrap 0.14": "acceptance/staging-bootstrap-0.14.md"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "Releases": [
+        {
+          "Releases": "releases/index.md"
+        },
+        {
+          "Latest — Core 0.16.0": "releases/core-0.16.0.md"
+        },
+        {
+          "Core 0.15.2": "releases/core-0.15.2.md"
+        },
+        {
+          "Core 0.15.1": "releases/core-0.15.1.md"
+        },
+        {
+          "Core 0.15.0": "releases/core-0.15.0.md"
+        }
+      ]
+    },
+    {
+      "Project": [
+        {
+          "Project": "project/index.md"
+        },
+        {
+          "Brand Assets": "assets/brand/README.md"
+        }
+      ]
+    }
+  ]
+}
