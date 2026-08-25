@@ -10,7 +10,7 @@ from urllib.parse import urlparse, urlunparse
 
 from .errors import RemoteError, RemoteErrorCode
 from .persistence import RemoteStore
-from .protocol import RemoteIdentity, all_remote_scopes
+from .protocol import RemoteIdentity, all_https_read_only_scopes, all_remote_scopes
 
 
 _identity_context: contextvars.ContextVar[RemoteIdentity | None] = contextvars.ContextVar(
@@ -303,11 +303,15 @@ class OAuthResourceMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
-def protected_resource_metadata(config: OAuthResourceConfig) -> dict[str, Any]:
+def protected_resource_metadata(
+    config: OAuthResourceConfig, *, read_only_https: bool = False,
+) -> dict[str, Any]:
     return {
         "resource": config.resource,
         "authorization_servers": [config.issuer],
-        "scopes_supported": list(all_remote_scopes()),
+        "scopes_supported": list(
+            all_https_read_only_scopes() if read_only_https else all_remote_scopes()
+        ),
         "resource_documentation": config.documentation_url or config.resource + "/docs/remote-auth",
         "bearer_methods_supported": ["header"],
     }

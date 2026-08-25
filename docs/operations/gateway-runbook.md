@@ -3,7 +3,8 @@
 ## Diagnose
 
 - `/healthz` proves the process answers.
-- `/readyz` proves schema v1 is readable and reports sanitized build identity.
+- `/readyz` proves the required store schema is readable and reports only the
+  sanitized HTTPS read-only profile and its six-tool count.
 - `401` plus `WWW-Authenticate` is expected without a bearer token.
 - `AGENT_OFFLINE` means authentication and project grant succeeded but the
   paired local agent is unavailable.

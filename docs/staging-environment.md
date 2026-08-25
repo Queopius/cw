@@ -49,8 +49,9 @@ contract and `render.yaml`. All values must be positive.
 
 Startup fails closed when a required value is absent, a URL is not HTTPS, the
 database path is relative, the build SHA is not exact, or a limit is invalid.
-`/healthz` and `/readyz` expose only service, version, protocol, environment,
-schema, and build SHA—never issuer details, host internals, paths, or secrets.
+`/healthz` exposes liveness only. `/readyz` exposes only service, sanitized
+read-profile readiness, and tool count. Version, protocol, environment,
+schema, build SHA, issuer details, host internals, paths, and secrets are omitted.
 
 The current gateway secret set is empty. Provider credentials used by a human
 to manage Render, Auth0, or DNS stay in those provider control planes.

@@ -35,6 +35,13 @@ def validate_gateway_url(value: str) -> str:
         raise ValueError("Remote gateway URL must not contain user information")
     if not parsed.hostname:
         raise ValueError("Remote gateway URL must contain a hostname")
+    hostname = parsed.hostname
+    if hostname.endswith("."):
+        raise ValueError("Remote gateway hostname must not use a trailing dot")
+    try:
+        hostname.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError("Remote gateway hostname must use its canonical ASCII form") from exc
     try:
         parsed.port
     except ValueError as exc:
@@ -43,13 +50,24 @@ def validate_gateway_url(value: str) -> str:
         raise ValueError("Remote gateway URL must be an origin without path, query, or fragment")
     if parsed.scheme == "http":
         try:
-            address = ipaddress.ip_address(parsed.hostname)
+            address = ipaddress.ip_address(hostname)
         except ValueError as exc:
             raise ValueError("Plain HTTP is allowed only for an exact loopback IP address") from exc
         if address not in {ipaddress.ip_address("127.0.0.1"), ipaddress.ip_address("::1")}:
             raise ValueError("Remote gateway must use HTTPS outside loopback development")
     elif parsed.scheme != "https":
         raise ValueError("Remote gateway must use HTTPS outside loopback development")
+    else:
+        try:
+            address = ipaddress.ip_address(hostname)
+        except ValueError:
+            # Numeric-looking hostnames are ambiguous across URL stacks and
+            # must not be interpreted as alternate IPv4 encodings.
+            if all(character in "0123456789.xXaAbBcCdDeEfF" for character in hostname):
+                raise ValueError("Remote gateway hostname is an ambiguous IP encoding")
+        else:
+            if not address.is_global:
+                raise ValueError("HTTPS gateway IP literals must be globally routable")
     return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
 
 
@@ -264,7 +282,9 @@ class HTTPAgentClient:
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("CW Remote requires codex-workflow[remote]") from exc
         delay = 0.25
-        async with httpx.AsyncClient(timeout=self.poll_seconds + 5, follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            timeout=self.poll_seconds + 5, follow_redirects=False, trust_env=False,
+        ) as client:
             while not stop.is_set():
                 try:
                     request = await self._poll(client)
@@ -330,7 +350,7 @@ async def request_pairing(
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("CW Remote requires codex-workflow[remote]") from exc
     gateway_origin = validate_gateway_url(gateway_url)
-    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False) as client:
         response = await client.post(gateway_origin + "/remote/v1/pairing/request", json={
             "device_id": credential.device_id,
             "public_key": credential.public_key,
@@ -357,7 +377,7 @@ async def register_project_grant(
         "display_name": canonical.name,
         "protocol_version": "cw.remote.v1",
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False) as client:
         response = await client.post(
             gateway_origin + path,
             content=body,

@@ -19,6 +19,7 @@ from .protocol import (
     RemoteIdentity,
     RemoteRequest,
     RemoteResponse,
+    https_read_only_tool_contract,
     required_scope,
 )
 
@@ -34,6 +35,8 @@ class GatewayLimits:
     operation_timeout_seconds: float = 30.0
     agent_idle_seconds: float = 45.0
     completed_response_cache_size: int = 1024
+    concurrent_http_requests: int = 32
+    http_queue_timeout_seconds: float = 1.0
 
     def __post_init__(self) -> None:
         if min(
@@ -44,7 +47,12 @@ class GatewayLimits:
             self.maximum_request_bytes,
             self.maximum_agent_message_bytes,
             self.completed_response_cache_size,
-        ) <= 0 or self.operation_timeout_seconds <= 0 or self.agent_idle_seconds <= 0:
+            self.concurrent_http_requests,
+        ) <= 0 or min(
+            self.operation_timeout_seconds,
+            self.agent_idle_seconds,
+            self.http_queue_timeout_seconds,
+        ) <= 0:
             raise ValueError("Gateway limits must be positive")
 
 
@@ -308,6 +316,27 @@ class RemoteRouter:
                 details={"operation_id": operation_id},
             ) from exc
         return self._public_response(response, replay=not created_record)
+
+    async def dispatch_https_read_only(
+        self, identity: RemoteIdentity, *, project_handle: str, tool: str,
+        arguments: Mapping[str, Any], request_id: str | None = None,
+        operation_id: str | None = None, timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        """Dispatch only the fixed public HTTPS read profile.
+
+        This check is deliberately below MCP discovery so an unlisted direct
+        call, alias, or manipulated tool name cannot reach the general router.
+        """
+        https_read_only_tool_contract(tool)
+        return await self.dispatch(
+            identity,
+            project_handle=project_handle,
+            tool=tool,
+            arguments=arguments,
+            request_id=request_id,
+            operation_id=operation_id,
+            timeout_seconds=timeout_seconds,
+        )
 
     async def accept_response(self, device_id: str, response: RemoteResponse) -> None:
         response.validate()

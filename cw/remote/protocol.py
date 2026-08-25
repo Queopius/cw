@@ -45,6 +45,7 @@ REMOTE_CONTROLLED_TOOLS = frozenset(
     in {CapabilityClass.READ, CapabilityClass.EXECUTION, CapabilityClass.CONTROLLED_STATE_MUTATION}
 )
 REMOTE_TOOLS = REMOTE_READ_TOOLS | REMOTE_CONTROLLED_TOOLS
+HTTPS_READ_ONLY_TOOLS = REMOTE_READ_TOOLS
 
 
 def tool_contract(name: str) -> ToolContract:
@@ -75,6 +76,24 @@ def tool_contract(name: str) -> ToolContract:
     return contract
 
 
+def https_read_only_tool_contract(name: str) -> ToolContract:
+    """Resolve a tool through the immutable HTTPS read-only allowlist."""
+    if name not in HTTPS_READ_ONLY_TOOLS:
+        raise RemoteError(
+            RemoteErrorCode.AUTHORIZATION_REQUIRED,
+            "The MCP HTTPS read-only profile does not expose that operation",
+            http_status=403,
+        )
+    contract = tool_contract(name)
+    if contract.mutation:
+        raise RemoteError(
+            RemoteErrorCode.AUTHORIZATION_REQUIRED,
+            "The MCP HTTPS read-only profile cannot dispatch mutations",
+            http_status=403,
+        )
+    return contract
+
+
 def required_scope(name: str) -> str:
     contract = tool_contract(name)
     try:
@@ -89,6 +108,10 @@ def required_scope(name: str) -> str:
 
 def all_remote_scopes() -> tuple[str, ...]:
     return tuple(sorted({required_scope(name) for name in REMOTE_TOOLS}))
+
+
+def all_https_read_only_scopes() -> tuple[str, ...]:
+    return tuple(sorted({required_scope(name) for name in HTTPS_READ_ONLY_TOOLS}))
 
 
 def canonical_digest(tool: str, arguments: Mapping[str, Any]) -> str:

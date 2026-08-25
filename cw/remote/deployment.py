@@ -139,6 +139,8 @@ class GatewayDeploymentConfig:
             operation_timeout_seconds=_positive_float(values, "CW_LIMIT_OPERATION_TIMEOUT_SECONDS", 30.0),
             agent_idle_seconds=_positive_float(values, "CW_LIMIT_AGENT_IDLE_SECONDS", 45.0),
             completed_response_cache_size=_positive_int(values, "CW_LIMIT_COMPLETED_CACHE", 1024),
+            concurrent_http_requests=_positive_int(values, "CW_LIMIT_CONCURRENT_HTTP", 32),
+            http_queue_timeout_seconds=_positive_float(values, "CW_LIMIT_HTTP_QUEUE_TIMEOUT_SECONDS", 1.0),
         )
         return cls(
             environment=deployment_environment,
