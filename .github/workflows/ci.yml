@@ -73,7 +73,7 @@ jobs:
             --stable-archive "$public_dir/cw-0.14.1-linux-x86_64.tar.gz" \
             --stable-archive-sha256 14e8a49e94117c9a3a5e179947c4d7208c778c1bd1e65a7074008012b776104e \
             --candidate-manifest dist/cw-release-manifest.json \
-            --candidate-archive dist/cw-0.16.0-linux-x86_64.tar.gz \
+            --candidate-archive dist/cw-0.17.0-linux-x86_64.tar.gz \
             --candidate-commit "$GITHUB_SHA"
       - name: Verify installed wheel
         run: |
