@@ -1,0 +1,77 @@
+name: Feature request
+description: Propose a focused improvement to CW or its documentation.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a concrete problem or workflow improvement.
+        Do not include secrets, credentials, personal data, or proprietary source code.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched the existing issues for a similar request.
+          required: true
+        - label: This request contains no secrets, credentials, personal data, or proprietary code.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the concrete workflow problem or friction you encountered.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the result you need without prescribing an implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_workaround
+    attributes:
+      label: Current workaround
+      description: Explain how you handle the problem today, if applicable.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Installation or update
+        - Planning
+        - Validation
+        - Independent review
+        - Gates or completion
+        - Diagnostics or recovery
+        - CLI output or --llm
+        - Documentation
+        - MCP integration
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Supporting evidence
+      description: Add sanitized commands, output, timing, or examples that show the impact.
+
+  - type: dropdown
+    id: participation
+    attributes:
+      label: Early Adopter Program
+      description: Are you reporting this from an invited Early Adopter pilot?
+      options:
+        - "Yes"
+        - "No"
+        - Prefer not to say
+    validations:
+      required: true
