@@ -16,6 +16,7 @@ from scripts.run_acceptance import (
     _result,
     _run,
     _safe_regular_text,
+    _text_traceback_frames,
     _validate_report,
     _write_diagnostic,
 )
@@ -24,8 +25,8 @@ from scripts.run_acceptance import (
 class AcceptanceHarnessTests(unittest.TestCase):
     canaries = ("GOAL_PRIVATE_CANARY", "GOAL_«quoted»\n秘密", "TOKEN_PRIVATE_CANARY", "C:/Users/RunnerPrivate/checkout", r"\\server\private\fixture", "/home/runner-private/project", "runner-private@example.invalid", "STDERR_PRIVATE_CANARY")
 
-    def _failure(self, root: Path) -> AcceptanceFailure:
-        return AcceptanceFailure("raw failure", stage="plan.create", executable="cw", command_name="plan", exit_code=1, executable_path="cw", cwd=root, environment={"PRIVATE_ENV": self.canaries[2]})
+    def _failure(self, root: Path, correlation: str = "corr_123") -> AcceptanceFailure:
+        return AcceptanceFailure("raw failure", stage="plan.create", executable="cw", command_name="plan", exit_code=1, executable_path="cw", cwd=root, environment={"PRIVATE_ENV": self.canaries[2]}, envelope_code="INTERNAL_ERROR", envelope_correlation=correlation, error_fingerprint="before")
 
     def _record(self, correlation: str) -> dict[str, object]:
         return {"correlation_id": correlation, "code": "INTERNAL_ERROR", "message": self.canaries[1], "exception_type": "ValueError", "traceback": [{"path": r"C:\host\site-packages\cw\cli\runner.py", "function": "run", "line": 73, "exception_type": "ValueError", "message": self.canaries[2]}]}
@@ -71,9 +72,9 @@ class AcceptanceHarnessTests(unittest.TestCase):
             root = Path(temporary); logs = root / ".cw/logs"; logs.mkdir(parents=True)
             logs.joinpath("errors.jsonl").write_text(json.dumps(self._record("old_corr")) + "\n" + json.dumps(self._record("corr_456")) + "\n", encoding="utf-8")
             with patch("scripts.run_acceptance.subprocess.run", return_value=self._cw_error("corr_456")):
-                self.assertEqual("captured", _capture_cw_diagnostic(self._failure(root))["diagnostic_status"])
+                self.assertEqual("captured", _capture_cw_diagnostic(self._failure(root, "corr_456"))["diagnostic_status"])
             with patch("scripts.run_acceptance.subprocess.run", return_value=self._cw_error("different_corr")):
-                self.assertEqual("unavailable", _capture_cw_diagnostic(self._failure(root))["diagnostic_status"])
+                self.assertEqual("unavailable", _capture_cw_diagnostic(self._failure(root, "different_corr"))["diagnostic_status"])
 
     def test_corrupt_oversized_symlink_and_hardlink_records_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -111,6 +112,19 @@ class AcceptanceHarnessTests(unittest.TestCase):
             _run(["cw", "retry"], cwd=Path(temporary), environment={}, timeout=17, diagnostic_stage="reviewer.retry", diagnostic_executable="cw", diagnostic_command="retry")
         self.assertTrue(raised.exception.timed_out)
         self.assertEqual("reviewer.retry", raised.exception.stage)
+
+    def test_text_traceback_allows_only_relative_cw_frames_on_windows_and_posix(self):
+        trace = ('Traceback (most recent call last):\n'
+                 '  File "C:\\Users\\RUNNER~1\\site-packages\\cw\\cli\\runner.py", line 71, in run\n'
+                 '    private source\n'
+                 '  File "/home/runner/site-packages/cw/checks/verification.py", line 19, in execute\n'
+                 '    private source\n'
+                 '  File "/outside/private.py", line 1, in leak\n'
+                 'ValueError: private message')
+        frames = _text_traceback_frames(trace, "ValueError")
+        self.assertEqual(["cw/cli/runner.py", "cw/checks/verification.py"], [frame["module"] for frame in frames])
+        self.assertNotIn("private", json.dumps(frames))
+        self.assertEqual([], _text_traceback_frames('File "/outside/private.py", line 1, in leak', "ValueError"))
 
 
 if __name__ == "__main__":

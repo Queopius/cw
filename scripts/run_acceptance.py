@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import platform
@@ -47,6 +48,9 @@ class AcceptanceFailure(RuntimeError):
         cwd: Path | None = None,
         environment: dict[str, str] | None = None,
         timed_out: bool = False,
+        envelope_code: str | None = None,
+        envelope_correlation: str | None = None,
+        error_fingerprint: str | None = None,
     ) -> None:
         super().__init__(message)
         self.stage = stage
@@ -57,6 +61,9 @@ class AcceptanceFailure(RuntimeError):
         self.cwd = cwd
         self.environment = environment or {}
         self.timed_out = timed_out
+        self.envelope_code = envelope_code
+        self.envelope_correlation = envelope_correlation
+        self.error_fingerprint = error_fingerprint
 
 
 def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str:
@@ -135,6 +142,21 @@ def _safe_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _safe_fingerprint(path: Path) -> str | None:
+    text = _safe_regular_text(path)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest() if text is not None else None
+
+
+def _failure_envelope(stdout: str) -> tuple[str | None, str | None]:
+    """Read only code and correlation from one in-memory CW JSON envelope."""
+    payload = _json_payload(stdout)
+    if not isinstance(payload, dict):
+        return None, None
+    code = payload.get("code")
+    correlation = _correlation_id(payload)
+    return (code if isinstance(code, str) and _SAFE_IDENTIFIER.fullmatch(code) else None, correlation)
+
+
 def _json_payload(text: str) -> dict[str, Any] | None:
     try:
         payload = json.loads(text)
@@ -188,15 +210,38 @@ def _safe_frame(value: Any) -> dict[str, Any] | None:
             "exception_type": exception_type, "message": _safe_message(value.get("message"))}
 
 
-def _record_diagnostic(record: dict[str, Any], correlation: str) -> dict[str, Any] | None:
-    if _correlation_id(record) != correlation:
-        return None
+def _text_traceback_frames(value: Any, exception_type: str | None) -> list[dict[str, Any]]:
+    """Parse Python traceback metadata only; source and exception text never escape."""
+    if not isinstance(value, str):
+        return []
+    frames: list[dict[str, Any]] = []
+    pattern = re.compile(r'^\s*File "(?P<path>[^"]+)", line (?P<line>\d+), in (?P<function>[A-Za-z_][A-Za-z0-9_]*)\s*$')
+    safe_type = exception_type if isinstance(exception_type, str) and _SAFE_IDENTIFIER.fullmatch(exception_type) else "Exception"
+    for line in value.splitlines():
+        match = pattern.match(line)
+        if match is None:
+            continue
+        module = _relative_cw_path(match.group("path"))
+        if module is not None:
+            frames.append({"module": module, "function": match.group("function"), "line": int(match.group("line")), "exception_type": safe_type, "message": _REDACTED_MESSAGE})
+    return frames[-12:]
+
+
+def _record_diagnostic(record: dict[str, Any], correlation: str, command: str) -> dict[str, Any] | None:
     payload = record.get("data") if isinstance(record.get("data"), dict) else record
-    error = payload.get("error") if isinstance(payload.get("error"), dict) else payload
+    nested_error = payload.get("error")
+    error: dict[str, Any] = nested_error if isinstance(nested_error, dict) else payload
     code = error.get("code")
+    message = error.get("message")
+    if not (isinstance(code, str) and isinstance(message, str)):
+        return None
+    expected = hashlib.sha256(f"{command}\0{code}\0{message}".encode()).hexdigest()[:16]
+    stored = _correlation_id(record)
+    if not hmac.compare_digest(correlation, expected) and stored != correlation:
+        return None
     error_type = error.get("exception_type") or error.get("type")
     frames = error.get("traceback") or error.get("frames") or []
-    safe_frames = [_safe_frame(frame) for frame in frames] if isinstance(frames, list) else []
+    safe_frames = [_safe_frame(frame) for frame in frames] if isinstance(frames, list) else _text_traceback_frames(frames, error_type)
     safe_frames = [frame for frame in safe_frames if frame is not None][:12]
     primary = safe_frames[-1] if safe_frames else None
     return {
@@ -206,7 +251,7 @@ def _record_diagnostic(record: dict[str, Any], correlation: str) -> dict[str, An
         "module": primary["module"] if primary else None,
         "function": primary["function"] if primary else None,
         "line": primary["line"] if primary else None,
-        "message": _safe_message(error.get("message")),
+        "message": _safe_message(message),
         "traceback": safe_frames,
     }
 
@@ -231,21 +276,14 @@ def _capture_cw_diagnostic(failure: AcceptanceFailure) -> dict[str, Any]:
     root = failure.cwd
     if failure.executable != "cw" or root is None or not (root / ".cw").is_dir() or not failure.executable_path:
         return unavailable
-    try:
-        completed = subprocess.run(
-            [failure.executable_path, "error", "--output=json"], cwd=root, env=failure.environment,
-            text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=15, check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return unavailable
-    correlation = _correlation_id(_json_payload(completed.stdout)) if completed.returncode == 0 else None
+    correlation = failure.envelope_correlation
     if correlation is None:
         return unavailable
     for source, record in (
         ("last_error", _safe_json(root / ".cw/logs/last-error.json")),
         ("errors_jsonl", _last_correlated_jsonl(root / ".cw/logs/errors.jsonl", correlation)),
     ):
-        if record is not None and (captured := _record_diagnostic(record, correlation)) is not None:
+        if record is not None and failure.error_fingerprint != _safe_fingerprint(root / ".cw/logs/last-error.json") and (captured := _record_diagnostic(record, correlation, failure.command_name)) is not None and (failure.envelope_code is None or captured["cw_error_code"] == failure.envelope_code):
             return {"diagnostic_status": "captured", "diagnostic_source": source, **captured}
     return unavailable
 
@@ -260,6 +298,7 @@ def _run(
             and diagnostic_executable in {"cw", "python", "git", "unknown"}
             and _SAFE_STAGE.fullmatch(diagnostic_command)):
         raise ValueError("diagnostic operation must use declared allowlisted identifiers")
+    before_error = _safe_fingerprint(cwd / ".cw/logs/last-error.json") if diagnostic_executable == "cw" else None
     try:
         completed = subprocess.run(
             command, cwd=cwd, env=environment, text=True, encoding="utf-8",
@@ -278,6 +317,7 @@ def _run(
             timed_out=True,
         ) from exc
     if completed.returncode not in expected:
+        code, correlation = _failure_envelope(completed.stdout) if diagnostic_executable == "cw" else (None, None)
         raise AcceptanceFailure(
             "Acceptance command failed.",
             stage=diagnostic_stage,
@@ -287,6 +327,9 @@ def _run(
             executable_path=command[0] if diagnostic_executable == "cw" and command else None,
             cwd=cwd,
             environment=environment,
+            envelope_code=code,
+            envelope_correlation=correlation,
+            error_fingerprint=before_error,
         )
     return completed
 
