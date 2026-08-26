@@ -20,6 +20,7 @@ from cw.checks.verification import (
     _cleanup_runtime,
     _git_metadata_snapshot,
     doctor_verification_runtime,
+    private_runtime_directory,
     validate_verification_receipt,
 )
 from cw.cli.main import main
@@ -411,6 +412,49 @@ class VerificationExecutorTests(unittest.TestCase):
         self.assertEqual("runtime_cleanup", diagnostic["phase"])
         self.assertEqual("runtime_cleanup", diagnostic["operation"])
         self.assertNotIn(str(self.repo.root), json.dumps(diagnostic))
+
+    def test_private_runtime_cleanup_retries_and_restores_namespace(self) -> None:
+        actual = __import__("shutil").rmtree
+        calls = 0
+
+        def transient(path, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise PermissionError("simulated Windows sharing violation")
+            return actual(path, *args, **kwargs)
+
+        with patch("cw.checks.verification.shutil.rmtree", side_effect=transient), private_runtime_directory(
+            self.repo.root, "reviewer"
+        ) as runtime:
+            (runtime / "result.json").write_text("{}", encoding="utf-8")
+
+        self.assertEqual(2, calls)
+        self.assertFalse(any((self.repo.root / ".cw/runtime").rglob("cw-reviewer-*")))
+
+    def test_private_runtime_cleanup_failure_is_classified_and_chains_primary(self) -> None:
+        primary = CwError("reviewer output invalid", ErrorCode.REVIEWER_INVALID_OUTPUT)
+        cleanup = CwError(
+            "Verification runtime cleanup failed",
+            ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR,
+            "Run: cw retry",
+            details="[redacted]",
+        )
+        with patch("cw.checks.verification._cleanup_runtime", side_effect=cleanup), self.assertRaises(
+            CwError
+        ) as raised, private_runtime_directory(self.repo.root, "reviewer"):
+            raise primary
+
+        self.assertIs(cleanup, raised.exception)
+        self.assertEqual(ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR, raised.exception.code)
+        self.assertIs(primary, raised.exception.__cause__)
+
+    def test_governed_runtime_context_uses_only_the_canonical_cleanup_primitive(self) -> None:
+        import inspect
+
+        source = inspect.getsource(private_runtime_directory)
+        self.assertIn("_cleanup_runtime(runtime)", source)
+        self.assertNotIn("shutil.rmtree", source)
 
     def test_git_snapshot_requests_absolute_paths_from_the_bound_root(self) -> None:
         observed: list[list[str]] = []

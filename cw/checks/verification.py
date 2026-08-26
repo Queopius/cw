@@ -129,9 +129,21 @@ def _runtime_environment(runtime: Path) -> dict[str, str]:
 
 
 def _cleanup_runtime(
-    runtime: Path, *, retries: int = 3, sleeper: Any = time.sleep
+    runtime: Path,
+    *,
+    retries: int = 3,
+    timeout_seconds: float = 0.25,
+    sleeper: Any = time.sleep,
+    clock: Any = time.monotonic,
 ) -> None:
-    """Remove a private runtime with bounded, fail-closed sharing retries."""
+    """Remove a governed private runtime with bounded, fail-closed retries.
+
+    This is the only deletion primitive for reviewer/verification runtimes.
+    Callers must have stopped their child process groups and closed pipes before
+    entering it; a failure here is infrastructure failure, never advisory
+    cleanup.  The injected clock and sleeper keep Windows sharing failures
+    deterministic under test.
+    """
 
     def remove_readonly(function: Any, path: str, exception: tuple[Any, Any, Any]) -> None:
         error = exception[1]
@@ -141,14 +153,16 @@ def _cleanup_runtime(
         function(path)
 
     delay = 0.02
-    last_error: PermissionError | None = None
+    deadline = clock() + timeout_seconds
+    last_error: OSError | None = None
     for attempt in range(retries):
         try:
             shutil.rmtree(runtime, onerror=remove_readonly)
             return
-        except PermissionError as exc:
+        except OSError as exc:
             last_error = exc
-            if attempt + 1 < retries:
+            transient = isinstance(exc, PermissionError)
+            if transient and attempt + 1 < retries and clock() + delay <= deadline:
                 sleeper(delay)
                 delay *= 2
     raise CwError(
@@ -370,24 +384,46 @@ def private_runtime_directory(root: Path, namespace: str):
     }
     parent = _runtime_parent(root, namespace, allow_uninitialized=True)
     runtime = Path(tempfile.mkdtemp(prefix=f"cw-{namespace}-", dir=parent))
+    primary_error: BaseException | None = None
     try:
         os.chmod(runtime, 0o700)
         _safe_runtime(runtime)
         yield runtime
+    except BaseException as exc:
+        primary_error = exc
+        raise
     finally:
-        shutil.rmtree(runtime, ignore_errors=False)
+        cleanup_error: CwError | None = None
         try:
-            parent.rmdir()
-        except OSError:
-            pass
-        for path in reversed(paths):
-            if path not in original:
-                try:
-                    path.rmdir()
-                except OSError:
-                    pass
-            elif path.exists():
-                os.utime(path, ns=original[path], follow_symlinks=False)
+            _cleanup_runtime(runtime)
+            try:
+                parent.rmdir()
+            except OSError:
+                pass
+            for path in reversed(paths):
+                if path not in original:
+                    try:
+                        path.rmdir()
+                    except OSError:
+                        pass
+                elif path.exists():
+                    os.utime(path, ns=original[path], follow_symlinks=False)
+        except OSError as exc:
+            cleanup_error = CwError(
+                "Verification runtime namespace cleanup failed",
+                ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR,
+                "Run: cw retry",
+                details=redact(str(exc)),
+            )
+        except CwError as exc:
+            cleanup_error = exc
+        if cleanup_error is not None:
+            # A runtime that cannot be removed cannot safely preserve a
+            # seemingly valid adapter/reviewer result. Keep the original
+            # failure as the chained cause, never as an unclassified escape.
+            if primary_error is not None:
+                raise cleanup_error from primary_error
+            raise cleanup_error
 
 
 def validate_verification_receipt(
