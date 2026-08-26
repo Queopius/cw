@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from cw.core.completion import contract_payload, latest_completion_review, load_extension_proposal
+from cw.core.completion import (
+    contract_payload,
+    latest_completion_review,
+    load_extension_proposal,
+)
 from cw.core.errors import CwError, ErrorCode
 from cw.core.models import WorkflowState
 from cw.core.progress import derive_effective_workflow_state
@@ -13,7 +18,6 @@ from cw.core.session import process_is_alive
 from cw.execution.processes import ProcessInspector
 from cw.execution.runs import load_active_run
 from cw.execution.session import load_batch
-
 
 ContextLoader = Callable[[Path], tuple[Any, dict[str, Any], Any]]
 
@@ -81,7 +85,11 @@ def project_status(root: Path, context: ContextLoader) -> dict[str, Any]:
             proposal = load_extension_proposal(root, state, workflow)
         except CwError:
             proposal = None
-    from cw.core.revisions import active_revision, supersession_index, validation_attempts
+    from cw.core.revisions import (
+        active_revision,
+        supersession_index,
+        validation_attempts,
+    )
 
     active_revision_id, active_revision_sha256 = active_revision(root, state, workflow) if workflow.phases else (None, None)
     supersessions = supersession_index(root) if workflow.phases else {}
@@ -131,7 +139,8 @@ def project_status(root: Path, context: ContextLoader) -> dict[str, Any]:
             and isinstance(event.get("attempt"), int)
         ],
         "rebaseline": {
-            "allowed": state.get("status") == WorkflowState.REVISION_REQUIRED.value and not gates.get(current, False),
+            "allowed": state.get("status") == WorkflowState.REVISION_REQUIRED.value
+            and not (gates.get(str(current), False) if current else False),
             "pending": state.get("pending_rebaseline"),
             "completed": bool(supersessions),
         },
@@ -166,13 +175,23 @@ def project_status(root: Path, context: ContextLoader) -> dict[str, Any]:
 
 
 def explain_status(data: dict[str, Any]) -> dict[str, Any]:
+    infrastructure = data.get("infrastructure_error")
+    retry_metadata = infrastructure if isinstance(infrastructure, dict) else {}
+    retryable = retry_metadata.get("retryable") is True
     return {
         "consistent": data.get("consistent", True),
         "current_phase": data.get("phase"),
         "expected_phase": data.get("expected_phase"),
         "approved_through": data.get("approved_through"),
         "issues": data.get("consistency_issues", []),
-        "recovery": "cw repair" if not data.get("consistent", True) else None,
+        "recovery": "cw repair" if not data.get("consistent", True) else "cw retry" if retryable else None,
+        "classification": retry_metadata.get("error_code") if retryable else None,
+        "failed_operation": retry_metadata.get("operation") if retryable else None,
+        "retryable": retryable,
+        "readiness_available": data.get("ready", False),
+        "semantic_attempt": data.get("attempt", 0),
+        "revision_attempt": data.get("revision_attempt", 0),
+        "reason": data.get("last_error") if retryable else None,
         "planned_scope_complete": data.get("planned_scope_complete", False),
         "completion_mode": data.get("completion_mode"),
         "completion_target": data.get("completion_target"),

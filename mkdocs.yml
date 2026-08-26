@@ -53,6 +53,7 @@ nav:
   - Workflow & Governance:
       - Workflow & Governance: workflow-governance/index.md
       - Gates and Reviews: gates-and-reviews.md
+      - Reviewer Infrastructure: reviewer-infrastructure.md
       - Plan Revisions: plan-revisions.md
       - Plan Rebaseline Recovery: operations/plan-rebaseline-recovery.md
       - Completion Contracts: completion-contracts.md

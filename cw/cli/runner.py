@@ -13,10 +13,6 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from cw.core.errors import CwError, ErrorCode
-from cw.ui.console import Console, emit_json, error_summary
-from cw.ui.renderers import render_help
-from cw.ui.renderers import render_update_notice
-from cw.update.service import automatic_update_notice
 from cw.output_protocol import (
     OutputMode,
     OutputStatus,
@@ -30,13 +26,19 @@ from cw.output_protocol import (
     sanitize_output,
     validate_machine_options,
 )
-
+from cw.ui.console import Console, emit_json, error_summary
+from cw.ui.renderers import render_help, render_update_notice
+from cw.update.service import automatic_update_notice
 
 Command = Callable[[argparse.Namespace, Console], int]
 ErrorRecorder = Callable[..., None]
 
 
 _RETRYABLE_ERRORS = frozenset({
+    ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR,
+    ErrorCode.VERIFICATION_TIMEOUT,
+    ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR,
+    ErrorCode.REVIEWER_INVALID_OUTPUT,
     ErrorCode.REVIEWER_NETWORK_ERROR,
     ErrorCode.REVIEWER_PROCESS_ERROR,
     ErrorCode.PLANNER_NETWORK_ERROR,

@@ -5,45 +5,51 @@ import json
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from cw import __version__
-from cw.application.status import git_branch as application_git_branch
-from cw.application.status import explain_status as application_explain_status
-from cw.application.status import project_status as application_project_status
-from cw.application.facade import CWApplication
 from cw.adapters.codex import CodexAdapter
 from cw.adapters.invocation import latest_invocation
 from cw.adapters.structured_output import codex_schema
+from cw.application.facade import CWApplication
+from cw.application.status import explain_status as application_explain_status
+from cw.application.status import git_branch as application_git_branch
+from cw.application.status import project_status as application_project_status
 from cw.checks.deterministic import load_readiness
 from cw.core.audit import audit_history
-from cw.core.diagnostics import legacy_diagnostic, load_diagnostic, load_global_diagnostic, raw_diagnostic
+from cw.core.diagnostics import (
+    legacy_diagnostic,
+    load_diagnostic,
+    load_global_diagnostic,
+    raw_diagnostic,
+)
 from cw.core.errors import CwError, ErrorCode
-from cw.core.gates import gate_path, validate_gate
+from cw.core.gates import validate_gate
 from cw.core.integrity import snapshot_protected_paths
 from cw.core.progress import derive_effective_workflow_state
 from cw.core.schema import SCHEMA_VERSION
 from cw.core.session import load_session, process_is_alive, readiness_path
 from cw.core.utils import load_json
-from cw.update.config import load_update_settings
-from cw.update.installation import ManagedInstallation
+from cw.execution.processes import ProcessInspector
+from cw.execution.runs import latest_run, load_active_run, load_run, load_run_events
 from cw.integrations.config import project_requirements
 from cw.integrations.manager import IntegrationManager
 from cw.integrations.models import IntegrationHealth, Requirement
-from cw.execution.session import load_batch
-from cw.execution.processes import ProcessInspector
-from cw.execution.runs import latest_run, load_active_run, load_run, load_run_events
 from cw.ui.console import Console, emit_json
+from cw.ui.live import render_performance, render_processes
 from cw.ui.renderers import (
     render_doctor,
     render_error,
     render_history,
-    render_status as render_status_view,
     render_integrations,
 )
-from cw.ui.live import render_performance, render_processes
-
+from cw.ui.renderers import (
+    render_status as render_status_view,
+)
+from cw.update.config import load_update_settings
+from cw.update.installation import ManagedInstallation
 
 RootResolver = Callable[[], Path]
 ContextLoader = Callable[[Path], tuple[Any, dict[str, Any], Any]]
@@ -109,6 +115,14 @@ def command_explain(
     console.header("Explain")
     if payload["consistent"]:
         console.item("✓", "Workflow state is consistent")
+        if payload.get("retryable"):
+            console.wrapped(
+                f"{payload['classification']} interrupted {payload['failed_operation']} without consuming semantic attempts.", 2,
+            )
+            console.field("Phase", payload.get("current_phase") or "none")
+            console.field("Readiness", "available" if payload.get("readiness_available") else "will be regenerated")
+            console.action("cw retry", "Retry the failed infrastructure operation safely")
+            return 0
         if payload["completion_mode"] == "CONTRACT_AWARE" and payload["planned_scope_complete"] and not payload["completion_satisfied"]:
             decision = (payload.get("completion_review") or {}).get("decision", "PENDING")
             console.wrapped(
@@ -242,6 +256,7 @@ def doctor_checks(
         snapshot_protected_paths(root, workflow.protected_paths)
         checks.append({"section": "Security", "name": "Protected paths", "status": "pass", "detail": f"{len(workflow.protected_paths)} enforced"})
         session = load_session(root, workflow, phase) if phase else None
+        session_phase = str(session.get("phase")) if isinstance(session, dict) else "unknown"
         readiness = readiness_path(root)
         owner = session.get("owner_pid") if session else None
         owner_active = isinstance(owner, int) and process_is_alive(owner)
@@ -250,7 +265,7 @@ def doctor_checks(
         checks.append({
             "section": "Security", "name": "Implementer session",
             "status": "pass" if owner_active else "warning" if session else "neutral",
-            "detail": f"active for {session['phase']}" if owner_active else f"detached; review ready for {session['phase']}" if session else "none",
+            "detail": f"active for {session_phase}" if owner_active else f"detached; review ready for {session_phase}" if session else "none",
         })
         if readiness.exists():
             if phase is None or session is None:
@@ -282,7 +297,18 @@ def doctor_checks(
     except CwError as exc:
         checks.append({"section": "Workflow", "name": "Workflow integrity", "status": "error", "detail": f"{exc.code.value}: {exc.message}"})
     if reviewer:
-        adapter = CodexAdapter()
+        from cw.checks.verification import doctor_verification_runtime
+
+        for check in doctor_verification_runtime(root):
+            checks.append({"section": "Verification Executor", **check})
+        checks.extend([
+            {"section": "Semantic Reviewer", "name": "Sandbox", "status": "pass", "detail": "read-only"},
+            {"section": "Semantic Reviewer", "name": "Hooks", "status": "pass", "detail": "disabled"},
+            {"section": "Semantic Reviewer", "name": "Web access", "status": "pass", "detail": "disabled"},
+            {"section": "Semantic Reviewer", "name": "Project commands", "status": "pass", "detail": "prohibited and command events rejected"},
+            {"section": "Semantic Reviewer", "name": "Structured output", "status": "pass", "detail": "strict schema"},
+        ])
+        adapter = CodexAdapter(persist=False)
         schema = codex_schema("review-output.schema.json")
         try:
             adapter.smoke_test(root, schema)
@@ -354,7 +380,7 @@ def command_doctor(
         if run is not None and not run.get("finished_at"):
             inspector = ProcessInspector()
             alive = inspector.inspect(run.get("process_pid")).alive or inspector.inspect(run.get("supervisor_pid")).alive
-        payload = {"run": run, "process_alive": alive}
+        payload: dict[str, Any] = {"run": run, "process_alive": alive}
         if args.json:
             emit_json(payload)
         else:
@@ -395,6 +421,7 @@ def command_inspect(
             console.field("Proposal", "present" if proposal else "none")
         return 0
     active = load_active_run(root)
+    run: dict[str, Any] | None
     if args.action == "session" and active is not None:
         run = active
     elif args.run_id:
