@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import venv
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,8 +20,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from cw.core.diagnostics import redact  # noqa: E402
-from cw.core.platform import popen_process_group_kwargs, process_is_alive  # noqa: E402
+from cw.core.diagnostics import redact
+from cw.core.platform import popen_process_group_kwargs, process_is_alive
 
 FAKE_CODEX = ROOT / "tests/fixtures/fake_codex/fake_codex.py"
 STATUSES = {"PASS", "FAIL", "SKIPPED", "NOT_CONFIGURED"}
@@ -31,7 +32,28 @@ REPORT_KEYS = {
 
 
 class AcceptanceFailure(RuntimeError):
-    pass
+    """A failed acceptance operation with safe metadata for the failure artifact."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        stage: str = "acceptance",
+        surface: str = "unknown",
+        exit_code: int | None = None,
+        command: list[str] | None = None,
+        cwd: Path | None = None,
+        environment: dict[str, str] | None = None,
+        timed_out: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.surface = surface
+        self.exit_code = exit_code
+        self.command = command or []
+        self.cwd = cwd
+        self.environment = environment or {}
+        self.timed_out = timed_out
 
 
 def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str:
@@ -42,18 +64,26 @@ def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str
         clean = re.sub(re.escape(root), "<PRIVATE_ROOT>", clean, flags=re.IGNORECASE)
         clean = re.sub(re.escape(root.replace("/", "\\")), "<PRIVATE_ROOT>", clean, flags=re.IGNORECASE)
     clean = re.sub(
+        r"(?i)\b[A-Z]:\\(?:Users|Documents and Settings)\\[^\r\n\"']+",
+        "<PRIVATE_PATH>",
+        clean,
+    )
+    clean = re.sub(
         r"(?i)(?:\b[A-Z]:)?[\\/]+(?:Users|Documents and Settings)[\\/]+[^\\/\r\n]+",
         "~",
         clean,
     )
     clean = re.sub(r"/(?:home|Users)/[^/\s\"']+", "~", clean)
+    clean = re.sub(r"(?i)\b[A-Z]:\\[^\s\"']+", "<PRIVATE_PATH>", clean)
+    clean = re.sub(r"(?i)\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b", "[REDACTED EMAIL]", clean)
     clean = re.sub(
         r"(?i)authorization\s*:\s*(?:bearer|basic)\s+\S+",
         "[REDACTED CREDENTIAL]",
         clean,
     )
+    clean = re.sub(r"(?i)\b(?:bearer|basic)\s+\S+", "[REDACTED CREDENTIAL]", clean)
     clean = re.sub(
-        r"(?i)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret)"
+        r"(?i)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|password|secret)"
         r"\s*[=:]\s*\S+",
         "[REDACTED CREDENTIAL]",
         clean,
@@ -61,19 +91,161 @@ def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str
     return clean
 
 
+def _surface(command: list[str]) -> str:
+    """Return a stable allowlisted operation name, never the raw command."""
+    executable = re.split(r"[\\/]", command[0])[-1].lower() if command else "unknown"
+    executable = executable.removesuffix(".exe")
+    if executable == "cw":
+        words = [value for value in command[1:] if not value.startswith("-")]
+        if not words:
+            return "cw run"
+        if words[0] in {"init", "status", "history", "inspect", "logs", "doctor", "retry", "error"}:
+            return f"cw {words[0]}"
+        if words[0] == "plan":
+            return f"cw plan {words[1]}" if len(words) > 1 else "cw plan"
+        return "cw run"
+    if executable.startswith("python"):
+        if "unittest" in command:
+            return "python unittest"
+        if "build" in command:
+            return "python build"
+        if "pip" in command:
+            return "python pip"
+        return "python"
+    if executable == "git":
+        return "git"
+    return executable
+
+
+def _safe_traceback(exc: BaseException, *, private_roots: tuple[Path, ...]) -> list[dict[str, Any]]:
+    frames = traceback.extract_tb(exc.__traceback__)
+    return [
+        {
+            "module": Path(frame.filename).stem,
+            "function": frame.name,
+            "line": frame.lineno,
+            "exception_type": type(exc).__name__,
+            "message": _sanitize_detail(str(exc), private_roots=private_roots),
+        }
+        for frame in frames[-12:]
+    ]
+
+
+_ERROR_KEYS = {
+    "code", "message", "hint", "correlation_id", "exception_type", "operation",
+    "source", "phase", "attempt", "revision_attempt", "last_event", "next_action",
+}
+
+
+def _safe_error_fields(value: Any, *, private_roots: tuple[Path, ...]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    safe: dict[str, Any] = {}
+    for key in _ERROR_KEYS:
+        item = value.get(key)
+        if key in value and (isinstance(item, (str, int, float, bool)) or item is None):
+            safe[key] = _sanitize_detail(str(item), private_roots=private_roots) if isinstance(item, str) else item
+    return safe
+
+
+def _safe_json(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _capture_cw_diagnostic(
+    failure: AcceptanceFailure, *, private_roots: tuple[Path, ...]
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Collect a bounded CW diagnostic without recursing through acceptance."""
+    root = failure.cwd
+    if failure.surface.split(" ", 1)[0] != "cw" or root is None or not (root / ".cw").is_dir():
+        return {}, {}, {}
+    cw_error: dict[str, Any] = {}
+    try:
+        completed = subprocess.run(
+            [failure.command[0], "error", "--json"], cwd=root, env=failure.environment,
+            text=True, encoding="utf-8", errors="replace", capture_output=True,
+            timeout=15, check=False,
+        )
+        cw_error = {
+            "surface": "cw error",
+            "exit_code": completed.returncode,
+            **_safe_error_fields(_safe_json_from_text(completed.stdout), private_roots=private_roots),
+        }
+    except (OSError, subprocess.SubprocessError):
+        cw_error = {"surface": "cw error", "exit_code": None}
+    last_error = _safe_error_fields(_safe_json(root / ".cw/logs/last-error.json"), private_roots=private_roots)
+    errors = root / ".cw/logs/errors.jsonl"
+    if errors.is_file():
+        try:
+            lines = [line for line in errors.read_text(encoding="utf-8").splitlines() if line.strip()]
+            if lines:
+                last_error = {**last_error, **_safe_error_fields(json.loads(lines[-1]), private_roots=private_roots)}
+        except (OSError, json.JSONDecodeError):
+            pass
+    state = _safe_json(root / ".cw/state.json")
+    state_safe = {
+        key: state[key] for key in ("status", "current_phase", "attempt", "revision_attempt")
+        if key in state and (isinstance(state.get(key), (str, int, float, bool)) or state.get(key) is None)
+    }
+    runtime_root = root / ".cw/runtime"
+    runtime = {"entries": []}
+    if runtime_root.is_dir():
+        try:
+            runtime["entries"] = [
+                path.relative_to(root).as_posix() for path in sorted(runtime_root.rglob("*"))[:64]
+            ]
+        except OSError:
+            runtime["entries"] = []
+    return cw_error, {**state_safe, **last_error}, runtime
+
+
+def _safe_json_from_text(value: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    error = payload.get("error")
+    return error if isinstance(error, dict) else payload
+
+
 def _run(
     command: list[str], *, cwd: Path, environment: dict[str, str],
     expected: set[int] = frozenset({0}), timeout: int = 180,
 ) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(
-        command, cwd=cwd, env=environment, text=True, encoding="utf-8",
-        errors="replace", capture_output=True, timeout=timeout, check=False,
-    )
-    if completed.returncode not in expected:
-        executable = Path(command[0]).name
+    surface = _surface(command)
+    try:
+        completed = subprocess.run(
+            command, cwd=cwd, env=environment, text=True, encoding="utf-8",
+            errors="replace", capture_output=True, timeout=timeout, check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
         raise AcceptanceFailure(
-            f"{executable} exited {completed.returncode}\n"
+            f"{surface} timed out after {timeout}s",
+            stage=surface,
+            surface=surface,
+            exit_code=None,
+            command=command,
+            cwd=cwd,
+            environment=environment,
+            timed_out=True,
+        ) from exc
+    if completed.returncode not in expected:
+        raise AcceptanceFailure(
+            f"{surface} exited {completed.returncode}\n"
             f"STDOUT\n{completed.stdout[-4000:]}\nSTDERR\n{completed.stderr[-4000:]}"
+            ,
+            stage=surface,
+            surface=surface,
+            exit_code=completed.returncode,
+            command=command,
+            cwd=cwd,
+            environment=environment,
         )
     return completed
 
@@ -406,6 +578,57 @@ def _validate_report(report: dict[str, Any]) -> None:
         raise AcceptanceFailure("compatibility report contains forbidden private data")
 
 
+def _write_diagnostic(
+    output: Path, exc: BaseException, *, base: Path, source_commit: str
+) -> None:
+    """Write a separate, failure-only forensic artifact with no private paths."""
+    failure = exc if isinstance(exc, AcceptanceFailure) else AcceptanceFailure(
+        str(exc), stage="acceptance", surface="acceptance"
+    )
+    private_roots = (base, ROOT, Path.home())
+    cw_error, state, runtime = _capture_cw_diagnostic(
+        failure, private_roots=private_roots
+    )
+    diagnostic = {
+        "schema": "cw.acceptance-diagnostic.v1",
+        "source_commit": source_commit,
+        "platform": f"{platform.system()} {platform.machine()}",
+        "stage": failure.stage,
+        "surface": failure.surface,
+        "exit_code": failure.exit_code,
+        "timeout": failure.timed_out,
+        "primary_error": {
+            "exception_type": type(exc).__name__,
+            "message": _sanitize_detail(str(exc), private_roots=private_roots),
+            "next_action": "Inspect the sanitized acceptance diagnostic and fix the failed stage.",
+        },
+        "cw_error": cw_error,
+        "state": state,
+        "runtime": runtime,
+        "traceback": _safe_traceback(exc, private_roots=private_roots),
+    }
+    serialized = json.dumps(diagnostic, ensure_ascii=False, indent=2) + "\n"
+    _validate_diagnostic(diagnostic)
+    destination = output.with_name("compatibility-diagnostic.json")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_output = destination.with_suffix(destination.suffix + ".tmp")
+    temporary_output.write_text(serialized, encoding="utf-8")
+    os.replace(temporary_output, destination)
+
+
+def _validate_diagnostic(diagnostic: dict[str, Any]) -> None:
+    required = {
+        "schema", "source_commit", "platform", "stage", "surface", "exit_code",
+        "timeout", "primary_error", "cw_error", "state", "runtime", "traceback",
+    }
+    if set(diagnostic) != required or diagnostic["schema"] != "cw.acceptance-diagnostic.v1":
+        raise AcceptanceFailure("acceptance diagnostic has an invalid contract")
+    serialized = json.dumps(diagnostic, ensure_ascii=False).lower()
+    forbidden = ("\\users\\", "/home/", "bearer ", "api_key", "password=", "secret=")
+    if any(value in serialized for value in forbidden):
+        raise AcceptanceFailure("acceptance diagnostic contains private data")
+
+
 def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
     source_version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     tests: dict[str, dict[str, str]] = {}
@@ -517,6 +740,7 @@ def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
             tests["rollback"] = _result("PASS", "manual and failed rollback preserve healthy runtime")
         except (AcceptanceFailure, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
             exit_code = 1
+            _write_diagnostic(output, exc, base=base, source_commit=_source_commit())
             tests.setdefault("acceptance", _result(
                 "FAIL",
                 _sanitize_detail(str(exc), private_roots=(base, ROOT, Path.home())),
