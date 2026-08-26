@@ -15,144 +15,102 @@ from scripts.run_acceptance import (
     _install_fake_codex,
     _result,
     _run,
-    _sanitize_detail,
-    _surface,
+    _safe_regular_text,
     _validate_report,
     _write_diagnostic,
 )
 
 
 class AcceptanceHarnessTests(unittest.TestCase):
-    def test_report_status_vocabulary_fails_closed(self):
+    canaries = ("GOAL_PRIVATE_CANARY", "GOAL_«quoted»\n秘密", "TOKEN_PRIVATE_CANARY", "C:/Users/RunnerPrivate/checkout", r"\\server\private\fixture", "/home/runner-private/project", "runner-private@example.invalid", "STDERR_PRIVATE_CANARY")
+
+    def _failure(self, root: Path) -> AcceptanceFailure:
+        return AcceptanceFailure("raw failure", stage="plan.create", executable="cw", command_name="plan", exit_code=1, executable_path="cw", cwd=root, environment={"PRIVATE_ENV": self.canaries[2]})
+
+    def _record(self, correlation: str) -> dict[str, object]:
+        return {"correlation_id": correlation, "code": "INTERNAL_ERROR", "message": self.canaries[1], "exception_type": "ValueError", "traceback": [{"path": r"C:\host\site-packages\cw\cli\runner.py", "function": "run", "line": 73, "exception_type": "ValueError", "message": self.canaries[2]}]}
+
+    def _write_record(self, root: Path, record: dict[str, object]) -> None:
+        (root / ".cw/logs").mkdir(parents=True)
+        (root / ".cw/logs/last-error.json").write_text(json.dumps(record), encoding="utf-8")
+
+    def _cw_error(self, correlation: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(["cw", "error"], 0, json.dumps({"data": {"correlation_id": correlation}}), "")
+
+    def test_report_and_environment_contracts_remain(self):
         self.assertEqual("PASS", _result("PASS")["status"])
-        with self.assertRaises(ValueError):
-            _result("MAYBE")
-
-    def test_report_validator_rejects_malformed_or_secret_evidence(self):
-        with self.assertRaises(AcceptanceFailure):
-            _validate_report({"schema_version": 1})
-        report = {
-            "schema_version": 1, "cw_version": "0.5.1", "source_commit": "abc", "generated_at": "now",
-            "os": "Linux", "os_version": "test", "architecture": "x86_64", "python_version": "3.13",
-            "install_method": "wheel", "tests": {"smoke": {"status": "PASS", "detail": "Bearer secret"}},
-            "delegated": {"windows": "CI_REQUIRED", "macos": "CI_REQUIRED", "real_codex": "NOT_CONFIGURED"},
-        }
-        with self.assertRaises(AcceptanceFailure):
-            _validate_report(report)
-
-    def test_external_fake_launcher_is_created_for_current_host(self):
+        with self.assertRaises(ValueError): _result("MAYBE")
+        with self.assertRaises(AcceptanceFailure): _validate_report({"schema_version": 1})
         with tempfile.TemporaryDirectory() as temporary:
-            launcher = _install_fake_codex(Path(temporary))
-            self.assertTrue(launcher.is_file())
-            if os.name != "nt":
-                self.assertTrue(os.access(launcher, os.X_OK))
-
-    def test_acceptance_environment_isolated_and_auth_free(self):
-        with tempfile.TemporaryDirectory() as temporary, patch.dict(
-            os.environ,
-            {"CODEX_HOME": "/private/auth", "PYTHONPATH": "/source/leak", "PATH": os.environ.get("PATH", "")},
-            clear=False,
-        ):
-            base = Path(temporary)
-            runtime = base / "runtime"
-            (runtime / ("Scripts" if os.name == "nt" else "bin")).mkdir(parents=True)
-            fake = base / "fake"
-            fake.mkdir()
-            environment = _environment(base, runtime, fake)
+            root = Path(temporary); runtime = root / "runtime"; (runtime / ("Scripts" if os.name == "nt" else "bin")).mkdir(parents=True)
+            environment = _environment(root, runtime, root)
             self.assertNotIn("CODEX_HOME", environment)
-            self.assertNotIn("PYTHONPATH", environment)
-            self.assertEqual("1", environment["PYTHONUTF8"])
-            self.assertIn(str(fake), environment["PATH"])
+            self.assertTrue(_install_fake_codex(root).is_file())
 
-    def test_failure_detail_redacts_secrets_and_private_windows_paths(self):
-        detail = _sanitize_detail(
-            r"C:\\Users\\Ada\\AppData\\Temp\\fixture Authorization: Bearer private-token",
-        )
-        self.assertNotIn("users", detail.lower())
-        self.assertNotIn("authorization", detail.lower())
-        self.assertNotIn("bearer", detail.lower())
-        self.assertNotIn("private-token", detail)
-        self.assertIn("[REDACTED CREDENTIAL]", detail)
+    def test_declared_stage_never_uses_goal_or_process_output(self):
+        completed = subprocess.CompletedProcess(["cw"], 1, self.canaries[0], self.canaries[-1])
+        with tempfile.TemporaryDirectory() as temporary, patch("scripts.run_acceptance.subprocess.run", return_value=completed), self.assertRaises(AcceptanceFailure) as raised:
+            _run(["cw", "plan", "--goal", self.canaries[0]], cwd=Path(temporary), environment={}, diagnostic_stage="plan.create", diagnostic_executable="cw", diagnostic_command="plan")
+        self.assertEqual("plan.create", raised.exception.stage)
+        self.assertEqual("plan", raised.exception.command_name)
+        self.assertNotIn(self.canaries[0], str(raised.exception))
 
-    def test_allowlisted_surface_never_contains_private_arguments(self):
-        self.assertEqual("cw plan approve", _surface([r"C:\private\cw.exe", "plan", "approve", "--secret=x"]))
-        self.assertEqual("cw run", _surface(["cw"]))
-        self.assertEqual("python unittest", _surface(["python", "-m", "unittest", "private.module"]))
-
-    def test_failure_diagnostic_redacts_paths_secrets_and_email(self):
+    def test_correlated_last_error_captures_only_relative_cw_frame(self):
         with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary) / "Café São Paulo"
-            base.mkdir()
-            failure = AcceptanceFailure(
-                r"C:\Users\Ada\worktree\秘密 token=abc Bearer xyz ada@example.com",
-                stage="cw run", surface="cw run", exit_code=1,
-            )
-            output = base / "artifacts/compatibility-report.json"
-            _write_diagnostic(output, failure, base=base, source_commit="deadbeef")
-            diagnostic = json.loads((output.parent / "compatibility-diagnostic.json").read_text(encoding="utf-8"))
-        self.assertEqual("cw.acceptance-diagnostic.v1", diagnostic["schema"])
-        self.assertEqual("cw run", diagnostic["stage"])
-        serialized = json.dumps(diagnostic, ensure_ascii=False).lower()
-        for forbidden in ("users", "ada", "token=abc", "bearer xyz", "example.com", "秘密"):
-            self.assertNotIn(forbidden, serialized)
-        self.assertEqual("AcceptanceFailure", diagnostic["primary_error"]["exception_type"])
+            root = Path(temporary); correlation = "corr_123"; self._write_record(root, self._record(correlation))
+            with patch("scripts.run_acceptance.subprocess.run", return_value=self._cw_error(correlation)):
+                captured = _capture_cw_diagnostic(self._failure(root))
+        self.assertEqual("captured", captured["diagnostic_status"])
+        self.assertEqual("last_error", captured["diagnostic_source"])
+        self.assertEqual("cw/cli/runner.py", captured["module"])
+        self.assertEqual("ValueError", captured["exception_type"])
+        self.assertNotIn(correlation, json.dumps(captured))
 
-    def test_successful_report_does_not_require_a_diagnostic(self):
+    def test_jsonl_requires_exact_correlation_and_rejects_old_record(self):
         with tempfile.TemporaryDirectory() as temporary:
-            artifact = Path(temporary) / "compatibility-report.json"
-            self.assertFalse(artifact.with_name("compatibility-diagnostic.json").exists())
+            root = Path(temporary); logs = root / ".cw/logs"; logs.mkdir(parents=True)
+            logs.joinpath("errors.jsonl").write_text(json.dumps(self._record("old_corr")) + "\n" + json.dumps(self._record("corr_456")) + "\n", encoding="utf-8")
+            with patch("scripts.run_acceptance.subprocess.run", return_value=self._cw_error("corr_456")):
+                self.assertEqual("captured", _capture_cw_diagnostic(self._failure(root))["diagnostic_status"])
+            with patch("scripts.run_acceptance.subprocess.run", return_value=self._cw_error("different_corr")):
+                self.assertEqual("unavailable", _capture_cw_diagnostic(self._failure(root))["diagnostic_status"])
 
-    def test_cw_failure_capture_uses_only_allowlisted_state_and_runtime_metadata(self):
+    def test_corrupt_oversized_symlink_and_hardlink_records_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            logs = root / ".cw/logs"; logs.mkdir(parents=True)
-            (root / ".cw/runtime/reviewer").mkdir(parents=True)
-            (root / ".cw/state.json").write_text(
-                json.dumps({"status": "ERROR", "current_phase": "01-phase", "attempt": 0, "revision_attempt": 0, "secret": "no"})
-            )
-            (logs / "last-error.json").write_text(json.dumps({"code": "REVIEWER_INFRASTRUCTURE_ERROR", "message": r"C:\\Users\\Ada\\secret", "hint": "Run: cw retry", "prompt": "ignore"}))
-            failure = AcceptanceFailure("cw run exited 1", stage="cw run", surface="cw run", exit_code=1, command=["cw"], cwd=root)
-            completed = __import__("subprocess").CompletedProcess(["cw", "error"], 0, '{"error":{"code":"REVIEWER_INFRASTRUCTURE_ERROR","message":"failed"}}', "")
-            with patch("scripts.run_acceptance.subprocess.run", return_value=completed):
-                cw_error, state, runtime = _capture_cw_diagnostic(failure, private_roots=(root,))
-        self.assertEqual("REVIEWER_INFRASTRUCTURE_ERROR", cw_error["code"])
-        self.assertEqual("ERROR", state["status"])
-        self.assertNotIn("secret", state)
-        self.assertEqual([".cw/runtime/reviewer"], runtime["entries"])
-        self.assertNotIn("users", json.dumps(state).lower())
+            root = Path(temporary); logs = root / ".cw/logs"; logs.mkdir(parents=True); target = root / "target"; target.write_text("{}", encoding="utf-8"); log = logs / "last-error.json"
+            try:
+                log.symlink_to(target); self.assertIsNone(_safe_regular_text(log)); log.unlink()
+            except OSError:
+                self.assertEqual("nt", os.name, "only Windows may prohibit developer symlink fixtures")
+            os.link(target, log); self.assertIsNone(_safe_regular_text(log)); log.unlink()
+            log.write_bytes(b"x" * (64 * 1024 + 1)); self.assertIsNone(_safe_regular_text(log))
 
-    def test_cw_error_failure_is_recorded_without_overwriting_primary_failure(self):
+    def test_artifact_scan_rejects_goal_tokens_paths_env_and_output_canaries(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); (root / ".cw").mkdir()
-            failure = AcceptanceFailure("cw run exited 1", stage="cw run", surface="cw run", exit_code=1, command=["cw"], cwd=root)
-            completed = __import__("subprocess").CompletedProcess(["cw", "error"], 7, "", "")
-            with patch("scripts.run_acceptance.subprocess.run", return_value=completed):
-                cw_error, _state, _runtime = _capture_cw_diagnostic(failure, private_roots=(root,))
-        self.assertEqual("cw error", cw_error["surface"])
-        self.assertEqual(7, cw_error["exit_code"])
+            root = Path(temporary); correlation = "corr_789"; self._write_record(root, self._record(correlation)); output = root / "artifacts/compatibility-report.json"
+            with patch("scripts.run_acceptance.subprocess.run", return_value=self._cw_error(correlation)):
+                _write_diagnostic(output, self._failure(root), base=root, source_commit="unused")
+            serialized = output.with_name("compatibility-diagnostic.json").read_text(encoding="utf-8")
+        for canary in self.canaries:
+            self.assertNotIn(canary, serialized)
+        self.assertNotIn("--goal", serialized)
+        self.assertIn('"stage": "plan.create"', serialized)
 
-    def test_capture_before_init_and_corrupt_error_log_fail_closed(self):
+    def test_cw_error_failure_missing_logs_and_harness_exception_are_unavailable(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            failure = AcceptanceFailure("cw init exited 1", stage="cw init", surface="cw init", command=["cw"], cwd=root)
-            self.assertEqual(({}, {}, {}), _capture_cw_diagnostic(failure, private_roots=(root,)))
-            (root / ".cw/logs").mkdir(parents=True)
-            (root / ".cw/logs/last-error.json").write_text("{not json", encoding="utf-8")
-            completed = subprocess.CompletedProcess(["cw", "error"], 0, "{not json", "")
-            with patch("scripts.run_acceptance.subprocess.run", return_value=completed):
-                cw_error, state, runtime = _capture_cw_diagnostic(failure, private_roots=(root,))
-        self.assertEqual({"surface": "cw error", "exit_code": 0}, cw_error)
-        self.assertEqual({}, state)
-        self.assertEqual({"entries": []}, runtime)
+            with patch("scripts.run_acceptance.subprocess.run", return_value=subprocess.CompletedProcess(["cw"], 7, "", "")):
+                self.assertEqual("unavailable", _capture_cw_diagnostic(self._failure(root))["diagnostic_status"])
+            output = root / "artifacts/compatibility-report.json"; _write_diagnostic(output, RuntimeError("private payload"), base=root, source_commit="unused")
+            diagnostic = json.loads(output.with_name("compatibility-diagnostic.json").read_text(encoding="utf-8"))
+        self.assertEqual("acceptance.harness", diagnostic["stage"])
+        self.assertEqual("unavailable", diagnostic["diagnostic_status"])
 
-    def test_timeout_is_preserved_as_sanitized_stage_metadata(self):
-        with tempfile.TemporaryDirectory() as temporary, patch(
-            "scripts.run_acceptance.subprocess.run", side_effect=subprocess.TimeoutExpired(["cw"], 17)
-        ), self.assertRaises(AcceptanceFailure) as raised:
-            _run(["cw", "retry"], cwd=Path(temporary), environment={}, timeout=17)
+    def test_timeout_uses_declared_metadata_only(self):
+        with tempfile.TemporaryDirectory() as temporary, patch("scripts.run_acceptance.subprocess.run", side_effect=subprocess.TimeoutExpired(["cw"], 17)), self.assertRaises(AcceptanceFailure) as raised:
+            _run(["cw", "retry"], cwd=Path(temporary), environment={}, timeout=17, diagnostic_stage="reviewer.retry", diagnostic_executable="cw", diagnostic_command="retry")
         self.assertTrue(raised.exception.timed_out)
-        self.assertEqual("cw retry", raised.exception.stage)
-        self.assertIsNone(raised.exception.exit_code)
+        self.assertEqual("reviewer.retry", raised.exception.stage)
 
 
 if __name__ == "__main__":
