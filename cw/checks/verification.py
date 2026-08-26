@@ -128,6 +128,57 @@ def _runtime_environment(runtime: Path) -> dict[str, str]:
     return environment
 
 
+def _cleanup_runtime(
+    runtime: Path, *, retries: int = 3, sleeper: Any = time.sleep
+) -> None:
+    """Remove a private runtime with bounded, fail-closed sharing retries."""
+
+    def remove_readonly(function: Any, path: str, exception: tuple[Any, Any, Any]) -> None:
+        error = exception[1]
+        if not isinstance(error, PermissionError):
+            raise error
+        os.chmod(path, stat.S_IWRITE)
+        function(path)
+
+    delay = 0.02
+    last_error: PermissionError | None = None
+    for attempt in range(retries):
+        try:
+            shutil.rmtree(runtime, onerror=remove_readonly)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            if attempt + 1 < retries:
+                sleeper(delay)
+                delay *= 2
+    raise CwError(
+        "Verification runtime cleanup failed",
+        ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR,
+        "Run: cw retry",
+        details=redact(str(last_error)) if last_error is not None else None,
+    ) from last_error
+
+
+def _record_runtime_cleanup_failure(result: ValidationResult, error: CwError) -> None:
+    """Keep cleanup failures classified without allowing valid evidence to escape."""
+    result.passed = False
+    result.receipt = None
+    result.receipt_payload = None
+    result.error_code = error.code.value
+    result.errors.append(error.message)
+    result.checks.append(
+        {
+            "name": "Verification runtime cleanup",
+            "status": "failed",
+            "phase": "runtime_cleanup",
+            "operation": "runtime_cleanup",
+            "detail": error.message,
+            "error_code": error.code.value,
+            "next_action": error.hint or "Run: cw retry",
+        }
+    )
+
+
 def _project_snapshot(
     root: Path, allowed_mutations: tuple[str, ...] = ()
 ) -> dict[str, tuple[str, int, str | None]]:
@@ -690,6 +741,12 @@ class VerificationExecutor:
                 "result": "PASSED",
             }
             body["receipt_sha256"] = _receipt_digest(body)
+            # Receipt persistence is deliberately after cleanup.  A runtime
+            # that cannot be removed is infrastructure failure, never proof.
+            stage = "runtime_cleanup"
+            _cleanup_runtime(runtime)
+            runtime = None
+            stage = "persist"
             _receipt_directory(root)
             path = _receipt_path(root, body["receipt_id"])
             atomic_json_new(path, body)
@@ -740,7 +797,10 @@ class VerificationExecutor:
             )
         finally:
             if runtime is not None:
-                shutil.rmtree(runtime, ignore_errors=False)
+                try:
+                    _cleanup_runtime(runtime)
+                except CwError as cleanup_error:
+                    _record_runtime_cleanup_failure(result, cleanup_error)
         return result
 
 
@@ -803,14 +863,24 @@ def doctor_verification_runtime(root: Path) -> list[dict[str, Any]]:
         )
     finally:
         if runtime is not None:
-            shutil.rmtree(runtime, ignore_errors=False)
-            checks.append(
-                {
-                    "name": "Verification runtime cleanup",
-                    "status": "pass" if not runtime.exists() else "error",
-                    "detail": "removed" if not runtime.exists() else "retained",
-                }
-            )
+            try:
+                _cleanup_runtime(runtime)
+            except CwError as cleanup_error:
+                checks.append(
+                    {
+                        "name": "Verification runtime cleanup",
+                        "status": "error",
+                        "detail": cleanup_error.message,
+                    }
+                )
+            else:
+                checks.append(
+                    {
+                        "name": "Verification runtime cleanup",
+                        "status": "pass",
+                        "detail": "removed",
+                    }
+                )
         for path in reversed(namespaces):
             existed = namespace_state.get(path)
             if existed is None:

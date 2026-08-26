@@ -17,6 +17,7 @@ from cw.adapters.result import CodexResult
 from cw.agents.reviewer import reviewer_prompt, run_review
 from cw.checks.verification import (
     VerificationExecutor,
+    _cleanup_runtime,
     _git_metadata_snapshot,
     doctor_verification_runtime,
     validate_verification_receipt,
@@ -369,6 +370,46 @@ class VerificationExecutorTests(unittest.TestCase):
         self.assertEqual("preflight", diagnostic["phase"])
         self.assertEqual("verification-executor", diagnostic["operation"])
         self.assertEqual("Run: cw validate", diagnostic["next_action"])
+        self.assertNotIn(str(self.repo.root), json.dumps(diagnostic))
+
+    def test_runtime_cleanup_retries_transient_permission_error(self) -> None:
+        runtime = self.repo.root / ".cw/runtime/transient cleanup"
+        runtime.mkdir()
+        (runtime / "ü.txt").write_text("x", encoding="utf-8")
+        actual = __import__("shutil").rmtree
+        calls: list[float] = []
+        attempts = 0
+
+        def transient(path, *args, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise PermissionError("locked")
+            return actual(path, *args, **kwargs)
+
+        with patch("cw.checks.verification.shutil.rmtree", side_effect=transient):
+            _cleanup_runtime(runtime, sleeper=calls.append)
+        self.assertFalse(runtime.exists())
+        self.assertEqual(2, attempts)
+        self.assertEqual([0.02], calls)
+
+    def test_runtime_cleanup_persistent_permission_error_is_classified_before_receipt(self) -> None:
+        runtime_error = CwError(
+            "Verification runtime cleanup failed",
+            ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR,
+            "Run: cw retry",
+        )
+        with patch("cw.checks.verification._cleanup_runtime", side_effect=runtime_error):
+            validation = VerificationExecutor().execute(
+                self.repo.root, self.workflow, self.phase
+            )
+        self.assertFalse(validation.passed)
+        self.assertEqual(ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR.value, validation.error_code)
+        self.assertIsNone(validation.receipt)
+        self.assertEqual([], list((self.repo.root / ".cw/verification-receipts").glob("*.json")))
+        diagnostic = validation.checks[-1]
+        self.assertEqual("runtime_cleanup", diagnostic["phase"])
+        self.assertEqual("runtime_cleanup", diagnostic["operation"])
         self.assertNotIn(str(self.repo.root), json.dumps(diagnostic))
 
     def test_git_snapshot_requests_absolute_paths_from_the_bound_root(self) -> None:
