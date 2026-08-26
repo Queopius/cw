@@ -11,8 +11,6 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import pytest
-
 from cw.adapters.codex import CodexAdapter
 from cw.adapters.invocation import record_run_result
 from cw.adapters.result import CodexResult
@@ -355,6 +353,41 @@ class VerificationExecutorTests(unittest.TestCase):
             with self.assertRaises(CwError) as raised:
                 _git_metadata_snapshot(self.repo.root)
         self.assertEqual(ErrorCode.INTEGRITY_ERROR, raised.exception.code)
+
+    def test_git_preflight_failure_is_structured_and_never_escapes_as_internal(self) -> None:
+        with patch(
+            "cw.checks.verification._git_metadata_snapshot",
+            side_effect=CwError("Git repository identity is incoherent", ErrorCode.INTEGRITY_ERROR),
+        ):
+            validation = VerificationExecutor().execute(
+                self.repo.root, self.workflow, self.phase
+            )
+        self.assertFalse(validation.passed)
+        self.assertEqual(ErrorCode.INTEGRITY_ERROR.value, validation.error_code)
+        self.assertEqual("Git repository identity is incoherent", validation.errors[0])
+        diagnostic = validation.checks[-1]
+        self.assertEqual("preflight", diagnostic["phase"])
+        self.assertEqual("verification-executor", diagnostic["operation"])
+        self.assertEqual("Run: cw validate", diagnostic["next_action"])
+        self.assertNotIn(str(self.repo.root), json.dumps(diagnostic))
+
+    def test_git_snapshot_requests_absolute_paths_from_the_bound_root(self) -> None:
+        observed: list[list[str]] = []
+        actual = subprocess.run
+
+        def capture(command, *args, **kwargs):
+            observed.append(command)
+            return actual(command, *args, **kwargs)
+
+        with patch("cw.checks.verification.subprocess.run", side_effect=capture):
+            _git_metadata_snapshot(self.repo.root)
+        self.assertEqual(3, len(observed))
+        for command in observed:
+            self.assertEqual("git", command[0])
+            self.assertEqual("-C", command[1])
+            self.assertEqual(str(self.repo.root.resolve()), command[2])
+            self.assertEqual("rev-parse", command[3])
+            self.assertEqual("--path-format=absolute", command[4])
 
     def test_duplicate_and_hardlinked_receipts_are_rejected(self) -> None:
         validation = VerificationExecutor().execute(
@@ -848,9 +881,11 @@ class HistoricalInfrastructureRecoveryTests(unittest.TestCase):
         )
 
 
-@pytest.mark.parametrize(
-    ("requirement", "relative", "token"),
-    [
+class PublicReviewerInfrastructureContractTests(unittest.TestCase):
+    """Keep public contract coverage runnable by the canonical unittest suite."""
+
+    def test_public_reviewer_infrastructure_contracts(self) -> None:
+        requirements = [
         ("core-version", "VERSION", "0.18.0"),
         ("plugin-version", "plugins/cw/VERSION", "0.1.0"),
         ("remote-protocol", "cw/remote/protocol.py", "cw.remote.v1"),
@@ -893,13 +928,11 @@ class HistoricalInfrastructureRecoveryTests(unittest.TestCase):
         ("docs-apply", "docs/reviewer-infrastructure.md", "--apply"),
         ("docs-no-auto-approval", "docs/reviewer-infrastructure.md", "approve, create a gate"),
         ("changelog-operation", "CHANGELOG.md", "recover-infrastructure"),
-    ],
-)
-def test_public_reviewer_infrastructure_contracts(
-    requirement: str, relative: str, token: str
-) -> None:
-    content = (ROOT / relative).read_text(encoding="utf-8")
-    assert token in content, requirement
+        ]
+        for requirement, relative, token in requirements:
+            with self.subTest(requirement=requirement, path=relative):
+                content = (ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn(token, content, requirement)
 
 
 if __name__ == "__main__":

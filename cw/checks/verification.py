@@ -152,7 +152,14 @@ def _project_snapshot(
 
 def _git_metadata_snapshot(root: Path) -> dict[str, tuple[str, int, str | None]]:
     """Snapshot the administrative metadata of precisely ``root``'s Git worktree."""
-    canonical_root = root.resolve()
+    try:
+        canonical_root = root.resolve(strict=True)
+    except OSError as exc:
+        raise CwError(
+            "Git repository root cannot be resolved", ErrorCode.INTEGRITY_ERROR
+        ) from exc
+    if not canonical_root.is_dir() or canonical_root.is_symlink():
+        raise CwError("Git repository root is unsafe", ErrorCode.INTEGRITY_ERROR)
     environment = dict(os.environ)
     for name in (
         "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
@@ -163,7 +170,10 @@ def _git_metadata_snapshot(root: Path) -> dict[str, tuple[str, int, str | None]]
     def query(flag: str) -> Path:
         try:
             completed = subprocess.run(
-                ["git", "-C", str(canonical_root), "rev-parse", flag],
+                [
+                    "git", "-C", str(canonical_root), "rev-parse",
+                    "--path-format=absolute", flag,
+                ],
                 cwd=canonical_root,
                 env=environment,
                 capture_output=True,
@@ -182,7 +192,7 @@ def _git_metadata_snapshot(root: Path) -> dict[str, tuple[str, int, str | None]]
         return path.resolve() if path.is_absolute() else (canonical_root / path).resolve()
 
     observed_root = query("--show-toplevel")
-    if observed_root != canonical_root:
+    if os.path.normcase(str(observed_root)) != os.path.normcase(str(canonical_root)):
         raise CwError("Git repository identity is incoherent", ErrorCode.INTEGRITY_ERROR)
     paths = [query("--git-dir"), query("--git-common-dir")]
     snap: dict[str, tuple[str, int, str | None]] = {}
@@ -498,12 +508,16 @@ class VerificationExecutor:
 
     def execute(self, root: Path, workflow: Workflow, phase: Phase) -> ValidationResult:
         result = ValidationResult(passed=False)
-        state_sha = sha256_file(root / ".cw/state.json")
-        project_before = _project_snapshot(root, phase.artifacts)
-        git_before = _git_metadata_snapshot(root)
         runtime: Path | None = None
         commands: list[dict[str, Any]] = []
+        stage = "preflight"
         try:
+            # These snapshots are part of the verification preflight.  Keep
+            # them inside the classified boundary so platform filesystem or
+            # Git failures cannot escape as an unstructured CLI internal error.
+            state_sha = sha256_file(root / ".cw/state.json")
+            project_before = _project_snapshot(root, phase.artifacts)
+            git_before = _git_metadata_snapshot(root)
             validate_dependencies(root, workflow, phase)
             result.checks.append({"name": "Previous gates", "status": "passed"})
             for artifact in phase.artifacts:
@@ -524,6 +538,7 @@ class VerificationExecutor:
             runtime_id = "vrt-" + sha256_bytes(secrets.token_bytes(32)).removeprefix(
                 "sha256:"
             )
+            stage = "commands"
             for index, command in enumerate(phase.required_commands):
                 timeout = command.timeout_seconds or workflow.command_timeout
                 argv = command_arguments(command.command)
@@ -617,6 +632,7 @@ class VerificationExecutor:
                         "Fix the implementation, then run: cw validate",
                         details=(stderr or stdout)[-4000:],
                     )
+            stage = "integrity"
             validate_dependencies(root, workflow, phase)
             if _project_snapshot(root, phase.artifacts) != project_before:
                 raise CwError(
@@ -695,8 +711,11 @@ class VerificationExecutor:
                 {
                     "name": "Verification",
                     "status": "failed",
+                    "phase": stage,
+                    "operation": "verification-executor",
                     "detail": exc.message,
                     "error_code": exc.code.value,
+                    "next_action": exc.hint or "Run: cw validate",
                 }
             )
         except OSError as exc:
@@ -712,8 +731,11 @@ class VerificationExecutor:
                 {
                     "name": "Verification",
                     "status": "failed",
+                    "phase": stage,
+                    "operation": "verification-executor",
                     "detail": error.message,
                     "error_code": error.code.value,
+                    "next_action": error.hint,
                 }
             )
         finally:
