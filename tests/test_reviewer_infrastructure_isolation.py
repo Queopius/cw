@@ -432,6 +432,21 @@ class VerificationExecutorTests(unittest.TestCase):
         self.assertEqual(2, calls)
         self.assertFalse(any((self.repo.root / ".cw/runtime").rglob("cw-reviewer-*")))
 
+    def test_private_runtime_restores_timestamps_when_windows_lacks_no_follow_utime(self) -> None:
+        actual = os.utime
+
+        def windows_utime(path, *args, **kwargs):
+            if kwargs.get("follow_symlinks") is False:
+                raise NotImplementedError("Windows no-follow utime unavailable")
+            return actual(path, *args, **kwargs)
+
+        with patch("cw.checks.verification.os.utime", side_effect=windows_utime), private_runtime_directory(
+            self.repo.root, "reviewer"
+        ) as runtime:
+            (runtime / "result.json").write_text("{}", encoding="utf-8")
+
+        self.assertFalse(any((self.repo.root / ".cw/runtime").rglob("cw-reviewer-*")))
+
     def test_private_runtime_cleanup_failure_is_classified_and_chains_primary(self) -> None:
         primary = CwError("reviewer output invalid", ErrorCode.REVIEWER_INVALID_OUTPUT)
         cleanup = CwError(

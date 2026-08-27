@@ -407,7 +407,15 @@ def private_runtime_directory(root: Path, namespace: str):
                     except OSError:
                         pass
                 elif path.exists():
-                    os.utime(path, ns=original[path], follow_symlinks=False)
+                    try:
+                        os.utime(path, ns=original[path], follow_symlinks=False)
+                    except NotImplementedError:
+                        if path.is_symlink():
+                            raise CwError(
+                                "Verification runtime namespace is unsafe",
+                                ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR,
+                            )
+                        os.utime(path, ns=original[path])
         except OSError as exc:
             cleanup_error = CwError(
                 "Verification runtime namespace cleanup failed",
