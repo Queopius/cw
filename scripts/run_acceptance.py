@@ -590,6 +590,23 @@ def _prepare_plan(cw: Path, root: Path, environment: dict[str, str], phases: int
          diagnostic_stage="plan.approve", diagnostic_executable="cw", diagnostic_command="plan")
 
 
+def _managed_child_is_running(pid: int, *, proc_root: Path = Path("/proc")) -> bool:
+    """Treat a POSIX zombie as terminated without trusting PID existence alone."""
+    if not process_is_alive(pid):
+        return False
+    if os.name == "nt":
+        return True
+    try:
+        tail = (proc_root / str(pid) / "stat").read_text(encoding="utf-8").rpartition(")"
+        )[2].lstrip()
+    except FileNotFoundError:
+        # The process may have exited after the first liveness probe.
+        return process_is_alive(pid)
+    except OSError:
+        return True
+    return not tail.startswith("Z")
+
+
 def _state(root: Path) -> dict[str, Any]:
     with _operation_stage("acceptance.operation.state_load"):
         return json.loads((root / ".cw/state.json").read_text(encoding="utf-8"))
@@ -771,10 +788,10 @@ def _interrupt(cw: Path, base: Path, environment: dict[str, str]) -> None:
                 child_pid = int(json.loads(active_path.read_text(encoding="utf-8")).get("process_pid") or 0)
             except (OSError, TypeError, ValueError, json.JSONDecodeError):
                 child_pid = 0
-            if child_pid and process_is_alive(child_pid):
+            if child_pid and _managed_child_is_running(child_pid):
                 break
             time.sleep(0.1)
-        if not child_pid or not process_is_alive(child_pid):
+        if not child_pid or not _managed_child_is_running(child_pid):
             if process.poll() is None:
                 process.kill()
             process.communicate(timeout=5)
@@ -793,9 +810,9 @@ def _interrupt(cw: Path, base: Path, environment: dict[str, str]) -> None:
                 stage="interrupt.parent_exit",
             )
         child_deadline = time.monotonic() + 5
-        while process_is_alive(child_pid) and time.monotonic() < child_deadline:
+        while _managed_child_is_running(child_pid) and time.monotonic() < child_deadline:
             time.sleep(0.05)
-        if process_is_alive(child_pid):
+        if _managed_child_is_running(child_pid):
             raise AcceptanceFailure(
                 "interrupted CW left its managed child active",
                 stage="interrupt.child_cleanup",
@@ -804,7 +821,7 @@ def _interrupt(cw: Path, base: Path, environment: dict[str, str]) -> None:
         if process.poll() is None:
             process.kill()
             process.communicate(timeout=5)
-        if child_pid and process_is_alive(child_pid):
+        if child_pid and _managed_child_is_running(child_pid):
             if os.name == "nt":
                 subprocess.run(
                     ["taskkill", "/PID", str(child_pid), "/T", "/F"],
@@ -821,13 +838,11 @@ def _interrupt(cw: Path, base: Path, environment: dict[str, str]) -> None:
             stage="interrupt.partial_gate",
         )
     recovered_environment = {**environment, "CW_FAKE_CODEX_SCENARIO": "success"}
-    try:
-        _run([str(cw), "retry", "--json"], cwd=root, environment=recovered_environment)
-    except AcceptanceFailure as error:
-        raise AcceptanceFailure(
-            "interrupted CW retry did not complete",
-            stage="interrupt.retry",
-        ) from error
+    _run(
+        [str(cw), "retry", "--json"], cwd=root, environment=recovered_environment,
+        diagnostic_stage="interrupt.retry", diagnostic_executable="cw",
+        diagnostic_command="retry",
+    )
     if _state(root).get("status") != "COMPLETED":
         raise AcceptanceFailure(
             "interrupted workflow was not recoverable through cw retry",
