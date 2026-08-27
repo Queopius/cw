@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from hashlib import sha256
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,10 +16,13 @@ from scripts.run_acceptance import (
     _environment,
     _install_fake_codex,
     _interrupt,
+    _json_object,
+    _managed_child_is_running,
     _operation_stage,
     _result,
     _run,
     _safe_regular_text,
+    _single_phase,
     _text_traceback_frames,
     _validate_diagnostic,
     _validate_report,
@@ -36,7 +40,7 @@ class AcceptanceHarnessTests(unittest.TestCase):
         return {"correlation_id": correlation, "code": "INTERNAL_ERROR", "message": self.canaries[1], "source": "plan", "exception_type": "ValueError", "traceback": [{"path": r"C:\host\site-packages\cw\cli\runner.py", "function": "run", "line": 73, "exception_type": "ValueError", "message": self.canaries[2]}]}
 
     def _write_record(self, root: Path, record: dict[str, object]) -> None:
-        (root / ".cw/logs").mkdir(parents=True)
+        (root / ".cw/logs").mkdir(parents=True, exist_ok=True)
         (root / ".cw/logs/last-error.json").write_text(json.dumps(record), encoding="utf-8")
 
     def _cw_error(self, correlation: str) -> subprocess.CompletedProcess[str]:
@@ -86,12 +90,12 @@ class AcceptanceHarnessTests(unittest.TestCase):
             process = self._InterruptProcess(returncode)
             alive = list(child_alive if child_alive is not None else [True, True, False, False])
             clock = iter(monotonic if monotonic is not None else [0.0, 0.0, 0.0])
-            retry = AcceptanceFailure("private retry failure") if retry_error else None
+            retry = AcceptanceFailure("private retry failure", stage="interrupt.retry") if retry_error else None
             with patch("scripts.run_acceptance._repository", return_value=root), patch(
                 "scripts.run_acceptance._prepare_plan"
             ), patch("scripts.run_acceptance.subprocess.Popen", return_value=process), patch(
                 "scripts.run_acceptance.os.killpg"
-            ), patch("scripts.run_acceptance.process_is_alive", side_effect=lambda _pid: alive.pop(0) if alive else False), patch(
+            ), patch("scripts.run_acceptance._managed_child_is_running", side_effect=lambda _pid: alive.pop(0) if alive else False), patch(
                 "scripts.run_acceptance.time.monotonic", side_effect=lambda: next(clock)), patch(
                 "scripts.run_acceptance.time.sleep"
             ), patch(
@@ -101,6 +105,36 @@ class AcceptanceHarnessTests(unittest.TestCase):
             ):
                 try:
                     _interrupt(Path("cw"), root.parent, {})
+                except AcceptanceFailure as error:
+                    return error
+        return None
+
+    def _single_failure(
+        self, *, state: dict[str, object] | None = None, gates: int = 1,
+        status: str = '{"state":"COMPLETED"}', inspect: str = '{"run":{"run_id":"run-1"}}',
+        command_failure: str | None = None,
+    ) -> AcceptanceFailure | None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "project"; gates_dir = root / ".cw/gates"; gates_dir.mkdir(parents=True)
+            for index in range(gates):
+                (gates_dir / f"{index}.approved.json").write_text("{}", encoding="utf-8")
+            values = {"status": status, "inspect": inspect}
+            def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+                name = command[1] if len(command) > 1 else "run"
+                if name == command_failure:
+                    raise AcceptanceFailure("private command failure", stage=f"acceptance.operation.{name}_command")
+                if name == "status":
+                    return subprocess.CompletedProcess(command, 0, values["status"], "")
+                if name == "inspect":
+                    return subprocess.CompletedProcess(command, 0, values["inspect"], "")
+                return subprocess.CompletedProcess(command, 0, "{}", "")
+            with patch("scripts.run_acceptance._repository", return_value=root), patch(
+                "scripts.run_acceptance._prepare_plan"
+            ), patch("scripts.run_acceptance._run", side_effect=fake_run), patch(
+                "scripts.run_acceptance._state", return_value=state or {"status": "COMPLETED", "current_phase": None}
+            ):
+                try:
+                    _single_phase(Path("cw"), root.parent, {})
                 except AcceptanceFailure as error:
                     return error
         return None
@@ -210,6 +244,33 @@ class AcceptanceHarnessTests(unittest.TestCase):
         self.assertEqual("interrupt.child_start", raised.exception.stage)
         self.assertNotIn("private path", str(raised.exception))
 
+    def test_single_phase_final_contracts_have_distinct_stages(self):
+        cases = {
+            "acceptance.operation.single_state": {"state": {"status": "ERROR", "current_phase": None}},
+            "acceptance.operation.single_gate": {"gates": 0},
+            "acceptance.operation.status_json": {"status": "not json"},
+            "acceptance.operation.status_contract": {"status": '{"state":"ERROR"}'},
+            "acceptance.operation.inspect_json": {"inspect": "not json"},
+            "acceptance.operation.inspect_contract": {"inspect": '{"run":{}}'},
+            "acceptance.operation.history_command": {"command_failure": "history"},
+            "acceptance.operation.logs_command": {"command_failure": "logs"},
+            "acceptance.operation.doctor_command": {"command_failure": "doctor"},
+        }
+        for stage, kwargs in cases.items():
+            with self.subTest(stage=stage):
+                failure = self._single_failure(**kwargs)
+                self.assertIsNotNone(failure)
+                assert failure is not None
+                self.assertEqual(stage, failure.stage)
+        self.assertIsNone(self._single_failure())
+
+    def test_json_object_rejects_concatenation_and_non_object_without_output(self):
+        for value in ("{}{}", "[]", "null"):
+            with self.subTest(value=value), self.assertRaises(AcceptanceFailure) as raised:
+                _json_object(value, stage="acceptance.operation.status_json")
+            self.assertEqual("acceptance.operation.status_json", raised.exception.stage)
+            self.assertNotIn(value, str(raised.exception))
+
     def test_text_traceback_allows_only_relative_cw_frames_on_windows_and_posix(self):
         trace = ('Traceback (most recent call last):\n'
                  '  File "C:\\Users\\RUNNER~1\\site-packages\\cw\\cli\\runner.py", line 71, in run\n'
@@ -263,6 +324,128 @@ class AcceptanceHarnessTests(unittest.TestCase):
                 self.assertRegex(failure.stage, r"^interrupt\.[a-z_]+$")
                 self.assertNotIn("STDOUT_PRIVATE_CANARY", str(failure))
                 self.assertNotIn("STDERR_PRIVATE_CANARY", str(failure))
+
+    def test_posix_zombie_child_is_not_reported_as_running(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            proc_root = Path(temporary) / "proc" / "991"
+            proc_root.mkdir(parents=True)
+            (proc_root / "stat").write_text("991 (fake child) Z 1 1 1", encoding="utf-8")
+            with patch("scripts.run_acceptance.process_is_alive", return_value=True):
+                self.assertFalse(_managed_child_is_running(991, proc_root=proc_root.parent))
+            (proc_root / "stat").write_text("991 (fake child) S 1 1 1", encoding="utf-8")
+            with patch("scripts.run_acceptance.process_is_alive", return_value=True):
+                self.assertTrue(_managed_child_is_running(991, proc_root=proc_root.parent))
+            with patch("scripts.run_acceptance.process_is_alive", return_value=False):
+                self.assertFalse(_managed_child_is_running(991, proc_root=proc_root.parent))
+            (proc_root / "stat").unlink()
+            with patch("scripts.run_acceptance.process_is_alive", side_effect=[True, False]):
+                self.assertFalse(_managed_child_is_running(991, proc_root=proc_root.parent))
+            with patch("scripts.run_acceptance.process_is_alive", side_effect=[True, True]):
+                self.assertTrue(_managed_child_is_running(991, proc_root=proc_root.parent))
+
+    def test_interrupt_retry_preserves_original_run_failure_metadata(self):
+        """The retry failure must remain binding-capable after _interrupt()."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "project"
+            (root / ".cw/runtime").mkdir(parents=True)
+            (root / ".cw/runtime/active-run.json").write_text(
+                json.dumps({"process_pid": 991}), encoding="utf-8",
+            )
+            process = self._InterruptProcess()
+            correlation = sha256(
+                b"retry\0INTERNAL_ERROR\0Unexpected internal failure",
+            ).hexdigest()[:16]
+            original = AcceptanceFailure(
+                "private retry failure", stage="unexpected", executable="cw",
+                command_name="retry", exit_code=1, executable_path="cw-private",
+                cwd=root, environment={"PRIVATE_ENV": self.canaries[2]},
+                envelope_code="INTERNAL_ERROR", envelope_correlation=correlation,
+                error_fingerprint="before",
+            )
+            captured: dict[str, object] = {}
+
+            def retry(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                captured["command"] = command
+                captured.update(kwargs)
+                raise original
+
+            alive = iter([True, True, False, False])
+            with patch("scripts.run_acceptance._repository", return_value=root), patch(
+                "scripts.run_acceptance._prepare_plan"
+            ), patch("scripts.run_acceptance.subprocess.Popen", return_value=process), patch(
+                "scripts.run_acceptance.os.killpg"
+            ), patch(
+                "scripts.run_acceptance._managed_child_is_running", side_effect=lambda _pid: next(alive, False)
+            ), patch("scripts.run_acceptance.time.sleep"), patch(
+                "scripts.run_acceptance._run", side_effect=retry
+            ), patch("scripts.run_acceptance._state", return_value={"status": "COMPLETED"}), self.assertRaises(
+                AcceptanceFailure
+            ) as raised:
+                _interrupt(Path("cw"), root.parent, {})
+
+        self.assertIs(raised.exception, original)
+        self.assertEqual("interrupt.retry", captured["diagnostic_stage"])
+        self.assertEqual("cw", captured["diagnostic_executable"])
+        self.assertEqual("retry", captured["diagnostic_command"])
+        self.assertEqual(["cw", "retry", "--json"], captured["command"])
+        self.assertEqual(1, raised.exception.exit_code)
+        self.assertEqual("INTERNAL_ERROR", raised.exception.envelope_code)
+        self.assertEqual(correlation, raised.exception.envelope_correlation)
+        self.assertEqual("before", raised.exception.error_fingerprint)
+        self.assertEqual(root, raised.exception.cwd)
+        self.assertEqual(self.canaries[2], raised.exception.environment["PRIVATE_ENV"])
+
+    def test_run_failure_binds_retry_record_without_publishing_private_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "project"
+            logs = root / ".cw/logs"
+            logs.mkdir(parents=True)
+            (logs / "last-error.json").write_text('{"old": true}', encoding="utf-8")
+            correlation = sha256(
+                b"retry\0INTERNAL_ERROR\0Unexpected internal failure",
+            ).hexdigest()[:16]
+            completed = subprocess.CompletedProcess(
+                ["cw", "retry", "--json"], 1,
+                json.dumps({"error": {"code": "INTERNAL_ERROR", "correlation_id": correlation}}),
+                self.canaries[7],
+            )
+            with patch("scripts.run_acceptance.subprocess.run", return_value=completed), self.assertRaises(
+                AcceptanceFailure
+            ) as raised:
+                _run(
+                    ["cw-private", "retry", "--json"], cwd=root,
+                    environment={"PRIVATE_ENV": self.canaries[2]},
+                    diagnostic_stage="interrupt.retry", diagnostic_executable="cw",
+                    diagnostic_command="retry",
+                )
+            record = {
+                "source": "retry", "code": "INTERNAL_ERROR",
+                "message": "Unexpected internal failure", "correlation_id": correlation,
+                "safe_traceback": {"version": 1, "exception_type": "OSError", "frames": [
+                    {"module": "cw.recovery", "function": "retry", "line": 77},
+                ]},
+            }
+            self._write_record(root, record)
+            diagnostic = _capture_cw_diagnostic(raised.exception)
+            output = root / "artifacts/compatibility-report.json"
+            _write_diagnostic(output, raised.exception, base=root, source_commit="unused")
+            artifact = output.with_name("compatibility-diagnostic.json").read_text(encoding="utf-8")
+
+        self.assertEqual("interrupt.retry", raised.exception.stage)
+        self.assertEqual(1, raised.exception.exit_code)
+        self.assertEqual("INTERNAL_ERROR", raised.exception.envelope_code)
+        self.assertEqual(correlation, raised.exception.envelope_correlation)
+        self.assertTrue(diagnostic["project_metadata_present"])
+        self.assertTrue(diagnostic["envelope_code_present"])
+        self.assertTrue(diagnostic["envelope_correlation_present"])
+        self.assertTrue(diagnostic["last_error_changed"])
+        self.assertTrue(diagnostic["record_found"])
+        self.assertTrue(diagnostic["correlation_match"])
+        self.assertTrue(diagnostic["code_match"])
+        self.assertEqual("captured", diagnostic["diagnostic_status"])
+        self.assertNotIn(correlation, artifact)
+        for private_value in (*self.canaries, "cw-private", "PRIVATE_ENV", "--json"):
+            self.assertNotIn(private_value, artifact)
 
     def test_interrupt_success_remains_pass_and_failure_artifact_is_redacted(self):
         self.assertIsNone(self._interrupt_failure())
