@@ -26,7 +26,7 @@ from cw.output_protocol import (
     sanitize_output,
     validate_machine_options,
 )
-from cw.ui.console import Console, emit_json, error_summary
+from cw.ui.console import Console, emit_json, error_summary, json_output_stream
 from cw.ui.renderers import render_help, render_update_notice
 from cw.update.service import automatic_update_notice
 
@@ -264,9 +264,13 @@ def _run_machine(
     args.quiet = False
     captured = io.StringIO()
     diagnostics = io.StringIO()
-    console = Console(stream=captured, no_color=True, quiet=False)
+    console = Console(stream=diagnostics, no_color=True, quiet=False)
     try:
-        with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(diagnostics):
+        with (
+            json_output_stream(captured),
+            contextlib.redirect_stdout(diagnostics),
+            contextlib.redirect_stderr(diagnostics),
+        ):
             if command == "help":
                 result = 0
                 emit_json({"commands": [*commands, "help"]})
