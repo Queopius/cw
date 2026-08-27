@@ -4,6 +4,8 @@ import json
 import os
 import shutil
 import sys
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, TextIO
 
@@ -11,6 +13,17 @@ from cw import __version__
 
 from .layout import DEFAULT_WIDTH, bounded_width, visible_ljust, wrap
 from .theme import MARKER_COLORS, STATE_COLORS
+
+_JSON_OUTPUT_STREAM: ContextVar[TextIO | None] = ContextVar("cw_json_output_stream", default=None)
+
+
+@contextmanager
+def json_output_stream(stream: TextIO):
+    token = _JSON_OUTPUT_STREAM.set(stream)
+    try:
+        yield
+    finally:
+        _JSON_OUTPUT_STREAM.reset(token)
 
 
 @dataclass(slots=True)
@@ -138,7 +151,7 @@ def emit_json(payload: Any, stream: TextIO | None = None) -> None:
     # streaming commands to use the same function as a JSONL transport.
     print(
         json.dumps(payload, ensure_ascii=False, sort_keys=True),
-        file=stream or sys.stdout,
+        file=stream or _JSON_OUTPUT_STREAM.get() or sys.stdout,
         flush=True,
     )
 

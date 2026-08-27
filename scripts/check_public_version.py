@@ -7,6 +7,10 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    from scripts.hero_demo import recording_is_patch_compatible
+except ModuleNotFoundError:  # Direct `python scripts/check_public_version.py` execution.
+    from hero_demo import recording_is_patch_compatible
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
@@ -55,9 +59,10 @@ def _errors() -> list[str]:
     hero_version = artifact.get("cw_version")
     if not isinstance(hero_version, str):
         errors.append("demo/hero/hero-demo.json missing string `cw_version`.")
-    elif hero_version != VERSION:
+    elif not recording_is_patch_compatible(hero_version, VERSION):
         errors.append(
-            f"demo/hero/hero-demo.json has cw_version `{hero_version}`, expected `{VERSION}`."
+            "demo/hero/hero-demo.json is not a validated recording from the current "
+            f"or immediately preceding minor line (`{hero_version}` vs `{VERSION}`)."
         )
 
     return errors

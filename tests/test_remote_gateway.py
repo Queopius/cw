@@ -125,18 +125,17 @@ class RemoteFixture(unittest.IsolatedAsyncioTestCase):
         return await dispatch
 
     async def wait_remote(self, target: str, *, timeout: float = 5) -> dict:
-        deadline = time.monotonic() + timeout
-        poll = 0
-        while time.monotonic() < deadline:
-            result_payload = await self.call(
-                "cw_operation_status", f"poll-{target}-{poll}",
-                target_operation_id=target,
-            )
-            if result_payload["status"] not in {"QUEUED", "RUNNING"}:
-                return result_payload
-            poll += 1
-            await asyncio.sleep(0.01)
-        self.fail(f"remote operation did not finish: {target}")
+        # The in-process fixture has a local completion future.  Awaiting it
+        # prevents an artificial burst of remote status calls from exhausting
+        # the production rate limiter while still asserting the public status
+        # result through the gateway exactly once.
+        local_id = self.runtime.runtime.project_handles()[0]["repository_id"]
+        future = self.runtime.runtime.application._operations._futures.get((local_id, target))
+        self.assertIsNotNone(future, f"remote operation was not registered: {target}")
+        await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
+        return await self.call(
+            "cw_operation_status", f"poll-{target}", target_operation_id=target,
+        )
 
 
 class RemoteReadEndToEndTests(RemoteFixture):
