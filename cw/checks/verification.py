@@ -73,7 +73,11 @@ def _safe_runtime(path: Path) -> None:
         )
     probe = path / "preflight.tmp"
     renamed = path / "preflight.ready"
-    descriptor = os.open(probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    descriptor = os.open(
+        probe,
+        os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0),
+        0o600,
+    )
     try:
         payload = b"cw-verification-preflight\n"
         written = 0

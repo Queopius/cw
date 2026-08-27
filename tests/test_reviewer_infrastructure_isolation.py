@@ -467,6 +467,23 @@ class VerificationExecutorTests(unittest.TestCase):
 
         self.assertGreaterEqual(writes, 2)
 
+    def test_runtime_preflight_uses_binary_mode_when_windows_supports_it(self) -> None:
+        binary_flag = 0x8000
+        actual_open = os.open
+        observed_flags: list[int] = []
+
+        def windows_open(path: str | bytes | os.PathLike[str] | os.PathLike[bytes], flags: int, mode: int) -> int:
+            observed_flags.append(flags)
+            return actual_open(path, flags & ~binary_flag, mode)
+
+        with tempfile.TemporaryDirectory() as temporary, patch.object(
+            os, "O_BINARY", binary_flag, create=True
+        ), patch("cw.checks.verification.os.open", side_effect=windows_open):
+            _safe_runtime(Path(temporary))
+
+        self.assertEqual(1, len(observed_flags))
+        self.assertNotEqual(0, observed_flags[0] & binary_flag)
+
     def test_private_runtime_cleanup_failure_is_classified_and_chains_primary(self) -> None:
         primary = CwError("reviewer output invalid", ErrorCode.REVIEWER_INVALID_OUTPUT)
         cleanup = CwError(
