@@ -595,27 +595,67 @@ def _state(root: Path) -> dict[str, Any]:
         return json.loads((root / ".cw/state.json").read_text(encoding="utf-8"))
 
 
+def _json_object(value: str, *, stage: str) -> dict[str, Any]:
+    """Fail closed on any non-object or non-single JSON command response."""
+
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise AcceptanceFailure("acceptance command returned invalid JSON", stage=stage) from exc
+    if not isinstance(payload, dict):
+        raise AcceptanceFailure("acceptance command returned a non-object JSON value", stage=stage)
+    return payload
+
+
 def _single_phase(cw: Path, base: Path, environment: dict[str, str]) -> tuple[Path, str]:
     root = _repository(base, "single phase", environment)
     _prepare_plan(cw, root, environment, 1)
     environment["CW_FAKE_CODEX_SCENARIO"] = "success"
     with _operation_stage("acceptance.operation.first_run"):
         _run([str(cw)], cwd=root, environment=environment)
-    with _operation_stage("acceptance.operation.final_state"):
+    with _operation_stage("acceptance.operation.single_state"):
         state = _state(root)
         if state.get("status") != "COMPLETED" or state.get("current_phase") is not None:
             raise AcceptanceFailure(f"single-phase state is not complete: {state}")
+    with _operation_stage("acceptance.operation.single_gate"):
         gates = sorted((root / ".cw/gates").glob("*.approved.json"))
         if len(gates) != 1:
             raise AcceptanceFailure(f"single-phase gate count is {len(gates)}")
-        status = json.loads(_run([str(cw), "status", "--json"], cwd=root, environment=environment).stdout)
+    status_response = _run(
+        [str(cw), "status", "--json"], cwd=root, environment=environment,
+        diagnostic_stage="acceptance.operation.status_command", diagnostic_executable="cw",
+        diagnostic_command="status",
+    )
+    status = _json_object(status_response.stdout, stage="acceptance.operation.status_json")
+    with _operation_stage("acceptance.operation.status_contract"):
         if status.get("state") != "COMPLETED":
             raise AcceptanceFailure("cw status did not derive COMPLETED")
-        _run([str(cw), "history", "--json"], cwd=root, environment=environment)
-        inspected = json.loads(_run([str(cw), "inspect", "run", "--json"], cwd=root, environment=environment).stdout)
-        run_id = str(inspected["run"]["run_id"])
-        _run([str(cw), "logs", "--run", run_id, "--json"], cwd=root, environment=environment)
-        _run([str(cw), "doctor", "--json"], cwd=root, environment=environment)
+    _run(
+        [str(cw), "history", "--json"], cwd=root, environment=environment,
+        diagnostic_stage="acceptance.operation.history_command", diagnostic_executable="cw",
+        diagnostic_command="history",
+    )
+    inspected_response = _run(
+        [str(cw), "inspect", "run", "--json"], cwd=root, environment=environment,
+        diagnostic_stage="acceptance.operation.inspect_command", diagnostic_executable="cw",
+        diagnostic_command="inspect",
+    )
+    inspected = _json_object(inspected_response.stdout, stage="acceptance.operation.inspect_json")
+    with _operation_stage("acceptance.operation.inspect_contract"):
+        run = inspected.get("run")
+        run_id = run.get("run_id") if isinstance(run, dict) else None
+        if not isinstance(run_id, str) or not _SAFE_IDENTIFIER.fullmatch(run_id):
+            raise AcceptanceFailure("cw inspect did not return a valid run identifier")
+    _run(
+        [str(cw), "logs", "--run", run_id, "--json"], cwd=root, environment=environment,
+        diagnostic_stage="acceptance.operation.logs_command", diagnostic_executable="cw",
+        diagnostic_command="logs",
+    )
+    _run(
+        [str(cw), "doctor", "--json"], cwd=root, environment=environment,
+        diagnostic_stage="acceptance.operation.doctor_command", diagnostic_executable="cw",
+        diagnostic_command="doctor",
+    )
     return root, run_id
 
 
@@ -628,11 +668,14 @@ def _multi_phase(cw: Path, base: Path, environment: dict[str, str]) -> None:
             [str(cw), "run", "3", "--yes", "--non-interactive", "--no-color"],
             cwd=root, environment=environment, timeout=240,
         )
-    with _operation_stage("acceptance.operation.final_state"):
+    with _operation_stage("acceptance.operation.multi_state"):
         state = _state(root)
+        if state.get("status") != "COMPLETED" or state.get("current_phase") is not None:
+            raise AcceptanceFailure("multi-phase workflow did not complete")
+    with _operation_stage("acceptance.operation.multi_gate"):
         gates = sorted((root / ".cw/gates").glob("*.approved.json"))
-        if state.get("status") != "COMPLETED" or state.get("current_phase") is not None or len(gates) != 3:
-            raise AcceptanceFailure("multi-phase workflow did not complete its contiguous gate chain")
+        if len(gates) != 3:
+            raise AcceptanceFailure("multi-phase workflow did not create three gates")
     with _operation_stage("acceptance.operation.determinism"):
         before = len(list((root / ".cw/logs/runs").glob("*.json")))
         _run([str(cw)], cwd=root, environment=environment)
@@ -647,11 +690,14 @@ def _multi_phase(cw: Path, base: Path, environment: dict[str, str]) -> None:
             [str(cw), "run", "--until", "02-acceptance-2", "--yes", "--non-interactive", "--no-color"],
             cwd=bounded, environment=environment, timeout=240,
         )
-    with _operation_stage("acceptance.operation.final_state"):
+    with _operation_stage("acceptance.operation.until_state"):
         bounded_state = _state(bounded)
+        if bounded_state.get("current_phase") != "03-acceptance-3":
+            raise AcceptanceFailure("cw run --until did not stop at the requested phase")
+    with _operation_stage("acceptance.operation.until_gate"):
         bounded_gates = sorted((bounded / ".cw/gates").glob("*.approved.json"))
-        if bounded_state.get("current_phase") != "03-acceptance-3" or len(bounded_gates) != 2:
-            raise AcceptanceFailure("cw run --until did not stop at the requested verified gate")
+        if len(bounded_gates) != 2:
+            raise AcceptanceFailure("cw run --until did not create two gates")
 
 
 def _recovery(cw: Path, root: Path, environment: dict[str, str]) -> None:

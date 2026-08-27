@@ -15,10 +15,12 @@ from scripts.run_acceptance import (
     _environment,
     _install_fake_codex,
     _interrupt,
+    _json_object,
     _operation_stage,
     _result,
     _run,
     _safe_regular_text,
+    _single_phase,
     _text_traceback_frames,
     _validate_diagnostic,
     _validate_report,
@@ -101,6 +103,36 @@ class AcceptanceHarnessTests(unittest.TestCase):
             ):
                 try:
                     _interrupt(Path("cw"), root.parent, {})
+                except AcceptanceFailure as error:
+                    return error
+        return None
+
+    def _single_failure(
+        self, *, state: dict[str, object] | None = None, gates: int = 1,
+        status: str = '{"state":"COMPLETED"}', inspect: str = '{"run":{"run_id":"run-1"}}',
+        command_failure: str | None = None,
+    ) -> AcceptanceFailure | None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "project"; gates_dir = root / ".cw/gates"; gates_dir.mkdir(parents=True)
+            for index in range(gates):
+                (gates_dir / f"{index}.approved.json").write_text("{}", encoding="utf-8")
+            values = {"status": status, "inspect": inspect}
+            def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+                name = command[1] if len(command) > 1 else "run"
+                if name == command_failure:
+                    raise AcceptanceFailure("private command failure", stage=f"acceptance.operation.{name}_command")
+                if name == "status":
+                    return subprocess.CompletedProcess(command, 0, values["status"], "")
+                if name == "inspect":
+                    return subprocess.CompletedProcess(command, 0, values["inspect"], "")
+                return subprocess.CompletedProcess(command, 0, "{}", "")
+            with patch("scripts.run_acceptance._repository", return_value=root), patch(
+                "scripts.run_acceptance._prepare_plan"
+            ), patch("scripts.run_acceptance._run", side_effect=fake_run), patch(
+                "scripts.run_acceptance._state", return_value=state or {"status": "COMPLETED", "current_phase": None}
+            ):
+                try:
+                    _single_phase(Path("cw"), root.parent, {})
                 except AcceptanceFailure as error:
                     return error
         return None
@@ -209,6 +241,33 @@ class AcceptanceHarnessTests(unittest.TestCase):
                 _interrupt(Path("cw"), root.parent, {})
         self.assertEqual("interrupt.child_start", raised.exception.stage)
         self.assertNotIn("private path", str(raised.exception))
+
+    def test_single_phase_final_contracts_have_distinct_stages(self):
+        cases = {
+            "acceptance.operation.single_state": {"state": {"status": "ERROR", "current_phase": None}},
+            "acceptance.operation.single_gate": {"gates": 0},
+            "acceptance.operation.status_json": {"status": "not json"},
+            "acceptance.operation.status_contract": {"status": '{"state":"ERROR"}'},
+            "acceptance.operation.inspect_json": {"inspect": "not json"},
+            "acceptance.operation.inspect_contract": {"inspect": '{"run":{}}'},
+            "acceptance.operation.history_command": {"command_failure": "history"},
+            "acceptance.operation.logs_command": {"command_failure": "logs"},
+            "acceptance.operation.doctor_command": {"command_failure": "doctor"},
+        }
+        for stage, kwargs in cases.items():
+            with self.subTest(stage=stage):
+                failure = self._single_failure(**kwargs)
+                self.assertIsNotNone(failure)
+                assert failure is not None
+                self.assertEqual(stage, failure.stage)
+        self.assertIsNone(self._single_failure())
+
+    def test_json_object_rejects_concatenation_and_non_object_without_output(self):
+        for value in ("{}{}", "[]", "null"):
+            with self.subTest(value=value), self.assertRaises(AcceptanceFailure) as raised:
+                _json_object(value, stage="acceptance.operation.status_json")
+            self.assertEqual("acceptance.operation.status_json", raised.exception.stage)
+            self.assertNotIn(value, str(raised.exception))
 
     def test_text_traceback_allows_only_relative_cw_frames_on_windows_and_posix(self):
         trace = ('Traceback (most recent call last):\n'
