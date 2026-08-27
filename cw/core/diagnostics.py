@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -7,13 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from .errors import CwError, ErrorCode
+from .platform import global_config_dir
 from .schema import SCHEMA_VERSION
 from .utils import atomic_json, load_json, utc_now
-from .platform import global_config_dir
-
 
 LAST_ERROR = ".cw/logs/last-error.json"
 ERROR_HISTORY = ".cw/logs/errors.jsonl"
+_CORRELATION_ID = re.compile(r"^[0-9a-f]{16}$")
 _REDACTIONS = (
     re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[^\s]+"),
     re.compile(r"(?i)\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret)\s*[=:]\s*)[^\s,;]+"),
@@ -38,6 +39,11 @@ def redact(value: str | None) -> str | None:
     return result
 
 
+def correlation_id(command: str, code: str, message: str) -> str:
+    """Return the single machine-error identity for one CW invocation."""
+    return hashlib.sha256(f"{command}\0{code}\0{message}".encode()).hexdigest()[:16]
+
+
 def _logs_directory(root: Path, *, create: bool) -> Path | None:
     runtime = root / ".cw"
     if not runtime.is_dir() or runtime.is_symlink():
@@ -56,6 +62,9 @@ def _valid_record(value: Any) -> dict[str, Any] | None:
     if value.get("schema_version") != SCHEMA_VERSION:
         return None
     if not all(isinstance(value.get(key), str) and value[key] for key in ("timestamp", "code", "message")):
+        return None
+    correlation = value.get("correlation_id")
+    if correlation is not None and (not isinstance(correlation, str) or not _CORRELATION_ID.fullmatch(correlation)):
         return None
     return value
 
@@ -89,6 +98,7 @@ def record_diagnostic(
     *,
     source: str | None = None,
     traceback_text: str | None = None,
+    correlation_id: str | None = None,
 ) -> dict[str, Any] | None:
     logs = _logs_directory(root, create=True)
     if logs is None:
@@ -103,6 +113,8 @@ def record_diagnostic(
         "source": redact(source),
         "traceback": redact(traceback_text),
     }
+    if correlation_id is not None and _CORRELATION_ID.fullmatch(correlation_id):
+        record["correlation_id"] = correlation_id
     previous = load_diagnostic(root)
     duplicate = previous is not None and all(
         previous.get(key) == record.get(key)
@@ -120,6 +132,7 @@ def global_diagnostic_path() -> Path:
 
 def record_global_diagnostic(
     error: CwError, *, source: str | None = None, traceback_text: str | None = None,
+    correlation_id: str | None = None,
 ) -> dict[str, Any]:
     record: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -131,6 +144,8 @@ def record_global_diagnostic(
         "source": redact(source),
         "traceback": redact(traceback_text),
     }
+    if correlation_id is not None and _CORRELATION_ID.fullmatch(correlation_id):
+        record["correlation_id"] = correlation_id
     atomic_json(global_diagnostic_path(), record)
     return record
 

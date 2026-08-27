@@ -241,7 +241,15 @@ def _text_traceback_frames(value: Any, exception_type: str | None) -> list[dict[
         return []
     frames: list[dict[str, Any]] = []
     pattern = re.compile(r'^\s*File "(?P<path>[^"]+)", line (?P<line>\d+), in (?P<function>[A-Za-z_][A-Za-z0-9_]*)\s*$')
-    safe_type = exception_type if isinstance(exception_type, str) and _SAFE_IDENTIFIER.fullmatch(exception_type) else "Exception"
+    safe_type = exception_type if isinstance(exception_type, str) and _SAFE_IDENTIFIER.fullmatch(exception_type) else None
+    if safe_type is None:
+        type_pattern = re.compile(r"^\s*(?P<type>[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Exit|Interrupt))(?::|$)")
+        for line in reversed(value.splitlines()):
+            match = type_pattern.match(line)
+            if match is not None:
+                safe_type = match.group("type")
+                break
+    safe_type = safe_type or "Exception"
     for line in value.splitlines():
         match = pattern.match(line)
         if match is None:
@@ -259,7 +267,8 @@ def _record_diagnostic(record: dict[str, Any], correlation: str, command: str) -
     error: dict[str, Any] = nested_error if isinstance(nested_error, dict) else payload
     code = error.get("code")
     message = error.get("message")
-    if not (isinstance(code, str) and isinstance(message, str)):
+    source = record.get("source")
+    if not (isinstance(code, str) and isinstance(message, str) and source == command):
         return None
     expected = hashlib.sha256(f"{command}\0{code}\0{message}".encode()).hexdigest()[:16]
     stored = _correlation_id(record)

@@ -481,21 +481,35 @@ COMMANDS = {
 }
 
 
-def _record_error(exc: CwError, *, source: str | None = None, traceback_text: str | None = None) -> None:
+def _record_error(
+    exc: CwError,
+    *,
+    source: str | None = None,
+    traceback_text: str | None = None,
+    correlation_id: str | None = None,
+) -> None:
     if source == "update":
         try:
-            record_global_diagnostic(exc, source=source, traceback_text=traceback_text)
+            record_global_diagnostic(
+                exc, source=source, traceback_text=traceback_text, correlation_id=correlation_id,
+            )
         except Exception:
             pass
         return
     try:
         root = repository_root(Path.cwd())
-        record = record_diagnostic(root, exc, source=source, traceback_text=traceback_text)
+        record = record_diagnostic(
+            root, exc, source=source, traceback_text=traceback_text, correlation_id=correlation_id,
+        )
         if record is None:
-            record_global_diagnostic(exc, source=source, traceback_text=traceback_text)
+            record_global_diagnostic(
+                exc, source=source, traceback_text=traceback_text, correlation_id=correlation_id,
+            )
     except Exception:
         try:
-            record_global_diagnostic(exc, source=source, traceback_text=traceback_text)
+            record_global_diagnostic(
+                exc, source=source, traceback_text=traceback_text, correlation_id=correlation_id,
+            )
         except Exception:
             pass
 

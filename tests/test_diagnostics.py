@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cw.cli.main import main
-from cw.core.diagnostics import load_diagnostic, record_diagnostic
+from cw.core.diagnostics import correlation_id, load_diagnostic, record_diagnostic
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import create_gate
 from tests.helpers import TempRepo
@@ -123,6 +123,44 @@ class DiagnosticTests(unittest.TestCase):
         record_diagnostic(self.repo.root, error, source="status")
         history = (self.repo.root / ".cw/logs/errors.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertEqual(1, len(history))
+
+    def test_machine_internal_error_uses_one_correlation_id_in_envelope_and_records(self):
+        goal_canary = "goal-private-canary"
+        token_canary = "token-private-canary"
+        with patch("cw.cli.main.COMMANDS", {"plan": lambda *_: (_ for _ in ()).throw(
+            RuntimeError(f"{goal_canary} {token_canary}"),
+        )}):
+            code, output = self.invoke("plan", "--goal", goal_canary, "--output=json")
+
+        self.assertEqual(1, code)
+        self.assertEqual(1, len(output.splitlines()))
+        payload = json.loads(output)
+        error = payload["error"]
+        self.assertEqual("INTERNAL_ERROR", error["code"])
+        self.assertEqual("Unexpected internal failure", error["message"])
+        self.assertRegex(error["correlation_id"], r"^[0-9a-f]{16}$")
+        self.assertEqual(
+            correlation_id("plan", "INTERNAL_ERROR", "Unexpected internal failure"),
+            error["correlation_id"],
+        )
+        record = load_diagnostic(self.repo.root)
+        self.assertIsNotNone(record)
+        self.assertEqual(error["correlation_id"], record["correlation_id"])
+        history = [json.loads(line) for line in (self.repo.root / ".cw/logs/errors.jsonl").read_text(
+            encoding="utf-8",
+        ).splitlines()]
+        self.assertEqual(error["correlation_id"], history[-1]["correlation_id"])
+        self.assertNotIn(goal_canary, output)
+        self.assertNotIn(token_canary, output)
+        self.assertNotIn("RuntimeError", output)
+        self.assertNotIn("Traceback", output)
+
+    def test_legacy_diagnostic_without_correlation_id_remains_readable(self):
+        error = CwError("legacy failure", ErrorCode.INVALID_STATE)
+        record_diagnostic(self.repo.root, error, source="status")
+        record = load_diagnostic(self.repo.root)
+        self.assertIsNotNone(record)
+        self.assertNotIn("correlation_id", record)
 
 
 if __name__ == "__main__":

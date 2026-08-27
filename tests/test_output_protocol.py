@@ -174,6 +174,7 @@ class OutputProtocolTests(unittest.TestCase):
         self.assertNotIn("should-not-leak", stdout)
         self.assertNotIn("/home/operator", stdout)
         self.assertNotIn("details", payload["error"])
+        self.assertEqual(payload["error"]["correlation_id"], recorded[0][1]["correlation_id"])
 
     def test_debug_uses_only_redacted_stderr(self):
         failure = CwError(

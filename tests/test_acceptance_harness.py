@@ -31,7 +31,7 @@ class AcceptanceHarnessTests(unittest.TestCase):
         return AcceptanceFailure("raw failure", stage="plan.create", executable="cw", command_name="plan", exit_code=1, executable_path="cw", cwd=root, environment={"PRIVATE_ENV": self.canaries[2]}, envelope_code="INTERNAL_ERROR", envelope_correlation=correlation, error_fingerprint="before")
 
     def _record(self, correlation: str) -> dict[str, object]:
-        return {"correlation_id": correlation, "code": "INTERNAL_ERROR", "message": self.canaries[1], "exception_type": "ValueError", "traceback": [{"path": r"C:\host\site-packages\cw\cli\runner.py", "function": "run", "line": 73, "exception_type": "ValueError", "message": self.canaries[2]}]}
+        return {"correlation_id": correlation, "code": "INTERNAL_ERROR", "message": self.canaries[1], "source": "plan", "exception_type": "ValueError", "traceback": [{"path": r"C:\host\site-packages\cw\cli\runner.py", "function": "run", "line": 73, "exception_type": "ValueError", "message": self.canaries[2]}]}
 
     def _write_record(self, root: Path, record: dict[str, object]) -> None:
         (root / ".cw/logs").mkdir(parents=True)
@@ -77,6 +77,14 @@ class AcceptanceHarnessTests(unittest.TestCase):
                 self.assertEqual("unavailable", _capture_cw_diagnostic(self._failure(root, "corr_456"))["diagnostic_status"])
             with patch("scripts.run_acceptance.subprocess.run", return_value=self._cw_error("different_corr")):
                 self.assertEqual("unavailable", _capture_cw_diagnostic(self._failure(root, "different_corr"))["diagnostic_status"])
+
+    def test_diagnostic_record_requires_the_same_command_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); correlation = "corr_123"; record = self._record(correlation); record["source"] = "status"; self._write_record(root, record)
+            with patch("scripts.run_acceptance.subprocess.run", return_value=self._cw_error(correlation)):
+                captured = _capture_cw_diagnostic(self._failure(root, correlation))
+        self.assertEqual("unavailable", captured["diagnostic_status"])
+        self.assertEqual("correlation_mismatch", captured["binding_failure_reason"])
 
     def test_corrupt_oversized_symlink_and_hardlink_records_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -127,6 +135,9 @@ class AcceptanceHarnessTests(unittest.TestCase):
         self.assertEqual(["cw/cli/runner.py", "cw/checks/verification.py"], [frame["module"] for frame in frames])
         self.assertNotIn("private", json.dumps(frames))
         self.assertEqual([], _text_traceback_frames('File "/outside/private.py", line 1, in leak', "ValueError"))
+        self.assertEqual("ValueError", _text_traceback_frames(
+            'File "C:\\site-packages\\cw\\cli\\runner.py", line 7, in run\nValueError: private', None,
+        )[-1]["exception_type"])
 
     def test_canonical_root_is_existing_identity_and_rejects_unrelated_path(self):
         with tempfile.TemporaryDirectory() as temporary:
