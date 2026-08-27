@@ -48,17 +48,30 @@ def correlation_id(command: str, code: str, message: str) -> str:
 
 def safe_exception_frames(exc: BaseException) -> dict[str, Any] | None:
     """Serialize only bounded, package-owned traceback metadata."""
-    frames: list[dict[str, Any]] = []
-    for frame, line in traceback.walk_tb(exc.__traceback__):
-        module = frame.f_globals.get("__name__")
-        function = frame.f_code.co_name
-        if (isinstance(module, str) and (module == "cw" or module.startswith("cw."))
-                and _SAFE_IDENTIFIER.fullmatch(module.replace(".", "_"))
-                and _SAFE_IDENTIFIER.fullmatch(function) and isinstance(line, int) and line > 0):
-            frames.append({"module": module, "function": function, "line": line})
-    if not frames or not _SAFE_IDENTIFIER.fullmatch(type(exc).__name__):
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    chosen: tuple[str, list[dict[str, Any]]] | None = None
+    for _ in range(8):
+        if current is None or id(current) in seen:
+            break
+        seen.add(id(current))
+        frames: list[dict[str, Any]] = []
+        for frame, line in traceback.walk_tb(current.__traceback__):
+            module = frame.f_globals.get("__name__")
+            function = frame.f_code.co_name
+            if (isinstance(module, str) and (module == "cw" or module.startswith("cw."))
+                    and _SAFE_IDENTIFIER.fullmatch(module.replace(".", "_"))
+                    and _SAFE_IDENTIFIER.fullmatch(function) and isinstance(line, int) and line > 0):
+                frames.append({"module": module, "function": function, "line": line})
+        if frames and _SAFE_IDENTIFIER.fullmatch(type(current).__name__):
+            chosen = (type(current).__name__, frames[-12:])
+        next_error = current.__cause__
+        if next_error is None and not current.__suppress_context__:
+            next_error = current.__context__
+        current = next_error
+    if chosen is None:
         return None
-    return {"version": 1, "exception_type": type(exc).__name__, "frames": frames[-12:]}
+    return {"version": 1, "exception_type": chosen[0], "frames": chosen[1]}
 
 
 def _logs_directory(root: Path, *, create: bool) -> Path | None:

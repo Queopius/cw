@@ -103,7 +103,7 @@ def _render_cw_error(
     record_error: ErrorRecorder,
 ) -> int:
     correlation = correlation_id(command, error.code.value, error.message)
-    record_error(error, source=command, correlation_id=correlation)
+    record_error(error, source=command, correlation_id=correlation, safe_traceback=safe_exception_frames(error))
     if getattr(args, "hook", False):
         reason = f"{error.message}. {error.hint or 'Run: cw error'}"
         print(json.dumps({"continue": False, "stopReason": reason, "systemMessage": reason}))
@@ -318,7 +318,7 @@ def _run_machine(
         return result
     except CwError as error:
         correlation = correlation_id(identifier, error.code.value, error.message)
-        record_error(error, source=identifier, correlation_id=correlation)
+        record_error(error, source=identifier, correlation_id=correlation, safe_traceback=safe_exception_frames(error))
         _emit_protocol(envelope(
             identifier,
             status=(
