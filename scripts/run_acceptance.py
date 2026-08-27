@@ -275,9 +275,24 @@ def _record_diagnostic(record: dict[str, Any], correlation: str, command: str) -
     stored = _correlation_id(record)
     if not hmac.compare_digest(correlation, expected) and stored != correlation:
         return None
-    error_type = error.get("exception_type") or error.get("type")
-    frames = error.get("traceback") or error.get("frames") or []
-    safe_frames = [_safe_frame(frame) for frame in frames] if isinstance(frames, list) else _text_traceback_frames(frames, error_type)
+    structured = record.get("safe_traceback")
+    if isinstance(structured, dict):
+        error_type = structured.get("exception_type")
+        frames = structured.get("frames")
+        if structured.get("version") != 1 or not isinstance(error_type, str) or not _SAFE_IDENTIFIER.fullmatch(error_type) or not isinstance(frames, list):
+            return None
+        safe_frames = [
+            {"module": frame.get("module"), "function": frame.get("function"), "line": frame.get("line"), "exception_type": error_type, "message": _REDACTED_MESSAGE}
+            for frame in frames if isinstance(frame, dict) and isinstance(frame.get("module"), str) and frame["module"].startswith("cw.")
+            and isinstance(frame.get("function"), str) and _SAFE_IDENTIFIER.fullmatch(frame["function"])
+            and isinstance(frame.get("line"), int) and frame["line"] > 0
+        ]
+        if len(safe_frames) != len(frames) or not safe_frames:
+            return None
+    else:
+        error_type = error.get("exception_type") or error.get("type")
+        frames = error.get("traceback") or error.get("frames") or []
+        safe_frames = [_safe_frame(frame) for frame in frames] if isinstance(frames, list) else _text_traceback_frames(frames, error_type)
     safe_frames = [frame for frame in safe_frames if frame is not None][:12]
     primary = safe_frames[-1] if safe_frames else None
     return {

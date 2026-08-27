@@ -11,7 +11,7 @@ import traceback
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from cw.core.diagnostics import correlation_id
+from cw.core.diagnostics import correlation_id, safe_exception_frames
 from cw.core.errors import CwError, ErrorCode
 from cw.output_protocol import (
     OutputMode,
@@ -155,6 +155,7 @@ def _render_internal_error(
     correlation = correlation_id(command, internal.code.value, internal.message)
     record_error(
         internal, source=command, traceback_text=traceback.format_exc(), correlation_id=correlation,
+        safe_traceback=safe_exception_frames(error),
     )
     if args.json:
         emit_json({
@@ -352,6 +353,7 @@ def _run_machine(
         correlation = correlation_id(identifier, internal.code.value, internal.message)
         record_error(
             internal, source=identifier, traceback_text=traceback.format_exc(), correlation_id=correlation,
+            safe_traceback=safe_exception_frames(error),
         )
         _emit_protocol(envelope(
             identifier,

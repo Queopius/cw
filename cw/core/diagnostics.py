@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from .utils import atomic_json, load_json, utc_now
 LAST_ERROR = ".cw/logs/last-error.json"
 ERROR_HISTORY = ".cw/logs/errors.jsonl"
 _CORRELATION_ID = re.compile(r"^[0-9a-f]{16}$")
+_SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _REDACTIONS = (
     re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[^\s]+"),
     re.compile(r"(?i)\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret)\s*[=:]\s*)[^\s,;]+"),
@@ -42,6 +44,21 @@ def redact(value: str | None) -> str | None:
 def correlation_id(command: str, code: str, message: str) -> str:
     """Return the single machine-error identity for one CW invocation."""
     return hashlib.sha256(f"{command}\0{code}\0{message}".encode()).hexdigest()[:16]
+
+
+def safe_exception_frames(exc: BaseException) -> dict[str, Any] | None:
+    """Serialize only bounded, package-owned traceback metadata."""
+    frames: list[dict[str, Any]] = []
+    for frame, line in traceback.walk_tb(exc.__traceback__):
+        module = frame.f_globals.get("__name__")
+        function = frame.f_code.co_name
+        if (isinstance(module, str) and (module == "cw" or module.startswith("cw."))
+                and _SAFE_IDENTIFIER.fullmatch(module.replace(".", "_"))
+                and _SAFE_IDENTIFIER.fullmatch(function) and isinstance(line, int) and line > 0):
+            frames.append({"module": module, "function": function, "line": line})
+    if not frames or not _SAFE_IDENTIFIER.fullmatch(type(exc).__name__):
+        return None
+    return {"version": 1, "exception_type": type(exc).__name__, "frames": frames[-12:]}
 
 
 def _logs_directory(root: Path, *, create: bool) -> Path | None:
@@ -99,6 +116,7 @@ def record_diagnostic(
     source: str | None = None,
     traceback_text: str | None = None,
     correlation_id: str | None = None,
+    safe_traceback: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     logs = _logs_directory(root, create=True)
     if logs is None:
@@ -115,6 +133,8 @@ def record_diagnostic(
     }
     if correlation_id is not None and _CORRELATION_ID.fullmatch(correlation_id):
         record["correlation_id"] = correlation_id
+    if safe_traceback is not None:
+        record["safe_traceback"] = safe_traceback
     previous = load_diagnostic(root)
     duplicate = previous is not None and all(
         previous.get(key) == record.get(key)

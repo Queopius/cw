@@ -487,11 +487,12 @@ def _record_error(
     source: str | None = None,
     traceback_text: str | None = None,
     correlation_id: str | None = None,
+    safe_traceback: dict[str, Any] | None = None,
 ) -> None:
     if source == "update":
         try:
             record_global_diagnostic(
-                exc, source=source, traceback_text=traceback_text, correlation_id=correlation_id,
+                exc, source=source, traceback_text=traceback_text, correlation_id=correlation_id, safe_traceback=safe_traceback,
             )
         except Exception:
             pass
@@ -499,7 +500,7 @@ def _record_error(
     try:
         root = repository_root(Path.cwd())
         record = record_diagnostic(
-            root, exc, source=source, traceback_text=traceback_text, correlation_id=correlation_id,
+            root, exc, source=source, traceback_text=traceback_text, correlation_id=correlation_id, safe_traceback=safe_traceback,
         )
         if record is None:
             record_global_diagnostic(
