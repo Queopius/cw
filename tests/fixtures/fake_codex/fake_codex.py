@@ -14,6 +14,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+_HOOK_CONTRACT_FAILURE = 46
+_HOOK_FAILURE_MESSAGE = "fake reviewer hook contract failed"
+
 
 def _option(arguments: list[str], name: str) -> str | None:
     try:
@@ -39,6 +42,58 @@ def _write_output(arguments: list[str], payload: Any) -> None:
 
 def _emit(value: dict[str, Any]) -> None:
     print(json.dumps(value, ensure_ascii=False), flush=True)
+
+
+def _acceptance_cw_executable() -> Path:
+    """Resolve the exact installed CW binary without accepting an external alias."""
+
+    executable_value = os.environ.get("CW_ACCEPTANCE_CW_EXECUTABLE")
+    runtime_value = os.environ.get("CW_ACCEPTANCE_RUNTIME_ROOT")
+    if not executable_value or not runtime_value:
+        raise ValueError("acceptance CW identity is unavailable")
+    executable_path = Path(executable_value)
+    runtime_path = Path(runtime_value)
+    if not executable_path.is_absolute() or not runtime_path.is_absolute():
+        raise ValueError("acceptance CW identity is invalid")
+    if executable_path.is_symlink() or runtime_path.is_symlink():
+        raise ValueError("acceptance CW identity is not canonical")
+    executable = executable_path.resolve(strict=True)
+    runtime = runtime_path.resolve(strict=True)
+    metadata = executable.stat()
+    if not executable.is_file() or metadata.st_nlink != 1 or not os.access(executable, os.X_OK):
+        raise ValueError("acceptance CW executable is unsafe")
+    if not os.path.samefile(executable.parent.parent, runtime):
+        raise ValueError("acceptance CW executable is outside its runtime")
+    return executable
+
+
+def _valid_hook_response(value: str) -> bool:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return False
+    return (
+        isinstance(payload, dict)
+        and bool(payload)
+        and payload.get("continue") is False
+        and isinstance(payload.get("stopReason"), str)
+    )
+
+
+def _review_hook(root: Path, environment: dict[str, str]) -> int:
+    try:
+        executable = _acceptance_cw_executable()
+        completed = subprocess.run(
+            [str(executable), "review", "--hook"], cwd=root, env=environment,
+            text=True, capture_output=True, timeout=60, check=False,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        print(_HOOK_FAILURE_MESSAGE, file=sys.stderr)
+        return _HOOK_CONTRACT_FAILURE
+    if completed.returncode != 0 or not _valid_hook_response(completed.stdout):
+        print(_HOOK_FAILURE_MESSAGE, file=sys.stderr)
+        return _HOOK_CONTRACT_FAILURE
+    return 0
 
 
 def _plan(root: Path) -> dict[str, Any]:
@@ -206,13 +261,9 @@ def _implement(root: Path, arguments: list[str]) -> int:
             environment = {**os.environ, "CW_FAKE_CODEX_SCENARIO": scenario}
         else:
             environment = os.environ.copy()
-        completed = subprocess.run(
-            ["cw", "review", "--hook"], cwd=root, env=environment,
-            text=True, capture_output=True, timeout=60, check=False,
-        )
-        if completed.returncode:
-            print(completed.stderr[-2000:], file=sys.stderr)
-            return completed.returncode
+        hook_result = _review_hook(root, environment)
+        if hook_result:
+            return hook_result
     if "--json" in arguments:
         _emit({"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}})
     return 0

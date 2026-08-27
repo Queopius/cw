@@ -21,8 +21,11 @@ from scripts.run_acceptance import (
     _operation_stage,
     _result,
     _run,
+    _safe_fixed_file_present,
     _safe_regular_text,
     _single_phase,
+    _single_phase_cycles,
+    _single_state_failure_stage,
     _text_traceback_frames,
     _validate_diagnostic,
     _validate_report,
@@ -112,12 +115,26 @@ class AcceptanceHarnessTests(unittest.TestCase):
     def _single_failure(
         self, *, state: dict[str, object] | None = None, gates: int = 1,
         status: str = '{"state":"COMPLETED"}', inspect: str = '{"run":{"run_id":"run-1"}}',
-        command_failure: str | None = None,
+        command_failure: str | None = None, evidence: str | None = None,
+        evidence_symlink: bool = False,
     ) -> AcceptanceFailure | None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "project"; gates_dir = root / ".cw/gates"; gates_dir.mkdir(parents=True)
             for index in range(gates):
                 (gates_dir / f"{index}.approved.json").write_text("{}", encoding="utf-8")
+            evidence_paths = {
+                "completion": root / ".cw/completion/completion.satisfied.json",
+                "readiness": root / ".cw/runtime/READY_FOR_REVIEW.json",
+            }
+            if evidence is not None:
+                path = evidence_paths[evidence]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if evidence_symlink:
+                    target = root / "unsafe-evidence.json"
+                    target.write_text("{}", encoding="utf-8")
+                    path.symlink_to(target)
+                else:
+                    path.write_text("{}", encoding="utf-8")
             values = {"status": status, "inspect": inspect}
             def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
                 name = command[1] if len(command) > 1 else "run"
@@ -144,9 +161,14 @@ class AcceptanceHarnessTests(unittest.TestCase):
         with self.assertRaises(ValueError): _result("MAYBE")
         with self.assertRaises(AcceptanceFailure): _validate_report({"schema_version": 1})
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); runtime = root / "runtime"; (runtime / ("Scripts" if os.name == "nt" else "bin")).mkdir(parents=True)
+            root = Path(temporary); runtime = root / "runtime"; runtime_bin = runtime / ("Scripts" if os.name == "nt" else "bin"); runtime_bin.mkdir(parents=True)
+            cw = runtime_bin / ("cw.exe" if os.name == "nt" else "cw")
+            cw.write_text("fixture", encoding="utf-8")
+            cw.chmod(0o755)
             environment = _environment(root, runtime, root)
             self.assertNotIn("CODEX_HOME", environment)
+            self.assertTrue(os.path.samefile(cw, environment["CW_ACCEPTANCE_CW_EXECUTABLE"]))
+            self.assertTrue(os.path.samefile(runtime, environment["CW_ACCEPTANCE_RUNTIME_ROOT"]))
             self.assertTrue(_install_fake_codex(root).is_file())
 
     def test_declared_stage_never_uses_goal_or_process_output(self):
@@ -246,7 +268,7 @@ class AcceptanceHarnessTests(unittest.TestCase):
 
     def test_single_phase_final_contracts_have_distinct_stages(self):
         cases = {
-            "acceptance.operation.single_state": {"state": {"status": "ERROR", "current_phase": None}},
+            "acceptance.operation.single_state.error": {"state": {"status": "ERROR", "current_phase": None}},
             "acceptance.operation.single_gate": {"gates": 0},
             "acceptance.operation.status_json": {"status": "not json"},
             "acceptance.operation.status_contract": {"status": '{"state":"ERROR"}'},
@@ -263,6 +285,113 @@ class AcceptanceHarnessTests(unittest.TestCase):
                 assert failure is not None
                 self.assertEqual(stage, failure.stage)
         self.assertIsNone(self._single_failure())
+
+    def test_single_state_failures_have_closed_safe_classifications(self):
+        cases = (
+            ("completed_phase_present", {"status": "COMPLETED", "current_phase": "PRIVATE_PHASE_CANARY"}, None),
+            ("planned_complete_gate_present", {"status": "PLANNED_COMPLETE", "current_phase": None}, "completion"),
+            ("planned_complete_gate_absent", {"status": "PLANNED_COMPLETE", "current_phase": None}, None),
+            ("in_progress_readiness_present", {"status": "IN_PROGRESS", "current_phase": "PRIVATE_PHASE_CANARY"}, "readiness"),
+            ("in_progress_readiness_absent", {"status": "IN_PROGRESS", "current_phase": "PRIVATE_PHASE_CANARY"}, None),
+            ("ready_for_review", {"status": "READY_FOR_REVIEW", "current_phase": "PRIVATE_PHASE_CANARY"}, None),
+            ("reviewing", {"status": "REVIEWING", "current_phase": "PRIVATE_PHASE_CANARY"}, None),
+            ("error", {"status": "ERROR", "current_phase": None}, None),
+            ("other", {"status": "PAUSED", "current_phase": None}, None),
+        )
+        for suffix, state, evidence in cases:
+            with self.subTest(suffix=suffix):
+                failure = self._single_failure(state=state, evidence=evidence)
+                self.assertIsNotNone(failure)
+                assert failure is not None
+                self.assertEqual(f"acceptance.operation.single_state.{suffix}", failure.stage)
+                self.assertNotIn("PRIVATE_PHASE_CANARY", str(failure))
+
+    def test_single_state_evidence_rejects_symlinks_without_reading_them(self):
+        for state, evidence in (
+            ({"status": "PLANNED_COMPLETE", "current_phase": None}, "completion"),
+            ({"status": "IN_PROGRESS", "current_phase": "phase"}, "readiness"),
+        ):
+            with self.subTest(evidence=evidence):
+                failure = self._single_failure(
+                    state=state, evidence=evidence, evidence_symlink=True,
+                )
+                self.assertIsNotNone(failure)
+                assert failure is not None
+                self.assertEqual("acceptance.operation.single_state.other", failure.stage)
+
+    def test_fixed_evidence_presence_uses_only_fixed_regular_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = Path(".cw/runtime/READY_FOR_REVIEW.json")
+            self.assertFalse(_safe_fixed_file_present(root, relative))
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            path.write_text(self.canaries[0], encoding="utf-8")
+            self.assertTrue(_safe_fixed_file_present(root, relative))
+            self.assertEqual(
+                "acceptance.operation.single_state.in_progress_readiness_present",
+                _single_state_failure_stage(root, {"status": "IN_PROGRESS"}),
+            )
+            with self.assertRaises(ValueError):
+                _safe_fixed_file_present(root, Path("../PRIVATE_PHASE_CANARY"))
+
+    def test_single_state_artifact_contains_only_safe_classification(self):
+        failure = self._single_failure(
+            state={"status": "IN_PROGRESS", "current_phase": "PRIVATE_PHASE_CANARY"},
+            evidence="readiness",
+        )
+        assert failure is not None
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "artifacts/compatibility-report.json"
+            _write_diagnostic(output, failure, base=root, source_commit="unused")
+            artifact = output.with_name("compatibility-diagnostic.json").read_text(
+                encoding="utf-8",
+            )
+        self.assertIn(
+            '"stage": "acceptance.operation.single_state.in_progress_readiness_present"',
+            artifact,
+        )
+        for private_value in (*self.canaries, "PRIVATE_PHASE_CANARY", "READY_FOR_REVIEW.json"):
+            self.assertNotIn(private_value, artifact)
+
+    def test_single_phase_cycle_policy_and_roots_are_platform_specific(self):
+        with patch("scripts.run_acceptance.os.name", "nt"):
+            self.assertEqual((1, 2, 3), _single_phase_cycles())
+        with patch("scripts.run_acceptance.os.name", "posix"):
+            self.assertEqual((None,), _single_phase_cycles())
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            roots: list[str] = []
+
+            def repository(_base: Path, name: str, _environment: dict[str, str]) -> Path:
+                roots.append(name)
+                root = base / name
+                (root / ".cw/gates").mkdir(parents=True)
+                (root / ".cw/gates/phase.approved.json").write_text("{}", encoding="utf-8")
+                return root
+
+            def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+                if len(command) > 1 and command[1] == "status":
+                    value = '{"state":"COMPLETED"}'
+                elif len(command) > 1 and command[1] == "inspect":
+                    value = '{"run":{"run_id":"run-1"}}'
+                else:
+                    value = "{}"
+                return subprocess.CompletedProcess(command, 0, value, "")
+
+            original_environment: dict[str, str] = {}
+            with patch("scripts.run_acceptance._repository", side_effect=repository), patch(
+                "scripts.run_acceptance._prepare_plan"
+            ), patch("scripts.run_acceptance._run", side_effect=run), patch(
+                "scripts.run_acceptance._state",
+                return_value={"status": "COMPLETED", "current_phase": None},
+            ):
+                for cycle in (1, 2, 3):
+                    _single_phase(Path("cw"), base, original_environment, cycle=cycle)
+            self.assertEqual(["single phase 1", "single phase 2", "single phase 3"], roots)
+            self.assertEqual({}, original_environment)
 
     def test_json_object_rejects_concatenation_and_non_object_without_output(self):
         for value in ("{}{}", "[]", "null"):
