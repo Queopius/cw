@@ -104,6 +104,7 @@ def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str
 _MAX_DIAGNOSTIC_BYTES = 64 * 1024
 _SAFE_STAGE = re.compile(r"^[a-z][a-z0-9_.-]{0,80}$")
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,120}$")
+_SAFE_CORRELATION_ID = re.compile(r"^[0-9a-f]{16}$")
 _SAFE_MESSAGES = {"Unexpected internal failure", "Verification Executor failed"}
 _REDACTED_MESSAGE = "Internal exception captured; message redacted."
 
@@ -199,7 +200,7 @@ def _correlation_id(value: Any) -> str | None:
         return None
     for key in ("correlation_id", "correlationId"):
         candidate = value.get(key)
-        if isinstance(candidate, str) and _SAFE_IDENTIFIER.fullmatch(candidate):
+        if isinstance(candidate, str) and _SAFE_CORRELATION_ID.fullmatch(candidate):
             return candidate
     for key in ("error", "data"):
         nested = value.get(key)

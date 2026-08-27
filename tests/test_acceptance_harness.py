@@ -27,7 +27,7 @@ from scripts.run_acceptance import (
 class AcceptanceHarnessTests(unittest.TestCase):
     canaries = ("GOAL_PRIVATE_CANARY", "GOAL_«quoted»\n秘密", "TOKEN_PRIVATE_CANARY", "C:/Users/RunnerPrivate/checkout", r"\\server\private\fixture", "/home/runner-private/project", "runner-private@example.invalid", "STDERR_PRIVATE_CANARY")
 
-    def _failure(self, root: Path, correlation: str = "corr_123") -> AcceptanceFailure:
+    def _failure(self, root: Path, correlation: str = "41e0163899520133") -> AcceptanceFailure:
         return AcceptanceFailure("raw failure", stage="plan.create", executable="cw", command_name="plan", exit_code=1, executable_path="cw", cwd=root, environment={"PRIVATE_ENV": self.canaries[2]}, envelope_code="INTERNAL_ERROR", envelope_correlation=correlation, error_fingerprint="before")
 
     def _record(self, correlation: str) -> dict[str, object]:
@@ -60,7 +60,7 @@ class AcceptanceHarnessTests(unittest.TestCase):
 
     def test_correlated_last_error_captures_only_relative_cw_frame(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); correlation = "corr_123"; self._write_record(root, self._record(correlation))
+            root = Path(temporary); correlation = "41e0163899520133"; self._write_record(root, self._record(correlation))
             with patch("scripts.run_acceptance.subprocess.run", return_value=self._cw_error(correlation)):
                 captured = _capture_cw_diagnostic(self._failure(root))
         self.assertEqual("captured", captured["diagnostic_status"])
@@ -80,7 +80,7 @@ class AcceptanceHarnessTests(unittest.TestCase):
 
     def test_diagnostic_record_requires_the_same_command_source(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); correlation = "corr_123"; record = self._record(correlation); record["source"] = "status"; self._write_record(root, record)
+            root = Path(temporary); correlation = "41e0163899520133"; record = self._record(correlation); record["source"] = "status"; self._write_record(root, record)
             with patch("scripts.run_acceptance.subprocess.run", return_value=self._cw_error(correlation)):
                 captured = _capture_cw_diagnostic(self._failure(root, correlation))
         self.assertEqual("unavailable", captured["diagnostic_status"])
