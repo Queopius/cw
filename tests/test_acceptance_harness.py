@@ -15,6 +15,7 @@ from scripts.run_acceptance import (
     _environment,
     _install_fake_codex,
     _interrupt,
+    _operation_stage,
     _result,
     _run,
     _safe_regular_text,
@@ -186,6 +187,28 @@ class AcceptanceHarnessTests(unittest.TestCase):
             _run(["cw", "retry"], cwd=Path(temporary), environment={}, timeout=17, diagnostic_stage="reviewer.retry", diagnostic_executable="cw", diagnostic_command="retry")
         self.assertTrue(raised.exception.timed_out)
         self.assertEqual("reviewer.retry", raised.exception.stage)
+
+    def test_operation_context_classifies_default_command_failure(self):
+        completed = subprocess.CompletedProcess(["python"], 1, "", "")
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "scripts.run_acceptance.subprocess.run", return_value=completed,
+        ), self.assertRaises(AcceptanceFailure) as raised, _operation_stage(
+            "acceptance.operation.second_run",
+        ):
+            _run(["python"], cwd=Path(temporary), environment={})
+        self.assertEqual("acceptance.operation.second_run", raised.exception.stage)
+
+    def test_interrupt_process_start_oserror_has_safe_child_stage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "project"
+            with patch("scripts.run_acceptance._repository", return_value=root), patch(
+                "scripts.run_acceptance._prepare_plan"
+            ), patch(
+                "scripts.run_acceptance.subprocess.Popen", side_effect=PermissionError("private path")
+            ), self.assertRaises(AcceptanceFailure) as raised:
+                _interrupt(Path("cw"), root.parent, {})
+        self.assertEqual("interrupt.child_start", raised.exception.stage)
+        self.assertNotIn("private path", str(raised.exception))
 
     def test_text_traceback_allows_only_relative_cw_frames_on_windows_and_posix(self):
         trace = ('Traceback (most recent call last):\n'

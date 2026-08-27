@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import contextvars
 import hashlib
 import hmac
 import json
@@ -32,6 +34,10 @@ REPORT_KEYS = {
     "os_version", "architecture", "python_version", "install_method", "tests", "delegated",
 }
 
+_OPERATION_STAGE: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "acceptance_operation_stage", default="acceptance.operation.setup",
+)
+
 
 class AcceptanceFailure(RuntimeError):
     """A failed acceptance operation with safe metadata for the failure artifact."""
@@ -40,7 +46,7 @@ class AcceptanceFailure(RuntimeError):
         self,
         message: str,
         *,
-        stage: str = "acceptance",
+        stage: str | None = None,
         executable: str = "unknown",
         command_name: str = "unknown",
         exit_code: int | None = None,
@@ -53,7 +59,7 @@ class AcceptanceFailure(RuntimeError):
         error_fingerprint: str | None = None,
     ) -> None:
         super().__init__(message)
-        self.stage = stage
+        self.stage = stage or _OPERATION_STAGE.get()
         self.executable = executable
         self.command_name = command_name
         self.exit_code = exit_code
@@ -107,6 +113,19 @@ _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,120}$")
 _SAFE_CORRELATION_ID = re.compile(r"^[0-9a-f]{16}$")
 _SAFE_MESSAGES = {"Unexpected internal failure", "Verification Executor failed"}
 _REDACTED_MESSAGE = "Internal exception captured; message redacted."
+
+
+@contextlib.contextmanager
+def _operation_stage(stage: str):
+    """Attribute expected harness failures to one stable public substage."""
+
+    if not (_SAFE_STAGE.fullmatch(stage) and stage.startswith(("acceptance.operation.", "interrupt."))):
+        raise ValueError("invalid acceptance operation stage")
+    token = _OPERATION_STAGE.set(stage)
+    try:
+        yield
+    finally:
+        _OPERATION_STAGE.reset(token)
 
 
 def _canonical_root(root: Path) -> Path:
@@ -384,9 +403,10 @@ def _capture_cw_diagnostic(failure: AcceptanceFailure) -> dict[str, Any]:
 def _run(
     command: list[str], *, cwd: Path, environment: dict[str, str],
     expected: set[int] = frozenset({0}), timeout: int = 180,
-    diagnostic_stage: str = "acceptance.operation", diagnostic_executable: str = "unknown",
+    diagnostic_stage: str | None = None, diagnostic_executable: str = "unknown",
     diagnostic_command: str = "unknown",
 ) -> subprocess.CompletedProcess[str]:
+    diagnostic_stage = diagnostic_stage or _OPERATION_STAGE.get()
     if not (_SAFE_STAGE.fullmatch(diagnostic_stage)
             and diagnostic_executable in {"cw", "python", "git", "unknown"}
             and _SAFE_STAGE.fullmatch(diagnostic_command)):
@@ -440,63 +460,70 @@ def _venv_bin(venv_root: Path) -> Path:
 
 
 def _install_wheel(base: Path, environment: dict[str, str]) -> tuple[Path, Path, Path]:
-    base = _canonical_root(base)
-    wheelhouse = base / "wheelhouse"
-    wheelhouse.mkdir()
-    build_tools = base / "build-tools"
-    venv.EnvBuilder(with_pip=True, clear=True).create(build_tools)
-    build_python = _python_bin(build_tools)
-    _run(
-        [
-            str(build_python), "-m", "pip", "install", "--disable-pip-version-check",
-            "build==1.3.0", "setuptools==80.9.0", "wheel==0.45.1",
-        ],
-        cwd=base, environment=environment, timeout=300,
-    )
-    _run(
-        [str(build_python), "-m", "build", "--wheel", "--no-isolation", "--outdir", str(wheelhouse)],
-        cwd=ROOT, environment=environment, timeout=300,
-    )
-    wheels = sorted(wheelhouse.glob("*.whl"))
-    if len(wheels) != 1:
-        raise AcceptanceFailure(f"expected one wheel, found {len(wheels)}")
-    no_dependencies = base / "runtime-no-deps"
-    venv.EnvBuilder(with_pip=True, clear=True).create(no_dependencies)
-    no_dependencies_python = _python_bin(no_dependencies)
-    _run(
-        [
-            str(no_dependencies_python), "-m", "pip", "install", "--no-deps",
-            str(wheels[0]),
-        ],
-        cwd=base, environment=environment, timeout=300,
-    )
-    _run(
-        [str(_cw_bin(no_dependencies)), "version", "--json"],
-        cwd=base, environment=environment,
-    )
-    runtime = base / "runtime"
-    venv.EnvBuilder(with_pip=True, clear=True).create(runtime)
-    python = _python_bin(runtime)
-    _run(
-        [str(python), "-m", "pip", "install", str(wheels[0])],
-        cwd=base, environment=environment, timeout=300,
-    )
+    with _operation_stage("acceptance.operation.build_tools"):
+        base = _canonical_root(base)
+        wheelhouse = base / "wheelhouse"
+        wheelhouse.mkdir()
+        build_tools = base / "build-tools"
+        venv.EnvBuilder(with_pip=True, clear=True).create(build_tools)
+        build_python = _python_bin(build_tools)
+        _run(
+            [
+                str(build_python), "-m", "pip", "install", "--disable-pip-version-check",
+                "build==1.3.0", "setuptools==80.9.0", "wheel==0.45.1",
+            ],
+            cwd=base, environment=environment, timeout=300,
+        )
+    with _operation_stage("acceptance.operation.wheel_build"):
+        _run(
+            [str(build_python), "-m", "build", "--wheel", "--no-isolation", "--outdir", str(wheelhouse)],
+            cwd=ROOT, environment=environment, timeout=300,
+        )
+    with _operation_stage("acceptance.operation.wheel_inventory"):
+        wheels = sorted(wheelhouse.glob("*.whl"))
+        if len(wheels) != 1:
+            raise AcceptanceFailure(f"expected one wheel, found {len(wheels)}")
+    with _operation_stage("acceptance.operation.no_deps_install"):
+        no_dependencies = base / "runtime-no-deps"
+        venv.EnvBuilder(with_pip=True, clear=True).create(no_dependencies)
+        no_dependencies_python = _python_bin(no_dependencies)
+        _run(
+            [
+                str(no_dependencies_python), "-m", "pip", "install", "--no-deps",
+                str(wheels[0]),
+            ],
+            cwd=base, environment=environment, timeout=300,
+        )
+    with _operation_stage("acceptance.operation.no_deps_smoke"):
+        _run(
+            [str(_cw_bin(no_dependencies)), "version", "--json"],
+            cwd=base, environment=environment,
+        )
+    with _operation_stage("acceptance.operation.runtime_install"):
+        runtime = base / "runtime"
+        venv.EnvBuilder(with_pip=True, clear=True).create(runtime)
+        python = _python_bin(runtime)
+        _run(
+            [str(python), "-m", "pip", "install", str(wheels[0])],
+            cwd=base, environment=environment, timeout=300,
+        )
     return runtime, wheels[0], no_dependencies
 
 
 def _install_fake_codex(directory: Path) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    if os.name == "nt":
-        launcher = directory / "codex.cmd"
-        launcher.write_text(
-            f'@echo off\r\n"{sys.executable}" "{FAKE_CODEX}" %*\r\n', encoding="utf-8",
-        )
-    else:
-        launcher = directory / "codex"
-        launcher.write_text(
-            f'#!/usr/bin/env sh\nexec "{sys.executable}" "{FAKE_CODEX}" "$@"\n', encoding="utf-8",
-        )
-        launcher.chmod(0o755)
+    with _operation_stage("acceptance.operation.fake_codex_setup"):
+        directory.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            launcher = directory / "codex.cmd"
+            launcher.write_text(
+                f'@echo off\r\n"{sys.executable}" "{FAKE_CODEX}" %*\r\n', encoding="utf-8",
+            )
+        else:
+            launcher = directory / "codex"
+            launcher.write_text(
+                f'#!/usr/bin/env sh\nexec "{sys.executable}" "{FAKE_CODEX}" "$@"\n', encoding="utf-8",
+            )
+            launcher.chmod(0o755)
     return launcher
 
 
@@ -534,17 +561,18 @@ def _environment(base: Path, runtime: Path, fake_bin: Path) -> dict[str, str]:
 
 
 def _repository(base: Path, name: str, environment: dict[str, str]) -> Path:
-    base = _canonical_root(base)
-    root = base / "CW Acceptance" / "Projeto São Paulo" / name
-    root.mkdir(parents=True)
-    _run(["git", "init", "--initial-branch=acceptance"], cwd=root, environment=environment)
-    _run(["git", "config", "--local", "user.name", "CW Acceptance"], cwd=root, environment=environment)
-    _run(["git", "config", "--local", "user.email", "acceptance@example.invalid"], cwd=root, environment=environment)
-    (root / "README.md").write_text(
-        "# Deterministic CW acceptance\n\nDisposable cross-platform fixture.\n", encoding="utf-8", newline="\n",
-    )
-    _run(["git", "add", "README.md"], cwd=root, environment=environment)
-    _run(["git", "commit", "-m", "test: initial fixture"], cwd=root, environment=environment)
+    with _operation_stage("acceptance.operation.repository_setup"):
+        base = _canonical_root(base)
+        root = base / "CW Acceptance" / "Projeto São Paulo" / name
+        root.mkdir(parents=True)
+        _run(["git", "init", "--initial-branch=acceptance"], cwd=root, environment=environment)
+        _run(["git", "config", "--local", "user.name", "CW Acceptance"], cwd=root, environment=environment)
+        _run(["git", "config", "--local", "user.email", "acceptance@example.invalid"], cwd=root, environment=environment)
+        (root / "README.md").write_text(
+            "# Deterministic CW acceptance\n\nDisposable cross-platform fixture.\n", encoding="utf-8", newline="\n",
+        )
+        _run(["git", "add", "README.md"], cwd=root, environment=environment)
+        _run(["git", "commit", "-m", "test: initial fixture"], cwd=root, environment=environment)
     return root
 
 
@@ -563,28 +591,31 @@ def _prepare_plan(cw: Path, root: Path, environment: dict[str, str], phases: int
 
 
 def _state(root: Path) -> dict[str, Any]:
-    return json.loads((root / ".cw/state.json").read_text(encoding="utf-8"))
+    with _operation_stage("acceptance.operation.state_load"):
+        return json.loads((root / ".cw/state.json").read_text(encoding="utf-8"))
 
 
 def _single_phase(cw: Path, base: Path, environment: dict[str, str]) -> tuple[Path, str]:
     root = _repository(base, "single phase", environment)
     _prepare_plan(cw, root, environment, 1)
     environment["CW_FAKE_CODEX_SCENARIO"] = "success"
-    _run([str(cw)], cwd=root, environment=environment)
-    state = _state(root)
-    if state.get("status") != "COMPLETED" or state.get("current_phase") is not None:
-        raise AcceptanceFailure(f"single-phase state is not complete: {state}")
-    gates = sorted((root / ".cw/gates").glob("*.approved.json"))
-    if len(gates) != 1:
-        raise AcceptanceFailure(f"single-phase gate count is {len(gates)}")
-    status = json.loads(_run([str(cw), "status", "--json"], cwd=root, environment=environment).stdout)
-    if status.get("state") != "COMPLETED":
-        raise AcceptanceFailure("cw status did not derive COMPLETED")
-    _run([str(cw), "history", "--json"], cwd=root, environment=environment)
-    inspected = json.loads(_run([str(cw), "inspect", "run", "--json"], cwd=root, environment=environment).stdout)
-    run_id = str(inspected["run"]["run_id"])
-    _run([str(cw), "logs", "--run", run_id, "--json"], cwd=root, environment=environment)
-    _run([str(cw), "doctor", "--json"], cwd=root, environment=environment)
+    with _operation_stage("acceptance.operation.first_run"):
+        _run([str(cw)], cwd=root, environment=environment)
+    with _operation_stage("acceptance.operation.final_state"):
+        state = _state(root)
+        if state.get("status") != "COMPLETED" or state.get("current_phase") is not None:
+            raise AcceptanceFailure(f"single-phase state is not complete: {state}")
+        gates = sorted((root / ".cw/gates").glob("*.approved.json"))
+        if len(gates) != 1:
+            raise AcceptanceFailure(f"single-phase gate count is {len(gates)}")
+        status = json.loads(_run([str(cw), "status", "--json"], cwd=root, environment=environment).stdout)
+        if status.get("state") != "COMPLETED":
+            raise AcceptanceFailure("cw status did not derive COMPLETED")
+        _run([str(cw), "history", "--json"], cwd=root, environment=environment)
+        inspected = json.loads(_run([str(cw), "inspect", "run", "--json"], cwd=root, environment=environment).stdout)
+        run_id = str(inspected["run"]["run_id"])
+        _run([str(cw), "logs", "--run", run_id, "--json"], cwd=root, environment=environment)
+        _run([str(cw), "doctor", "--json"], cwd=root, environment=environment)
     return root, run_id
 
 
@@ -592,85 +623,99 @@ def _multi_phase(cw: Path, base: Path, environment: dict[str, str]) -> None:
     root = _repository(base, "multi phase", environment)
     _prepare_plan(cw, root, environment, 3)
     environment["CW_FAKE_CODEX_SCENARIO"] = "success"
-    _run(
-        [str(cw), "run", "3", "--yes", "--non-interactive", "--no-color"],
-        cwd=root, environment=environment, timeout=240,
-    )
-    state = _state(root)
-    gates = sorted((root / ".cw/gates").glob("*.approved.json"))
-    if state.get("status") != "COMPLETED" or state.get("current_phase") is not None or len(gates) != 3:
-        raise AcceptanceFailure("multi-phase workflow did not complete its contiguous gate chain")
-    before = len(list((root / ".cw/logs/runs").glob("*.json")))
-    _run([str(cw)], cwd=root, environment=environment)
-    after = len(list((root / ".cw/logs/runs").glob("*.json")))
-    if before != after:
-        raise AcceptanceFailure("completed workflow launched another implementation run")
+    with _operation_stage("acceptance.operation.second_run"):
+        _run(
+            [str(cw), "run", "3", "--yes", "--non-interactive", "--no-color"],
+            cwd=root, environment=environment, timeout=240,
+        )
+    with _operation_stage("acceptance.operation.final_state"):
+        state = _state(root)
+        gates = sorted((root / ".cw/gates").glob("*.approved.json"))
+        if state.get("status") != "COMPLETED" or state.get("current_phase") is not None or len(gates) != 3:
+            raise AcceptanceFailure("multi-phase workflow did not complete its contiguous gate chain")
+    with _operation_stage("acceptance.operation.determinism"):
+        before = len(list((root / ".cw/logs/runs").glob("*.json")))
+        _run([str(cw)], cwd=root, environment=environment)
+        after = len(list((root / ".cw/logs/runs").glob("*.json")))
+        if before != after:
+            raise AcceptanceFailure("completed workflow launched another implementation run")
 
     bounded = _repository(base, "multi phase until", environment)
     _prepare_plan(cw, bounded, environment, 3)
-    _run(
-        [str(cw), "run", "--until", "02-acceptance-2", "--yes", "--non-interactive", "--no-color"],
-        cwd=bounded, environment=environment, timeout=240,
-    )
-    bounded_state = _state(bounded)
-    bounded_gates = sorted((bounded / ".cw/gates").glob("*.approved.json"))
-    if bounded_state.get("current_phase") != "03-acceptance-3" or len(bounded_gates) != 2:
-        raise AcceptanceFailure("cw run --until did not stop at the requested verified gate")
+    with _operation_stage("acceptance.operation.second_run"):
+        _run(
+            [str(cw), "run", "--until", "02-acceptance-2", "--yes", "--non-interactive", "--no-color"],
+            cwd=bounded, environment=environment, timeout=240,
+        )
+    with _operation_stage("acceptance.operation.final_state"):
+        bounded_state = _state(bounded)
+        bounded_gates = sorted((bounded / ".cw/gates").glob("*.approved.json"))
+        if bounded_state.get("current_phase") != "03-acceptance-3" or len(bounded_gates) != 2:
+            raise AcceptanceFailure("cw run --until did not stop at the requested verified gate")
 
 
 def _recovery(cw: Path, root: Path, environment: dict[str, str]) -> None:
-    gate = next((root / ".cw/gates").glob("*.approved.json"))
-    gate_before = gate.read_bytes()
-    state = _state(root)
-    phase = json.loads((root / ".codex/workflow/phases.yaml").read_text(encoding="utf-8"))["phases"][0]["id"]
-    state.update({"status": "IN_PROGRESS", "current_phase": phase, "last_gate": None, "attempt": 2})
-    (root / ".cw/state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-    _run([str(cw), "status", "--json"], cwd=root, environment=environment, expected={1})
-    _run([str(cw), "repair", "--json"], cwd=root, environment=environment)
-    repaired = _state(root)
-    if repaired.get("status") != "COMPLETED" or repaired.get("current_phase") is not None:
-        raise AcceptanceFailure("repair did not reconcile all-approved workflow to completion")
-    if gate.read_bytes() != gate_before:
-        raise AcceptanceFailure("repair modified a valid approval gate")
-    gate_payload = json.loads(gate.read_text(encoding="utf-8"))
-    gate_payload["artifact_hashes"][next(iter(gate_payload["artifact_hashes"]))] = "sha256:" + "0" * 64
-    gate.write_text(json.dumps(gate_payload, indent=2) + "\n", encoding="utf-8")
-    _run([str(cw), "status", "--json"], cwd=root, environment=environment, expected={1})
+    with _operation_stage("acceptance.operation.recovery"):
+        gate = next((root / ".cw/gates").glob("*.approved.json"))
+        gate_before = gate.read_bytes()
+        state = _state(root)
+        phase = json.loads((root / ".codex/workflow/phases.yaml").read_text(encoding="utf-8"))["phases"][0]["id"]
+        state.update({"status": "IN_PROGRESS", "current_phase": phase, "last_gate": None, "attempt": 2})
+        (root / ".cw/state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+        _run([str(cw), "status", "--json"], cwd=root, environment=environment, expected={1})
+        _run([str(cw), "repair", "--json"], cwd=root, environment=environment)
+        repaired = _state(root)
+        if repaired.get("status") != "COMPLETED" or repaired.get("current_phase") is not None:
+            raise AcceptanceFailure("repair did not reconcile all-approved workflow to completion")
+        if gate.read_bytes() != gate_before:
+            raise AcceptanceFailure("repair modified a valid approval gate")
+        gate_payload = json.loads(gate.read_text(encoding="utf-8"))
+        gate_payload["artifact_hashes"][next(iter(gate_payload["artifact_hashes"]))] = "sha256:" + "0" * 64
+        gate.write_text(json.dumps(gate_payload, indent=2) + "\n", encoding="utf-8")
+        _run([str(cw), "status", "--json"], cwd=root, environment=environment, expected={1})
 
 
 def _review_failures(cw: Path, base: Path, environment: dict[str, str]) -> None:
-    revision = _repository(base, "semantic revision", environment)
-    _prepare_plan(cw, revision, environment, 1)
-    environment["CW_FAKE_CODEX_SCENARIO"] = "semantic_revision"
-    _run([str(cw)], cwd=revision, environment=environment)
-    revised = _state(revision)
-    if revised.get("status") != "REVISION_REQUIRED" or revised.get("attempt") != 1:
-        raise AcceptanceFailure("semantic REVISE did not consume exactly one attempt")
-    infrastructure = _repository(base, "review transport failure", environment)
-    _prepare_plan(cw, infrastructure, environment, 1)
-    environment["CW_FAKE_CODEX_SCENARIO"] = "reviewer_infrastructure_failure"
-    _run([str(cw)], cwd=infrastructure, environment=environment, expected={1})
-    failed = _state(infrastructure)
-    if failed.get("status") != "ERROR" or failed.get("attempt") != 0:
-        raise AcceptanceFailure("reviewer infrastructure failure consumed a semantic attempt")
-    if not (infrastructure / ".cw/runtime/READY_FOR_REVIEW.json").is_file():
-        raise AcceptanceFailure("reviewer infrastructure failure did not preserve readiness")
-    environment["CW_FAKE_CODEX_SCENARIO"] = "success"
-    _run([str(cw), "retry", "--json"], cwd=infrastructure, environment=environment)
-    recovered = _state(infrastructure)
-    if recovered.get("status") != "COMPLETED" or recovered.get("attempt") != 0:
-        raise AcceptanceFailure("cw retry did not resume the preserved reviewer boundary")
+    with _operation_stage("acceptance.operation.review_semantics"):
+        revision = _repository(base, "semantic revision", environment)
+        _prepare_plan(cw, revision, environment, 1)
+        environment["CW_FAKE_CODEX_SCENARIO"] = "semantic_revision"
+        _run([str(cw)], cwd=revision, environment=environment)
+        revised = _state(revision)
+        if revised.get("status") != "REVISION_REQUIRED" or revised.get("attempt") != 1:
+            raise AcceptanceFailure("semantic REVISE did not consume exactly one attempt")
+        infrastructure = _repository(base, "review transport failure", environment)
+        _prepare_plan(cw, infrastructure, environment, 1)
+        environment["CW_FAKE_CODEX_SCENARIO"] = "reviewer_infrastructure_failure"
+        _run([str(cw)], cwd=infrastructure, environment=environment, expected={1})
+        failed = _state(infrastructure)
+        if failed.get("status") != "ERROR" or failed.get("attempt") != 0:
+            raise AcceptanceFailure("reviewer infrastructure failure consumed a semantic attempt")
+        if not (infrastructure / ".cw/runtime/READY_FOR_REVIEW.json").is_file():
+            raise AcceptanceFailure("reviewer infrastructure failure did not preserve readiness")
+        environment["CW_FAKE_CODEX_SCENARIO"] = "success"
+        _run([str(cw), "retry", "--json"], cwd=infrastructure, environment=environment)
+        recovered = _state(infrastructure)
+        if recovered.get("status") != "COMPLETED" or recovered.get("attempt") != 0:
+            raise AcceptanceFailure("cw retry did not resume the preserved reviewer boundary")
 
 
 def _interrupt(cw: Path, base: Path, environment: dict[str, str]) -> None:
     root = _repository(base, "interrupt recovery", environment)
     _prepare_plan(cw, root, environment, 1)
     interrupted_environment = {**environment, "CW_FAKE_CODEX_SCENARIO": "implementer_timeout"}
-    process = subprocess.Popen(
-        [str(cw)], cwd=root, env=interrupted_environment,
-        text=True, encoding="utf-8", errors="replace", stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        **popen_process_group_kwargs(),
-    )
+    try:
+        with _operation_stage("interrupt.child_start"):
+            process = subprocess.Popen(
+                [str(cw)], cwd=root, env=interrupted_environment,
+                text=True, encoding="utf-8", errors="replace", stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                **popen_process_group_kwargs(),
+            )
+    except OSError as exc:
+        raise AcceptanceFailure(
+            "interrupt fixture could not start its managed child",
+            stage="interrupt.child_start",
+        ) from exc
     active_path = root / ".cw/runtime/active-run.json"
     child_pid = 0
     try:
