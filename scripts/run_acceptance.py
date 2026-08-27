@@ -529,6 +529,10 @@ def _install_fake_codex(directory: Path) -> Path:
 
 def _environment(base: Path, runtime: Path, fake_bin: Path) -> dict[str, str]:
     base = _canonical_root(base)
+    runtime = _canonical_root(runtime)
+    cw_executable = _cw_bin(runtime).resolve(strict=True)
+    if not os.path.samefile(cw_executable.parent.parent, runtime):
+        raise AcceptanceFailure("installed CW executable is outside the acceptance runtime")
     inherited = {
         key: value for key, value in os.environ.items()
         if key in {
@@ -553,6 +557,8 @@ def _environment(base: Path, runtime: Path, fake_bin: Path) -> dict[str, str]:
         "CI": "1",
         "PYTHONUTF8": "1",
         "PYTHONIOENCODING": "utf-8",
+        "CW_ACCEPTANCE_CW_EXECUTABLE": str(cw_executable),
+        "CW_ACCEPTANCE_RUNTIME_ROOT": str(runtime),
         "PATH": os.pathsep.join((str(fake_bin), str(_venv_bin(runtime)), inherited.get("PATH", ""))),
     })
     inherited.pop("PYTHONPATH", None)
@@ -624,22 +630,99 @@ def _json_object(value: str, *, stage: str) -> dict[str, Any]:
     return payload
 
 
-def _single_phase(cw: Path, base: Path, environment: dict[str, str]) -> tuple[Path, str]:
-    root = _repository(base, "single phase", environment)
-    _prepare_plan(cw, root, environment, 1)
-    environment["CW_FAKE_CODEX_SCENARIO"] = "success"
+def _safe_fixed_file_present(root: Path, relative: Path) -> bool:
+    """Check fixed acceptance evidence without following links or reading it."""
+
+    allowed = {
+        Path(".cw/completion/completion.satisfied.json"),
+        Path(".cw/runtime/READY_FOR_REVIEW.json"),
+    }
+    if relative not in allowed:
+        raise ValueError("invalid fixed acceptance evidence path")
+    canonical_root = _canonical_root(root)
+    candidate = canonical_root / relative
+    try:
+        candidate.relative_to(canonical_root)
+        cursor = canonical_root
+        for component in relative.parts[:-1]:
+            cursor /= component
+            if cursor.is_symlink():
+                raise AcceptanceFailure(
+                    "single-phase evidence path is not a safe regular file",
+                    stage="acceptance.operation.single_state.other",
+                )
+        metadata = candidate.lstat()
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError) as exc:
+        raise AcceptanceFailure(
+            "single-phase evidence path could not be verified",
+            stage="acceptance.operation.single_state.other",
+        ) from exc
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        raise AcceptanceFailure(
+            "single-phase evidence path is not a safe regular file",
+            stage="acceptance.operation.single_state.other",
+        )
+    return True
+
+
+def _single_state_failure_stage(root: Path, state: dict[str, Any]) -> str:
+    status = state.get("status")
+    current_phase = state.get("current_phase")
+    prefix = "acceptance.operation.single_state."
+    if status == "COMPLETED" and current_phase is not None:
+        return prefix + "completed_phase_present"
+    if status == "PLANNED_COMPLETE":
+        present = _safe_fixed_file_present(
+            root, Path(".cw/completion/completion.satisfied.json"),
+        )
+        return prefix + ("planned_complete_gate_present" if present else "planned_complete_gate_absent")
+    if status == "IN_PROGRESS":
+        present = _safe_fixed_file_present(root, Path(".cw/runtime/READY_FOR_REVIEW.json"))
+        return prefix + ("in_progress_readiness_present" if present else "in_progress_readiness_absent")
+    known = {
+        "READY_FOR_REVIEW": "ready_for_review",
+        "REVIEWING": "reviewing",
+        "ERROR": "error",
+    }
+    suffix = known.get(status, "other") if isinstance(status, str) else "other"
+    return prefix + suffix
+
+
+def _single_phase_cycles() -> tuple[int | None, ...]:
+    return (1, 2, 3) if os.name == "nt" else (None,)
+
+
+def _single_phase(
+    cw: Path,
+    base: Path,
+    environment: dict[str, str],
+    *,
+    cycle: int | None = None,
+) -> tuple[Path, str]:
+    if cycle is not None and cycle not in {1, 2, 3}:
+        raise ValueError("invalid single-phase acceptance cycle")
+    phase_environment = environment.copy()
+    name = "single phase" if cycle is None else f"single phase {cycle}"
+    root = _repository(base, name, phase_environment)
+    _prepare_plan(cw, root, phase_environment, 1)
+    phase_environment["CW_FAKE_CODEX_SCENARIO"] = "success"
     with _operation_stage("acceptance.operation.first_run"):
-        _run([str(cw)], cwd=root, environment=environment)
-    with _operation_stage("acceptance.operation.single_state"):
+        _run([str(cw)], cwd=root, environment=phase_environment)
+    with _operation_stage("acceptance.operation.single_state.other"):
         state = _state(root)
         if state.get("status") != "COMPLETED" or state.get("current_phase") is not None:
-            raise AcceptanceFailure(f"single-phase state is not complete: {state}")
+            raise AcceptanceFailure(
+                "single-phase state contract was not satisfied",
+                stage=_single_state_failure_stage(root, state),
+            )
     with _operation_stage("acceptance.operation.single_gate"):
         gates = sorted((root / ".cw/gates").glob("*.approved.json"))
         if len(gates) != 1:
             raise AcceptanceFailure(f"single-phase gate count is {len(gates)}")
     status_response = _run(
-        [str(cw), "status", "--json"], cwd=root, environment=environment,
+        [str(cw), "status", "--json"], cwd=root, environment=phase_environment,
         diagnostic_stage="acceptance.operation.status_command", diagnostic_executable="cw",
         diagnostic_command="status",
     )
@@ -648,12 +731,12 @@ def _single_phase(cw: Path, base: Path, environment: dict[str, str]) -> tuple[Pa
         if status.get("state") != "COMPLETED":
             raise AcceptanceFailure("cw status did not derive COMPLETED")
     _run(
-        [str(cw), "history", "--json"], cwd=root, environment=environment,
+        [str(cw), "history", "--json"], cwd=root, environment=phase_environment,
         diagnostic_stage="acceptance.operation.history_command", diagnostic_executable="cw",
         diagnostic_command="history",
     )
     inspected_response = _run(
-        [str(cw), "inspect", "run", "--json"], cwd=root, environment=environment,
+        [str(cw), "inspect", "run", "--json"], cwd=root, environment=phase_environment,
         diagnostic_stage="acceptance.operation.inspect_command", diagnostic_executable="cw",
         diagnostic_command="inspect",
     )
@@ -664,12 +747,12 @@ def _single_phase(cw: Path, base: Path, environment: dict[str, str]) -> tuple[Pa
         if not isinstance(run_id, str) or not _SAFE_IDENTIFIER.fullmatch(run_id):
             raise AcceptanceFailure("cw inspect did not return a valid run identifier")
     _run(
-        [str(cw), "logs", "--run", run_id, "--json"], cwd=root, environment=environment,
+        [str(cw), "logs", "--run", run_id, "--json"], cwd=root, environment=phase_environment,
         diagnostic_stage="acceptance.operation.logs_command", diagnostic_executable="cw",
         diagnostic_command="logs",
     )
     _run(
-        [str(cw), "doctor", "--json"], cwd=root, environment=environment,
+        [str(cw), "doctor", "--json"], cwd=root, environment=phase_environment,
         diagnostic_stage="acceptance.operation.doctor_command", diagnostic_executable="cw",
         diagnostic_command="doctor",
     )
@@ -1023,8 +1106,14 @@ def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
             tests["mcp_package"] = _result(
                 "PASS", "wheel includes MCP adapter; core and CLI need no MCP extra",
             )
-            root, _ = _single_phase(cw, base, environment)
-            tests["deterministic_e2e"] = _result("PASS", "external installed CLI; one verified gate")
+            single_roots = [
+                _single_phase(cw, base, environment, cycle=cycle)[0]
+                for cycle in _single_phase_cycles()
+            ]
+            root = single_roots[0]
+            tests["deterministic_e2e"] = _result(
+                "PASS", "external installed CLI; independent verified single-phase gates",
+            )
             _multi_phase(cw, base, environment)
             tests["multi_phase"] = _result("PASS", "run N and --until preserve ordered contiguous gates")
             _recovery(cw, root, environment)
