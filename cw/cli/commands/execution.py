@@ -13,7 +13,7 @@ from typing import Any
 from cw.checks.deterministic import inspect_completed_work, validate_phase
 from cw.core.diagnostics import state_error
 from cw.core.errors import CwError, ErrorCode
-from cw.core.gates import gate_path, validate_dependencies
+from cw.core.gates import gate_path, validate_dependencies, validate_gate
 from cw.core.initialize import backup_metadata
 from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
 from cw.core.locking import operation_lock
@@ -73,6 +73,55 @@ def current_phase(workflow: Any, state: dict[str, Any]) -> Any:
         return workflow.phase(phase_id)
     except KeyError as exc:
         raise CwError("Current phase is not in the plan", ErrorCode.INVALID_STATE) from exc
+
+
+def _require_review_hook_postcondition(
+    root: Path,
+    workflow: Any,
+    phase: Any,
+    report: dict[str, Any],
+) -> None:
+    """Refuse a successful hook response until its durable transition is proven."""
+
+    state = load_state(root)
+    readiness = readiness_path(root)
+    readiness_present = readiness.exists() or readiness.is_symlink()
+    decision = report.get("decision")
+    valid = False
+    if decision == "APPROVE" and not report.get("human"):
+        try:
+            validate_gate(root, workflow, phase.id)
+        except CwError:
+            valid = False
+        else:
+            status = state.get("status")
+            current = state.get("current_phase")
+            valid = not readiness_present and (
+                status == WorkflowState.IN_PROGRESS.value
+                and isinstance(current, str)
+                and current != phase.id
+                or status in {
+                    WorkflowState.PLANNED_COMPLETE.value,
+                    WorkflowState.COMPLETED.value,
+                }
+                and current is None
+            )
+    elif decision == "REVISE":
+        valid = (
+            not readiness_present
+            and state.get("status") == WorkflowState.REVISION_REQUIRED.value
+        )
+    elif decision == "HUMAN_REVIEW_REQUIRED":
+        valid = (
+            not readiness_present
+            and state.get("status") == WorkflowState.HUMAN_REVIEW_REQUIRED.value
+        )
+    if not valid:
+        raise CwError(
+            "Review hook durable postcondition failed",
+            ErrorCode.INTEGRITY_ERROR,
+            "Run: cw status",
+        )
 
 
 def command_start(
@@ -578,6 +627,7 @@ def command_review(
             "next_action": "cw status" if report.get("decision") == "APPROVE" else "Revise the implementation",
         }
     if args.hook:
+        _require_review_hook_postcondition(root, workflow, phase, report)
         if report.get("decision") == "REVISE":
             reason = "CW independent review requires revision. Run: cw history"
         else:

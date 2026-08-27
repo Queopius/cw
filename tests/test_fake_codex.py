@@ -76,12 +76,16 @@ class FakeCodexContractTests(unittest.TestCase):
         }
 
     def _implementer_project(self, root: Path) -> None:
-        (root / ".cw/runtime").mkdir(parents=True)
+        (root / ".cw/runtime").mkdir(parents=True, exist_ok=True)
         (root / ".cw/state.json").write_text(
-            json.dumps({"current_phase": "01-acceptance-1"}), encoding="utf-8",
+            json.dumps({
+                "status": "IN_PROGRESS",
+                "current_phase": "01-acceptance-1",
+            }),
+            encoding="utf-8",
         )
         workflow = root / ".codex/workflow"
-        workflow.mkdir(parents=True)
+        workflow.mkdir(parents=True, exist_ok=True)
         (workflow / "phases.yaml").write_text(
             json.dumps({"phases": [{
                 "id": "01-acceptance-1", "artifacts": ["artifacts/result.txt"],
@@ -129,14 +133,28 @@ class FakeCodexContractTests(unittest.TestCase):
             root = Path(temporary)
             _executable, environment = self._runtime_identity(root)
             self._implementer_project(root)
+
+            def durable_hook(*_args, **_kwargs):
+                gate = root / ".cw/gates/01-acceptance-1.approved.json"
+                gate.parent.mkdir(parents=True, exist_ok=True)
+                gate.write_text("{}", encoding="utf-8")
+                (root / ".cw/runtime/READY_FOR_REVIEW.json").unlink(missing_ok=True)
+                (root / ".cw/state.json").write_text(
+                    json.dumps({"status": "PLANNED_COMPLETE", "current_phase": None}),
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(["cw"], 0, valid, canary)
+
             with patch.dict(os.environ, environment, clear=False), patch(
                 "tests.fixtures.fake_codex.fake_codex.subprocess.run",
-                return_value=subprocess.CompletedProcess(["cw"], 0, valid, canary),
+                side_effect=durable_hook,
             ) as invoked:
                 self.assertEqual(0, fake_codex._implement(root, []))
+            invoked.assert_called_once()
             self.assertEqual(str(Path(environment["CW_ACCEPTANCE_CW_EXECUTABLE"])), invoked.call_args.args[0][0])
 
             for hook_output in invalid_values:
+                self._implementer_project(root)
                 with self.subTest(output=hook_output[:8]), patch.dict(
                     os.environ, environment, clear=False,
                 ), patch(
@@ -158,16 +176,71 @@ class FakeCodexContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _executable, environment = self._runtime_identity(root)
+            self._implementer_project(root)
             with patch.dict(os.environ, environment, clear=False), patch(
                 "tests.fixtures.fake_codex.fake_codex.subprocess.run",
                 return_value=subprocess.CompletedProcess(["cw"], 7, "", canary),
             ), io.StringIO() as stdout, io.StringIO() as stderr, contextlib.redirect_stdout(
                 stdout,
             ), contextlib.redirect_stderr(stderr):
-                self.assertEqual(fake_codex._HOOK_CONTRACT_FAILURE, fake_codex._review_hook(root, os.environ.copy()))
+                self.assertEqual(
+                    fake_codex._HOOK_CONTRACT_FAILURE,
+                    fake_codex._review_hook(
+                        root,
+                        os.environ.copy(),
+                        phase_id="01-acceptance-1",
+                        next_phase=None,
+                    ),
+                )
                 self.assertEqual("", stdout.getvalue())
                 self.assertEqual(fake_codex._HOOK_FAILURE_MESSAGE + "\n", stderr.getvalue())
                 self.assertNotIn(canary, stderr.getvalue())
+
+    def test_hook_requires_durable_next_and_final_phase_postconditions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._implementer_project(root)
+            gate = root / ".cw/gates/01-acceptance-1.approved.json"
+            gate.parent.mkdir(parents=True)
+            gate.write_text("{}", encoding="utf-8")
+            (root / ".cw/state.json").write_text(
+                json.dumps({"status": "IN_PROGRESS", "current_phase": "02-acceptance-2"}),
+                encoding="utf-8",
+            )
+            self.assertTrue(fake_codex._durable_review_postcondition(
+                root, "01-acceptance-1", "02-acceptance-2",
+            ))
+            (root / ".cw/state.json").write_text(
+                json.dumps({"status": "PLANNED_COMPLETE", "current_phase": None}),
+                encoding="utf-8",
+            )
+            self.assertTrue(fake_codex._durable_review_postcondition(
+                root, "01-acceptance-1", None,
+            ))
+
+    def test_valid_hook_response_without_durable_transition_fails_closed(self):
+        canary = "HOOK_PRIVATE_CANARY"
+        valid = json.dumps({"continue": False, "stopReason": canary})
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _executable, environment = self._runtime_identity(root)
+            self._implementer_project(root)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch.dict(os.environ, environment, clear=False), patch(
+                "tests.fixtures.fake_codex.fake_codex.subprocess.run",
+                return_value=subprocess.CompletedProcess(["cw"], 0, valid, canary),
+            ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                result = fake_codex._review_hook(
+                    root,
+                    os.environ.copy(),
+                    phase_id="01-acceptance-1",
+                    next_phase=None,
+                )
+            self.assertEqual(fake_codex._HOOK_POSTCONDITION_FAILURE, result)
+            self.assertEqual("", stdout.getvalue())
+            self.assertEqual(fake_codex._HOOK_POSTCONDITION_MESSAGE + "\n", stderr.getvalue())
+            self.assertNotIn(canary, stderr.getvalue())
 
 
 if __name__ == "__main__":

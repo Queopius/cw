@@ -20,6 +20,7 @@ from scripts.run_acceptance import (
     _managed_child_is_running,
     _operation_stage,
     _result,
+    _review_hook_failure_stage,
     _run,
     _safe_fixed_file_present,
     _safe_regular_text,
@@ -291,7 +292,11 @@ class AcceptanceHarnessTests(unittest.TestCase):
             ("completed_phase_present", {"status": "COMPLETED", "current_phase": "PRIVATE_PHASE_CANARY"}, None),
             ("planned_complete_gate_present", {"status": "PLANNED_COMPLETE", "current_phase": None}, "completion"),
             ("planned_complete_gate_absent", {"status": "PLANNED_COMPLETE", "current_phase": None}, None),
-            ("in_progress_readiness_present", {"status": "IN_PROGRESS", "current_phase": "PRIVATE_PHASE_CANARY"}, "readiness"),
+            (
+                "review_hook.no_review",
+                {"status": "IN_PROGRESS", "current_phase": "PRIVATE_PHASE_CANARY"},
+                "readiness",
+            ),
             ("in_progress_readiness_absent", {"status": "IN_PROGRESS", "current_phase": "PRIVATE_PHASE_CANARY"}, None),
             ("ready_for_review", {"status": "READY_FOR_REVIEW", "current_phase": "PRIVATE_PHASE_CANARY"}, None),
             ("reviewing", {"status": "REVIEWING", "current_phase": "PRIVATE_PHASE_CANARY"}, None),
@@ -303,7 +308,12 @@ class AcceptanceHarnessTests(unittest.TestCase):
                 failure = self._single_failure(state=state, evidence=evidence)
                 self.assertIsNotNone(failure)
                 assert failure is not None
-                self.assertEqual(f"acceptance.operation.single_state.{suffix}", failure.stage)
+                expected = (
+                    f"acceptance.operation.{suffix}"
+                    if suffix.startswith("review_hook.")
+                    else f"acceptance.operation.single_state.{suffix}"
+                )
+                self.assertEqual(expected, failure.stage)
                 self.assertNotIn("PRIVATE_PHASE_CANARY", str(failure))
 
     def test_single_state_evidence_rejects_symlinks_without_reading_them(self):
@@ -329,8 +339,12 @@ class AcceptanceHarnessTests(unittest.TestCase):
             path.write_text(self.canaries[0], encoding="utf-8")
             self.assertTrue(_safe_fixed_file_present(root, relative))
             self.assertEqual(
-                "acceptance.operation.single_state.in_progress_readiness_present",
-                _single_state_failure_stage(root, {"status": "IN_PROGRESS"}),
+                "acceptance.operation.review_hook.no_review",
+                _single_state_failure_stage(
+                    root,
+                    {"status": "IN_PROGRESS"},
+                    "phase",
+                ),
             )
             with self.assertRaises(ValueError):
                 _safe_fixed_file_present(root, Path("../PRIVATE_PHASE_CANARY"))
@@ -349,11 +363,113 @@ class AcceptanceHarnessTests(unittest.TestCase):
                 encoding="utf-8",
             )
         self.assertIn(
-            '"stage": "acceptance.operation.single_state.in_progress_readiness_present"',
+            '"stage": "acceptance.operation.review_hook.no_review"',
             artifact,
         )
         for private_value in (*self.canaries, "PRIVATE_PHASE_CANARY", "READY_FOR_REVIEW.json"):
             self.assertNotIn(private_value, artifact)
+
+    def test_review_hook_failure_evidence_has_closed_safe_classifications(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            phase = "01-phase-1"
+            state = {
+                "status": "IN_PROGRESS",
+                "current_phase": phase,
+                "last_review": None,
+                "history": [],
+            }
+            self.assertEqual(
+                "acceptance.operation.review_hook.no_review",
+                _review_hook_failure_stage(root, state, phase),
+            )
+
+            review = root / ".cw/reviews/review.json"
+            review.parent.mkdir(parents=True)
+            review.write_text("{}", encoding="utf-8")
+            state["last_review"] = ".cw/reviews/review.json"
+            self.assertEqual(
+                "acceptance.operation.review_hook.review_without_gate",
+                _review_hook_failure_stage(root, state, phase),
+            )
+
+            gate = root / f".cw/gates/{phase}.approved.json"
+            gate.parent.mkdir(parents=True)
+            gate.write_text("{}", encoding="utf-8")
+            self.assertEqual(
+                "acceptance.operation.review_hook.gate_without_advance",
+                _review_hook_failure_stage(root, state, phase),
+            )
+
+            state["history"] = [{"action": "approved", "phase": phase}]
+            self.assertEqual(
+                "acceptance.operation.review_hook.state_regressed",
+                _review_hook_failure_stage(root, state, phase),
+            )
+
+            completion = root / ".cw/completion/completion.satisfied.json"
+            completion.parent.mkdir(parents=True)
+            completion.write_text("{}", encoding="utf-8")
+            self.assertEqual(
+                "acceptance.operation.review_hook.completion_without_state",
+                _review_hook_failure_stage(root, state, phase),
+            )
+
+            self.assertEqual(
+                "acceptance.operation.review_hook.unknown",
+                _review_hook_failure_stage(root, state, None),
+            )
+
+    def test_review_hook_evidence_rejects_symlink_and_hardlink(self):
+        state = {
+            "status": "IN_PROGRESS",
+            "current_phase": "phase",
+            "last_review": ".cw/reviews/review.json",
+            "history": [],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target.json"
+            target.write_text("{}", encoding="utf-8")
+            review = root / ".cw/reviews/review.json"
+            review.parent.mkdir(parents=True)
+            try:
+                review.symlink_to(target)
+            except OSError:
+                self.assertEqual("nt", os.name)
+            else:
+                self.assertEqual(
+                    "acceptance.operation.review_hook.unknown",
+                    _review_hook_failure_stage(root, state, "phase"),
+                )
+                review.unlink()
+            os.link(target, review)
+            self.assertEqual(
+                "acceptance.operation.review_hook.unknown",
+                _review_hook_failure_stage(root, state, "phase"),
+            )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target.json"
+            target.write_text("{}", encoding="utf-8")
+            gate = root / ".cw/gates/phase.approved.json"
+            gate.parent.mkdir(parents=True)
+            try:
+                gate.symlink_to(target)
+            except OSError:
+                self.assertEqual("nt", os.name)
+            else:
+                state["last_review"] = None
+                self.assertEqual(
+                    "acceptance.operation.review_hook.unknown",
+                    _review_hook_failure_stage(root, state, "phase"),
+                )
+                gate.unlink()
+            os.link(target, gate)
+            self.assertEqual(
+                "acceptance.operation.review_hook.unknown",
+                _review_hook_failure_stage(root, state, "phase"),
+            )
 
     def test_single_phase_cycle_policy_and_roots_are_platform_specific(self):
         with patch("scripts.run_acceptance.os.name", "nt"):

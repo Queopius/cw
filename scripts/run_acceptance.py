@@ -110,6 +110,7 @@ def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str
 _MAX_DIAGNOSTIC_BYTES = 64 * 1024
 _SAFE_STAGE = re.compile(r"^[a-z][a-z0-9_.-]{0,80}$")
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,120}$")
+_SAFE_PHASE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$")
 _SAFE_CORRELATION_ID = re.compile(r"^[0-9a-f]{16}$")
 _SAFE_MESSAGES = {"Unexpected internal failure", "Verification Executor failed"}
 _REDACTED_MESSAGE = "Internal exception captured; message redacted."
@@ -667,7 +668,94 @@ def _safe_fixed_file_present(root: Path, relative: Path) -> bool:
     return True
 
 
-def _single_state_failure_stage(root: Path, state: dict[str, Any]) -> str:
+def _safe_project_evidence_present(root: Path, relative: Path) -> bool | None:
+    """Return fixed evidence presence without following or publishing its path."""
+
+    if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+        return None
+    canonical_root = _canonical_root(root)
+    candidate = canonical_root / relative
+    try:
+        candidate.relative_to(canonical_root)
+        cursor = canonical_root
+        for component in relative.parts[:-1]:
+            cursor /= component
+            if cursor.is_symlink():
+                return None
+        metadata = candidate.lstat()
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError):
+        return None
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        return None
+    return True
+
+
+def _review_hook_failure_stage(
+    root: Path,
+    state: dict[str, Any],
+    expected_phase: str | None,
+) -> str:
+    prefix = "acceptance.operation.review_hook."
+    if (
+        not isinstance(expected_phase, str)
+        or not _SAFE_PHASE_IDENTIFIER.fullmatch(expected_phase)
+    ):
+        return prefix + "unknown"
+
+    completion = _safe_project_evidence_present(
+        root, Path(".cw/completion/completion.satisfied.json"),
+    )
+    gate = _safe_project_evidence_present(
+        root, Path(".cw/gates") / f"{expected_phase}.approved.json",
+    )
+    review_reference = state.get("last_review")
+    review: bool | None
+    if review_reference is None:
+        review = False
+    elif (
+        isinstance(review_reference, str)
+        and _SAFE_IDENTIFIER.fullmatch(review_reference.removeprefix(".").replace("/", "."))
+        and review_reference.startswith(".cw/reviews/")
+    ):
+        review = _safe_project_evidence_present(root, Path(review_reference))
+    else:
+        review = None
+
+    history = state.get("history", [])
+    advanced: bool | None = False
+    if not isinstance(history, list):
+        advanced = None
+    else:
+        for event in history:
+            if not isinstance(event, dict):
+                advanced = None
+                break
+            action = event.get("action")
+            phase = event.get("phase")
+            if action in {"approved", "human_approved"} and phase == expected_phase:
+                advanced = True
+                break
+
+    if completion is True:
+        return prefix + "completion_without_state"
+    if advanced is True and state.get("current_phase") == expected_phase:
+        return prefix + "state_regressed"
+    if gate is True and state.get("current_phase") == expected_phase:
+        return prefix + "gate_without_advance"
+    if review is True and gate is False:
+        return prefix + "review_without_gate"
+    if review is False and gate is False:
+        return prefix + "no_review"
+    return prefix + "unknown"
+
+
+def _single_state_failure_stage(
+    root: Path,
+    state: dict[str, Any],
+    expected_phase: str | None = None,
+) -> str:
     status = state.get("status")
     current_phase = state.get("current_phase")
     prefix = "acceptance.operation.single_state."
@@ -680,7 +768,15 @@ def _single_state_failure_stage(root: Path, state: dict[str, Any]) -> str:
         return prefix + ("planned_complete_gate_present" if present else "planned_complete_gate_absent")
     if status == "IN_PROGRESS":
         present = _safe_fixed_file_present(root, Path(".cw/runtime/READY_FOR_REVIEW.json"))
-        return prefix + ("in_progress_readiness_present" if present else "in_progress_readiness_absent")
+        if present:
+            return _review_hook_failure_stage(
+                root,
+                state,
+                expected_phase if expected_phase is not None else (
+                    current_phase if isinstance(current_phase, str) else None
+                ),
+            )
+        return prefix + "in_progress_readiness_absent"
     known = {
         "READY_FOR_REVIEW": "ready_for_review",
         "REVIEWING": "reviewing",
@@ -707,6 +803,9 @@ def _single_phase(
     name = "single phase" if cycle is None else f"single phase {cycle}"
     root = _repository(base, name, phase_environment)
     _prepare_plan(cw, root, phase_environment, 1)
+    initial_state = _state(root)
+    initial_phase = initial_state.get("current_phase")
+    expected_phase = initial_phase if isinstance(initial_phase, str) else None
     phase_environment["CW_FAKE_CODEX_SCENARIO"] = "success"
     with _operation_stage("acceptance.operation.first_run"):
         _run([str(cw)], cwd=root, environment=phase_environment)
@@ -715,7 +814,7 @@ def _single_phase(
         if state.get("status") != "COMPLETED" or state.get("current_phase") is not None:
             raise AcceptanceFailure(
                 "single-phase state contract was not satisfied",
-                stage=_single_state_failure_stage(root, state),
+                stage=_single_state_failure_stage(root, state, expected_phase),
             )
     with _operation_stage("acceptance.operation.single_gate"):
         gates = sorted((root / ".cw/gates").glob("*.approved.json"))
