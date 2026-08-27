@@ -75,7 +75,13 @@ def _safe_runtime(path: Path) -> None:
     renamed = path / "preflight.ready"
     descriptor = os.open(probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     try:
-        os.write(descriptor, b"cw-verification-preflight\n")
+        payload = b"cw-verification-preflight\n"
+        written = 0
+        while written < len(payload):
+            count = os.write(descriptor, payload[written:])
+            if count <= 0:
+                raise OSError("Verification runtime preflight write was incomplete")
+            written += count
         os.fsync(descriptor)
     finally:
         os.close(descriptor)

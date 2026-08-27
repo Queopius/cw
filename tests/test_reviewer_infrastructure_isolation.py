@@ -19,6 +19,7 @@ from cw.checks.verification import (
     VerificationExecutor,
     _cleanup_runtime,
     _git_metadata_snapshot,
+    _safe_runtime,
     doctor_verification_runtime,
     private_runtime_directory,
     validate_verification_receipt,
@@ -446,6 +447,25 @@ class VerificationExecutorTests(unittest.TestCase):
             (runtime / "result.json").write_text("{}", encoding="utf-8")
 
         self.assertFalse(any((self.repo.root / ".cw/runtime").rglob("cw-reviewer-*")))
+
+    def test_runtime_preflight_completes_a_partial_windows_write(self) -> None:
+        actual_write = os.write
+        writes = 0
+
+        def partial_write(descriptor: int, payload: bytes) -> int:
+            nonlocal writes
+            writes += 1
+            if writes == 1:
+                return actual_write(descriptor, payload[:5])
+            return actual_write(descriptor, payload)
+
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch("cw.checks.verification.os.write", side_effect=partial_write),
+        ):
+            _safe_runtime(Path(temporary))
+
+        self.assertGreaterEqual(writes, 2)
 
     def test_private_runtime_cleanup_failure_is_classified_and_chains_primary(self) -> None:
         primary = CwError("reviewer output invalid", ErrorCode.REVIEWER_INVALID_OUTPUT)
