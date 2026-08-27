@@ -14,6 +14,7 @@ from scripts.run_acceptance import (
     _capture_cw_diagnostic,
     _environment,
     _install_fake_codex,
+    _interrupt,
     _result,
     _run,
     _safe_regular_text,
@@ -39,6 +40,69 @@ class AcceptanceHarnessTests(unittest.TestCase):
 
     def _cw_error(self, correlation: str) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(["cw", "error"], 0, json.dumps({"data": {"correlation_id": correlation}}), "")
+
+    class _InterruptProcess:
+        def __init__(self, returncode: int = 130) -> None:
+            self.pid = 991
+            self.returncode = returncode
+            self.running = True
+
+        def poll(self) -> int | None:
+            return None if self.running else self.returncode
+
+        def kill(self) -> None:
+            self.running = False
+
+        def communicate(self, *, timeout: int) -> tuple[str, str]:
+            self.running = False
+            return "STDOUT_PRIVATE_CANARY", "STDERR_PRIVATE_CANARY"
+
+        def send_signal(self, _signal: int) -> None:
+            return None
+
+    def _interrupt_failure(
+        self,
+        *,
+        returncode: int = 130,
+        child_ready: bool = True,
+        child_alive: list[bool] | None = None,
+        monotonic: list[float] | None = None,
+        gate: bool = False,
+        retry_error: bool = False,
+        recovered_status: str = "COMPLETED",
+    ) -> AcceptanceFailure | None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "project"
+            (root / ".cw/runtime").mkdir(parents=True)
+            if child_ready:
+                (root / ".cw/runtime/active-run.json").write_text(
+                    json.dumps({"process_pid": 991}), encoding="utf-8",
+                )
+            if gate:
+                gates = root / ".cw/gates"
+                gates.mkdir()
+                (gates / "phase.approved.json").write_text("{}", encoding="utf-8")
+            process = self._InterruptProcess(returncode)
+            alive = list(child_alive if child_alive is not None else [True, True, False, False])
+            clock = iter(monotonic if monotonic is not None else [0.0, 0.0, 0.0])
+            retry = AcceptanceFailure("private retry failure") if retry_error else None
+            with patch("scripts.run_acceptance._repository", return_value=root), patch(
+                "scripts.run_acceptance._prepare_plan"
+            ), patch("scripts.run_acceptance.subprocess.Popen", return_value=process), patch(
+                "scripts.run_acceptance.os.killpg"
+            ), patch("scripts.run_acceptance.process_is_alive", side_effect=lambda _pid: alive.pop(0) if alive else False), patch(
+                "scripts.run_acceptance.time.monotonic", side_effect=lambda: next(clock)), patch(
+                "scripts.run_acceptance.time.sleep"
+            ), patch(
+                "scripts.run_acceptance.os.kill"
+            ), patch("scripts.run_acceptance._run", side_effect=retry), patch(
+                "scripts.run_acceptance._state", return_value={"status": recovered_status}
+            ):
+                try:
+                    _interrupt(Path("cw"), root.parent, {})
+                except AcceptanceFailure as error:
+                    return error
+        return None
 
     def test_report_and_environment_contracts_remain(self):
         self.assertEqual("PASS", _result("PASS")["status"])
@@ -157,6 +221,38 @@ class AcceptanceHarnessTests(unittest.TestCase):
         diagnostic["binding_failure_reason"] = "not-an-enum"
         with self.assertRaises(AcceptanceFailure):
             _validate_diagnostic(diagnostic)
+
+    def test_interrupt_failures_have_specific_safe_stages(self):
+        cases = {
+            "interrupt.child_start": {"child_ready": False, "monotonic": [0.0, 16.0]},
+            "interrupt.parent_exit": {"returncode": 1},
+            "interrupt.child_cleanup": {"child_alive": [True, True, True, True, True], "monotonic": [0.0, 0.0, 0.0, 6.0]},
+            "interrupt.partial_gate": {"gate": True},
+            "interrupt.retry": {"retry_error": True},
+            "interrupt.recovery": {"recovered_status": "ERROR"},
+        }
+        for expected_stage, kwargs in cases.items():
+            with self.subTest(stage=expected_stage):
+                failure = self._interrupt_failure(**kwargs)
+                self.assertIsNotNone(failure)
+                assert failure is not None
+                self.assertEqual(expected_stage, failure.stage)
+                self.assertRegex(failure.stage, r"^interrupt\.[a-z_]+$")
+                self.assertNotIn("STDOUT_PRIVATE_CANARY", str(failure))
+                self.assertNotIn("STDERR_PRIVATE_CANARY", str(failure))
+
+    def test_interrupt_success_remains_pass_and_failure_artifact_is_redacted(self):
+        self.assertIsNone(self._interrupt_failure())
+        failure = self._interrupt_failure(child_ready=False, monotonic=[0.0, 16.0])
+        assert failure is not None
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "artifacts/compatibility-report.json"
+            _write_diagnostic(output, failure, base=root, source_commit="unused")
+            artifact = output.with_name("compatibility-diagnostic.json").read_text(encoding="utf-8")
+        self.assertIn('"stage": "interrupt.child_start"', artifact)
+        for private_value in (*self.canaries, "STDOUT_PRIVATE_CANARY", "STDERR_PRIVATE_CANARY", "991"):
+            self.assertNotIn(private_value, artifact)
 
 
 if __name__ == "__main__":

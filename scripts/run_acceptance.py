@@ -686,24 +686,29 @@ def _interrupt(cw: Path, base: Path, environment: dict[str, str]) -> None:
         if not child_pid or not process_is_alive(child_pid):
             if process.poll() is None:
                 process.kill()
-            stdout, stderr = process.communicate(timeout=5)
+            process.communicate(timeout=5)
             raise AcceptanceFailure(
-                f"interrupt fixture did not start its managed child\n{stdout[-1000:]}\n{stderr[-1000:]}"
+                "interrupt fixture did not start its managed child",
+                stage="interrupt.child_start",
             )
         if os.name == "nt":
             process.send_signal(signal.CTRL_BREAK_EVENT)
         else:
             os.killpg(process.pid, signal.SIGINT)
-        stdout, stderr = process.communicate(timeout=20)
+        process.communicate(timeout=20)
         if process.returncode != 130:
             raise AcceptanceFailure(
-                f"interrupted CW exited {process.returncode}, expected 130\n{stdout[-1000:]}\n{stderr[-1000:]}"
+                "interrupted CW did not exit with the expected signal status",
+                stage="interrupt.parent_exit",
             )
         child_deadline = time.monotonic() + 5
         while process_is_alive(child_pid) and time.monotonic() < child_deadline:
             time.sleep(0.05)
         if process_is_alive(child_pid):
-            raise AcceptanceFailure("interrupted CW left its managed Codex child running")
+            raise AcceptanceFailure(
+                "interrupted CW left its managed child active",
+                stage="interrupt.child_cleanup",
+            )
     finally:
         if process.poll() is None:
             process.kill()
@@ -720,11 +725,23 @@ def _interrupt(cw: Path, base: Path, environment: dict[str, str]) -> None:
                 except ProcessLookupError:
                     pass
     if list((root / ".cw/gates").glob("*.approved.json")):
-        raise AcceptanceFailure("interrupted CW created a partial approval gate")
+        raise AcceptanceFailure(
+            "interrupted CW created a partial approval gate",
+            stage="interrupt.partial_gate",
+        )
     recovered_environment = {**environment, "CW_FAKE_CODEX_SCENARIO": "success"}
-    _run([str(cw), "retry", "--json"], cwd=root, environment=recovered_environment)
+    try:
+        _run([str(cw), "retry", "--json"], cwd=root, environment=recovered_environment)
+    except AcceptanceFailure as error:
+        raise AcceptanceFailure(
+            "interrupted CW retry did not complete",
+            stage="interrupt.retry",
+        ) from error
     if _state(root).get("status") != "COMPLETED":
-        raise AcceptanceFailure("interrupted workflow was not recoverable through cw retry")
+        raise AcceptanceFailure(
+            "interrupted workflow was not recoverable through cw retry",
+            stage="interrupt.recovery",
+        )
 
 
 def _result(status: str, detail: str = "") -> dict[str, str]:
