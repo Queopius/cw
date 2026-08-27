@@ -30,6 +30,13 @@ performs a staged smoke test, and atomically changes `current`. Failure leaves
 the running installation selected. The previous healthy version remains for
 rollback and retention is bounded.
 
+Core 0.18.0 preserves project schema 1 and reads legacy readiness/reviewer
+infrastructure records. Existing receipt-free readiness is reverified once by
+the Verification Executor before semantic review. Managed installation,
+rollback, and re-update do not migrate Plugin 0.1.0, add tools, or change
+`cw.remote.v1`/`cw.output.v1`. Historical `REVISE` recovery remains an explicit
+operator action and is never performed by the updater.
+
 Release manifest schema 1 may also contain an optional closed
 `signature.extensions.plugin` section. Reusing the existing schema-v1 signature
 object keeps Core 0.14.1 manifest consumers able to preserve and ignore the new

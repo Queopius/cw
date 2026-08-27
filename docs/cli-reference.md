@@ -286,7 +286,7 @@ Returns human-action exit `3` when there is nothing ready to validate.
 
 ## cw review
 
-**Syntax:** `cw review [--human-approve]`
+**Syntax:** `cw review [recover-infrastructure|authorize-retry] [--human-approve] [--phase ID] [--review-ref PATH] [--expected-review-sha256 SHA256] [--expected-workflow-sha256 SHA256] [--expected-state-sha256 SHA256] [--reason TEXT] [--dry-run|--apply] [--acknowledge-unverifiable-legacy]`
 
 Runs the independent read-only reviewer after validation. `--human-approve`
 verifies and accepts a pending human gate; it is not an approval bypass.
@@ -298,12 +298,60 @@ cw review --human-approve
 
 Only semantic `REVISE` consumes an attempt. Infrastructure failures are separate.
 
+`recover-infrastructure` is a separate, fail-closed historical correction. It
+requires the exact active `REVISE` review, its digest, workflow/state CAS, a
+reason, and exactly one of preview or explicit apply. CW accepts it only when a
+validated Verification Receipt and a linked structured infrastructure event
+prove that the reviewer attempted a command and encountered infrastructure
+failure. Unlinked logs are rejected fail-closed.
+`--phase` and `--review-ref` select the active evidence; the three independent
+CAS controls are `--expected-review-sha256`, `--expected-workflow-sha256`, and
+`--expected-state-sha256`. `--reason` is mandatory.
+
+```bash
+cw review recover-infrastructure \
+  --phase 02-active \
+  --review-ref .cw/reviews/02-active-attempt-01.json \
+  --expected-review-sha256 sha256:<review-hash> \
+  --expected-workflow-sha256 sha256:<workflow-hash> \
+  --expected-state-sha256 sha256:<state-hash> \
+  --reason "Reviewer cache failure was misclassified" \
+  --dry-run --output=json
+```
+
+Replace every angle-bracket placeholder with the live value reported by CW.
+Apply uses the same command with `--apply` instead of `--dry-run`. It restores
+one attempt, records backup/supersession/receipt evidence, and leaves a
+retryable infrastructure error. It never runs commands or agents; run `cw
+retry` separately.
+
+`authorize-retry` is the explicit human-authorized path for an unverifiable
+historical `REVISE`. It creates one pending authorization without changing
+attempt counters. `cw retry` then regenerates deterministic verification and
+readiness; a technical error leaves the authorization pending, while the next
+semantic `REVISE` or `APPROVE` consumes it exactly once. The explicit
+`--acknowledge-unverifiable-legacy` flag is required for this operation.
+
+```bash
+cw review authorize-retry \
+  --phase 02-active \
+  --review-ref .cw/reviews/02-active-attempt-01.json \
+  --expected-review-sha256 sha256:<review-hash> \
+  --expected-workflow-sha256 sha256:<workflow-hash> \
+  --expected-state-sha256 sha256:<state-hash> \
+  --reason "Authorize a fresh review of unverifiable historical evidence" \
+  --acknowledge-unverifiable-legacy \
+  --apply
+```
+
 ## cw retry
 
 **Syntax:** `cw retry`
 
-Retries the classified planning, implementation, or review operation. CW reuses
-valid readiness for reviewer failures.
+Retries the classified planning, implementation, verification, or review
+operation. Review recovery regenerates verification evidence deterministically
+before semantic review; it does not automatically reuse historical receipts.
+A review retry never invokes the implementer.
 
 ```bash
 cw error
@@ -428,7 +476,10 @@ cw logs --run run_0123456789abcdef0123456789abcdef
 
 **Syntax:** `cw doctor [--reviewer] [--integrations] [--codex] [--performance] [--processes]`
 
-- `--reviewer` adds a live ephemeral reviewer connectivity check.
+- `--reviewer` adds a live ephemeral connectivity/structured-output check and
+  separately reports reviewer sandbox/hooks/web isolation plus private
+  Verification Executor temp/cache preflight and cleanup. It does not run any
+  workflow command.
 - `--integrations` inspects configured integration health.
 - `--codex` reports the latest sanitized managed Codex invocation.
 - `--performance` shows measurable startup timings only.

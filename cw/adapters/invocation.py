@@ -4,12 +4,11 @@ import hashlib
 import json
 import os
 import shlex
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence
 
 from cw.core.diagnostics import redact
 from cw.core.utils import utc_now
-
 
 _INHERITED_PROCESS_CONTEXT = {
     "CODEX_CI",
@@ -55,6 +54,14 @@ def sanitized_invocation(
     if prompt is not None and argv and argv[-1] == prompt:
         digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
         argv[-1] = f"[PROMPT sha256:{digest}]"
+    placeholders = {
+        "--cd": "[PROJECT_ROOT]",
+        "--output-last-message": "[EPHEMERAL_OUTPUT]",
+        "--output-schema": "[OUTPUT_SCHEMA]",
+    }
+    for index, value in enumerate(argv[:-1]):
+        if value in placeholders:
+            argv[index + 1] = placeholders[value]
     clean_argv = [redact(value) or "" for value in argv]
     clean_environment = {
         name: redact(environment[name])

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "fixture": "reviewer-infrastructure-isolation",
+  "consumer_data": false,
+  "external_services": false,
+  "workflow": {
+    "phases": ["01-approved", "02-active"],
+    "phase_01_gate_preserved": true,
+    "phase_02_required_command": "python3 -c 'print(42)'",
+    "completion_contract": "synthetic-internal-tool"
+  },
+  "v0_17_reproduction": [
+    "verification commands pass",
+    "readiness is valid",
+    "reviewer attempts project command",
+    "reviewer cache write fails",
+    "valid REVISE payload is accepted",
+    "attempt and revision_attempt increment",
+    "readiness is removed",
+    "state becomes REVISION_REQUIRED",
+    "retry has no infrastructure_error",
+    "explain has no safe recovery"
+  ],
+  "v0_18_expected": {
+    "classification": "REVIEWER_INFRASTRUCTURE_ERROR",
+    "attempts_consumed": 0,
+    "retry": "cw retry",
+    "historical_recovery": "cw review recover-infrastructure",
+    "automatic_approval": false,
+    "automatic_execution": false
+  }
+}

@@ -1,5 +1,14 @@
 # Troubleshooting CW by symptom
 
+## Reviewer or verification infrastructure failure
+
+Run `cw explain --output=json`. When `retryable` is true and `recovery` is `cw
+retry`, semantic counters are preserved. `cw retry` reuses receipt-bound
+readiness or regenerates it through the Verification Executor; it does not run
+the implementer for a review retry. A legitimate semantic `REVISE` is not
+retryable. Use historical recovery only when CW can prove the original review
+was exclusively infrastructure-derived.
+
 ## Plugin marketplace or installation fails
 
 Verify the installed surface before retrying:

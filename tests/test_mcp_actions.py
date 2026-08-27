@@ -11,6 +11,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from cw.adapters.mcp import MCPRuntime, RuntimeConfig
+from cw.agents.reviewer import run_review
 from cw.application import (
     Actor,
     ActorOrigin,
@@ -19,14 +20,13 @@ from cw.application import (
     CWApplication,
     OperationContext,
 )
+from cw.cli.main import main as cli_main
+from cw.core.completion import run_completion_review
 from cw.core.errors import CwError, ErrorCode
+from cw.core.locking import operation_lock
+from cw.core.models import WorkflowState
 from cw.core.recovery import mark_infrastructure_error
 from cw.core.state import save_state, transition
-from cw.core.models import WorkflowState
-from cw.core.completion import run_completion_review
-from cw.core.locking import operation_lock
-from cw.agents.reviewer import run_review
-from cw.cli.main import main as cli_main
 from cw.core.utils import sha256_file
 from tests.helpers import FakeAdapter, TempRepo, result
 
@@ -301,7 +301,10 @@ class MCPControlledActionTests(unittest.TestCase):
         after = file_snapshot(self.repo.root / ".cw")
         changed = {name for name in set(before) | set(after) if before.get(name) != after.get(name)}
         self.assertTrue(all(
-            name.startswith("runtime/operations/") or name.startswith("validation/")
+            name.startswith(
+                ("runtime/operations/", "validation/", "verification-receipts/")
+            )
+            or name == "runtime/READY_FOR_REVIEW.json"
             for name in changed
         ), changed)
 
@@ -317,9 +320,14 @@ class MCPControlledActionTests(unittest.TestCase):
         self.assertTrue(all(
             name == "state.json"
             or name in {"runtime/implementer-session.json", "runtime/READY_FOR_REVIEW.json"}
-            or name.startswith("runtime/operations/")
-            or name.startswith("reviews/")
-            or name.startswith("gates/")
+            or name.startswith(
+                (
+                    "runtime/operations/",
+                    "reviews/",
+                    "gates/",
+                    "verification-receipts/",
+                )
+            )
             for name in changed
         ), changed)
 

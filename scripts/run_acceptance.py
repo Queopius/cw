@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import os
 import platform
 import re
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -19,8 +22,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from cw.core.diagnostics import redact  # noqa: E402
-from cw.core.platform import popen_process_group_kwargs, process_is_alive  # noqa: E402
+from cw.core.diagnostics import redact
+from cw.core.platform import popen_process_group_kwargs, process_is_alive
 
 FAKE_CODEX = ROOT / "tests/fixtures/fake_codex/fake_codex.py"
 STATUSES = {"PASS", "FAIL", "SKIPPED", "NOT_CONFIGURED"}
@@ -31,7 +34,36 @@ REPORT_KEYS = {
 
 
 class AcceptanceFailure(RuntimeError):
-    pass
+    """A failed acceptance operation with safe metadata for the failure artifact."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        stage: str = "acceptance",
+        executable: str = "unknown",
+        command_name: str = "unknown",
+        exit_code: int | None = None,
+        executable_path: str | None = None,
+        cwd: Path | None = None,
+        environment: dict[str, str] | None = None,
+        timed_out: bool = False,
+        envelope_code: str | None = None,
+        envelope_correlation: str | None = None,
+        error_fingerprint: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.executable = executable
+        self.command_name = command_name
+        self.exit_code = exit_code
+        self.executable_path = executable_path
+        self.cwd = cwd
+        self.environment = environment or {}
+        self.timed_out = timed_out
+        self.envelope_code = envelope_code
+        self.envelope_correlation = envelope_correlation
+        self.error_fingerprint = error_fingerprint
 
 
 def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str:
@@ -42,18 +74,26 @@ def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str
         clean = re.sub(re.escape(root), "<PRIVATE_ROOT>", clean, flags=re.IGNORECASE)
         clean = re.sub(re.escape(root.replace("/", "\\")), "<PRIVATE_ROOT>", clean, flags=re.IGNORECASE)
     clean = re.sub(
+        r"(?i)\b[A-Z]:\\(?:Users|Documents and Settings)\\[^\r\n\"']+",
+        "<PRIVATE_PATH>",
+        clean,
+    )
+    clean = re.sub(
         r"(?i)(?:\b[A-Z]:)?[\\/]+(?:Users|Documents and Settings)[\\/]+[^\\/\r\n]+",
         "~",
         clean,
     )
     clean = re.sub(r"/(?:home|Users)/[^/\s\"']+", "~", clean)
+    clean = re.sub(r"(?i)\b[A-Z]:\\[^\s\"']+", "<PRIVATE_PATH>", clean)
+    clean = re.sub(r"(?i)\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b", "[REDACTED EMAIL]", clean)
     clean = re.sub(
         r"(?i)authorization\s*:\s*(?:bearer|basic)\s+\S+",
         "[REDACTED CREDENTIAL]",
         clean,
     )
+    clean = re.sub(r"(?i)\b(?:bearer|basic)\s+\S+", "[REDACTED CREDENTIAL]", clean)
     clean = re.sub(
-        r"(?i)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret)"
+        r"(?i)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|password|secret)"
         r"\s*[=:]\s*\S+",
         "[REDACTED CREDENTIAL]",
         clean,
@@ -61,19 +101,328 @@ def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str
     return clean
 
 
+_MAX_DIAGNOSTIC_BYTES = 64 * 1024
+_SAFE_STAGE = re.compile(r"^[a-z][a-z0-9_.-]{0,80}$")
+_SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,120}$")
+_SAFE_CORRELATION_ID = re.compile(r"^[0-9a-f]{16}$")
+_SAFE_MESSAGES = {"Unexpected internal failure", "Verification Executor failed"}
+_REDACTED_MESSAGE = "Internal exception captured; message redacted."
+
+
+def _canonical_root(root: Path) -> Path:
+    """Return the existing runtime root in its host canonical spelling."""
+    resolved = root.resolve(strict=True)
+    if os.name != "nt":
+        return resolved
+    try:
+        import ctypes
+
+        windll = getattr(ctypes, "windll", None)
+        kernel32 = getattr(windll, "kernel32", None)
+        get_long_path = getattr(kernel32, "GetLongPathNameW", None)
+        if get_long_path is None:
+            return resolved
+        size = get_long_path(str(resolved), None, 0)
+        if size:
+            buffer = ctypes.create_unicode_buffer(size + 1)
+            if get_long_path(str(resolved), buffer, len(buffer)):
+                long_path = Path(buffer.value)
+                if os.path.samefile(resolved, long_path):
+                    return long_path.resolve(strict=True)
+    except (AttributeError, OSError):
+        pass
+    return resolved
+
+
+def _safe_message(value: Any) -> str:
+    """Free text is never exported; only fixed diagnostic messages are allowed."""
+    return value if isinstance(value, str) and value in _SAFE_MESSAGES else _REDACTED_MESSAGE
+
+
+def _safe_regular_text(path: Path, *, maximum: int = _MAX_DIAGNOSTIC_BYTES) -> str | None:
+    """Read a small, regular, single-link file without following symlinks."""
+    try:
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > maximum:
+            return None
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1 or opened.st_size > maximum:
+                return None
+            return os.read(descriptor, maximum + 1).decode("utf-8")
+        finally:
+            os.close(descriptor)
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _safe_json(path: Path) -> dict[str, Any] | None:
+    text = _safe_regular_text(path)
+    if text is None:
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _safe_fingerprint(path: Path) -> str | None:
+    text = _safe_regular_text(path)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest() if text is not None else None
+
+
+def _failure_envelope(stdout: str) -> tuple[str | None, str | None]:
+    """Read only code and correlation from one in-memory CW JSON envelope."""
+    payload = _json_payload(stdout)
+    if not isinstance(payload, dict):
+        return None, None
+    code = payload.get("code")
+    correlation = _correlation_id(payload)
+    return (code if isinstance(code, str) and _SAFE_IDENTIFIER.fullmatch(code) else None, correlation)
+
+
+def _json_payload(text: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if isinstance(payload.get("error"), dict):
+        return payload["error"]
+    return payload.get("data") if isinstance(payload.get("data"), dict) else payload
+
+
+def _correlation_id(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    for key in ("correlation_id", "correlationId"):
+        candidate = value.get(key)
+        if isinstance(candidate, str) and _SAFE_CORRELATION_ID.fullmatch(candidate):
+            return candidate
+    for key in ("error", "data"):
+        nested = value.get(key)
+        if isinstance(nested, dict) and (correlation := _correlation_id(nested)) is not None:
+            return correlation
+    return None
+
+
+def _relative_cw_path(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.replace("\\", "/")
+    if "/cw/" not in normalized:
+        return None
+    candidate = "cw/" + normalized.rsplit("/cw/", 1)[1]
+    if ".." in candidate.split("/") or not candidate.endswith(".py"):
+        return None
+    return candidate if _SAFE_IDENTIFIER.fullmatch(candidate.replace("/", ".")) else None
+
+
+def _safe_frame(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    module = _relative_cw_path(value.get("path") or value.get("file") or value.get("filename"))
+    function = value.get("function")
+    line = value.get("line") or value.get("lineno")
+    exception_type = value.get("exception_type") or value.get("type")
+    if not (module and isinstance(function, str) and _SAFE_IDENTIFIER.fullmatch(function)
+            and isinstance(line, int) and line >= 0 and isinstance(exception_type, str)
+            and _SAFE_IDENTIFIER.fullmatch(exception_type)):
+        return None
+    return {"module": module, "function": function, "line": line,
+            "exception_type": exception_type, "message": _safe_message(value.get("message"))}
+
+
+def _text_traceback_frames(value: Any, exception_type: str | None) -> list[dict[str, Any]]:
+    """Parse Python traceback metadata only; source and exception text never escape."""
+    if not isinstance(value, str):
+        return []
+    frames: list[dict[str, Any]] = []
+    pattern = re.compile(r'^\s*File "(?P<path>[^"]+)", line (?P<line>\d+), in (?P<function>[A-Za-z_][A-Za-z0-9_]*)\s*$')
+    safe_type = exception_type if isinstance(exception_type, str) and _SAFE_IDENTIFIER.fullmatch(exception_type) else None
+    if safe_type is None:
+        type_pattern = re.compile(r"^\s*(?P<type>[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Exit|Interrupt))(?::|$)")
+        for line in reversed(value.splitlines()):
+            match = type_pattern.match(line)
+            if match is not None:
+                safe_type = match.group("type")
+                break
+    safe_type = safe_type or "Exception"
+    for line in value.splitlines():
+        match = pattern.match(line)
+        if match is None:
+            continue
+        module = _relative_cw_path(match.group("path"))
+        if module is not None:
+            frames.append({"module": module, "function": match.group("function"), "line": int(match.group("line")), "exception_type": safe_type, "message": _REDACTED_MESSAGE})
+    return frames[-12:]
+
+
+def _record_diagnostic(record: dict[str, Any], correlation: str, command: str) -> dict[str, Any] | None:
+    nested_payload = record.get("data")
+    payload: dict[str, Any] = nested_payload if isinstance(nested_payload, dict) else record
+    nested_error = payload.get("error")
+    error: dict[str, Any] = nested_error if isinstance(nested_error, dict) else payload
+    code = error.get("code")
+    message = error.get("message")
+    source = record.get("source")
+    if not (isinstance(code, str) and isinstance(message, str) and source == command):
+        return None
+    expected = hashlib.sha256(f"{command}\0{code}\0{message}".encode()).hexdigest()[:16]
+    stored = _correlation_id(record)
+    if not hmac.compare_digest(correlation, expected) and stored != correlation:
+        return None
+    structured = record.get("safe_traceback")
+    if isinstance(structured, dict):
+        error_type = structured.get("exception_type")
+        frames = structured.get("frames")
+        if structured.get("version") != 1 or not isinstance(error_type, str) or not _SAFE_IDENTIFIER.fullmatch(error_type) or not isinstance(frames, list):
+            return None
+        safe_frames = [
+            {"module": frame.get("module"), "function": frame.get("function"), "line": frame.get("line"), "exception_type": error_type, "message": _REDACTED_MESSAGE}
+            for frame in frames if isinstance(frame, dict) and isinstance(frame.get("module"), str) and frame["module"].startswith("cw.")
+            and isinstance(frame.get("function"), str) and _SAFE_IDENTIFIER.fullmatch(frame["function"])
+            and isinstance(frame.get("line"), int) and frame["line"] > 0
+        ]
+        if len(safe_frames) != len(frames) or not safe_frames:
+            return None
+    else:
+        error_type = error.get("exception_type") or error.get("type")
+        frames = error.get("traceback") or error.get("frames") or []
+        safe_frames = [_safe_frame(frame) for frame in frames] if isinstance(frames, list) else _text_traceback_frames(frames, error_type)
+    safe_frames = [frame for frame in safe_frames if frame is not None][:12]
+    primary = safe_frames[-1] if safe_frames else None
+    return {
+        "cw_error_code": code if isinstance(code, str) and _SAFE_IDENTIFIER.fullmatch(code) else None,
+        "correlation_id_sha256": hashlib.sha256(correlation.encode("utf-8")).hexdigest(),
+        "exception_type": primary["exception_type"] if primary else error_type if isinstance(error_type, str) and _SAFE_IDENTIFIER.fullmatch(error_type) else None,
+        "module": primary["module"] if primary else None,
+        "function": primary["function"] if primary else None,
+        "line": primary["line"] if primary else None,
+        "message": _safe_message(message),
+        "traceback": safe_frames,
+    }
+
+
+def _last_correlated_jsonl(path: Path, correlation: str) -> dict[str, Any] | None:
+    text = _safe_regular_text(path)
+    if text is None:
+        return None
+    for line in reversed(text.splitlines()):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(record, dict) and _correlation_id(record) == correlation:
+            return record
+    return None
+
+
+def _capture_cw_diagnostic(failure: AcceptanceFailure) -> dict[str, Any]:
+    """Capture only a correlation-bound CW record; no stale-error heuristics."""
+    unavailable: dict[str, Any] = {
+        "diagnostic_status": "unavailable", "diagnostic_source": "none",
+        "canonical_root_available": False, "project_metadata_present": False,
+        "envelope_code_present": failure.envelope_code is not None,
+        "envelope_correlation_present": failure.envelope_correlation is not None,
+        "last_error_changed": False, "last_error_safe_regular": False,
+        "record_found": False, "correlation_match": False, "code_match": False,
+        "traceback_frame_available": False, "binding_failure_reason": "project_metadata_missing",
+    }
+    root = failure.cwd
+    if failure.executable != "cw" or root is None or not failure.executable_path:
+        return unavailable
+    try:
+        root = _canonical_root(root)
+    except OSError:
+        return unavailable
+    unavailable["canonical_root_available"] = True
+    if not (root / ".cw").is_dir():
+        return unavailable
+    unavailable["project_metadata_present"] = True
+    correlation = failure.envelope_correlation
+    if failure.envelope_code is None:
+        unavailable["binding_failure_reason"] = "envelope_missing"
+        return unavailable
+    if correlation is None:
+        unavailable["binding_failure_reason"] = "envelope_correlation_missing"
+        return unavailable
+    current_fingerprint = _safe_fingerprint(root / ".cw/logs/last-error.json")
+    unavailable["last_error_safe_regular"] = current_fingerprint is not None
+    unavailable["last_error_changed"] = current_fingerprint is not None and current_fingerprint != failure.error_fingerprint
+    if not unavailable["last_error_changed"]:
+        unavailable["binding_failure_reason"] = "diagnostic_record_unchanged"
+        return unavailable
+    for source, record in (
+        ("last_error", _safe_json(root / ".cw/logs/last-error.json")),
+        ("errors_jsonl", _last_correlated_jsonl(root / ".cw/logs/errors.jsonl", correlation)),
+    ):
+        if record is not None:
+            unavailable["record_found"] = True
+            captured = _record_diagnostic(record, correlation, failure.command_name)
+            if captured is None:
+                unavailable["binding_failure_reason"] = "correlation_mismatch"
+                continue
+            unavailable["correlation_match"] = True
+            if captured["cw_error_code"] != failure.envelope_code:
+                unavailable["binding_failure_reason"] = "code_mismatch"
+                continue
+            unavailable["code_match"] = True
+            unavailable["traceback_frame_available"] = bool(captured["traceback"])
+            if not unavailable["traceback_frame_available"]:
+                unavailable["binding_failure_reason"] = "traceback_unavailable"
+                continue
+            return {**unavailable, "diagnostic_status": "captured", "diagnostic_source": source, "binding_failure_reason": "none", **captured}
+    if not unavailable["record_found"]:
+        unavailable["binding_failure_reason"] = "diagnostic_record_missing"
+    return unavailable
+
+
 def _run(
     command: list[str], *, cwd: Path, environment: dict[str, str],
     expected: set[int] = frozenset({0}), timeout: int = 180,
+    diagnostic_stage: str = "acceptance.operation", diagnostic_executable: str = "unknown",
+    diagnostic_command: str = "unknown",
 ) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(
-        command, cwd=cwd, env=environment, text=True, encoding="utf-8",
-        errors="replace", capture_output=True, timeout=timeout, check=False,
-    )
-    if completed.returncode not in expected:
-        executable = Path(command[0]).name
+    if not (_SAFE_STAGE.fullmatch(diagnostic_stage)
+            and diagnostic_executable in {"cw", "python", "git", "unknown"}
+            and _SAFE_STAGE.fullmatch(diagnostic_command)):
+        raise ValueError("diagnostic operation must use declared allowlisted identifiers")
+    before_error = _safe_fingerprint(cwd / ".cw/logs/last-error.json") if diagnostic_executable == "cw" else None
+    try:
+        completed = subprocess.run(
+            command, cwd=cwd, env=environment, text=True, encoding="utf-8",
+            errors="replace", capture_output=True, timeout=timeout, check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
         raise AcceptanceFailure(
-            f"{executable} exited {completed.returncode}\n"
-            f"STDOUT\n{completed.stdout[-4000:]}\nSTDERR\n{completed.stderr[-4000:]}"
+            "Acceptance command timed out.",
+            stage=diagnostic_stage,
+            executable=diagnostic_executable,
+            command_name=diagnostic_command,
+            exit_code=None,
+            executable_path=command[0] if diagnostic_executable == "cw" and command else None,
+            cwd=cwd,
+            environment=environment,
+            timed_out=True,
+        ) from exc
+    if completed.returncode not in expected:
+        code, correlation = _failure_envelope(completed.stdout) if diagnostic_executable == "cw" else (None, None)
+        raise AcceptanceFailure(
+            "Acceptance command failed.",
+            stage=diagnostic_stage,
+            executable=diagnostic_executable,
+            command_name=diagnostic_command,
+            exit_code=completed.returncode,
+            executable_path=command[0] if diagnostic_executable == "cw" and command else None,
+            cwd=cwd,
+            environment=environment,
+            envelope_code=code,
+            envelope_correlation=correlation,
+            error_fingerprint=before_error,
         )
     return completed
 
@@ -91,6 +440,7 @@ def _venv_bin(venv_root: Path) -> Path:
 
 
 def _install_wheel(base: Path, environment: dict[str, str]) -> tuple[Path, Path, Path]:
+    base = _canonical_root(base)
     wheelhouse = base / "wheelhouse"
     wheelhouse.mkdir()
     build_tools = base / "build-tools"
@@ -151,6 +501,7 @@ def _install_fake_codex(directory: Path) -> Path:
 
 
 def _environment(base: Path, runtime: Path, fake_bin: Path) -> dict[str, str]:
+    base = _canonical_root(base)
     inherited = {
         key: value for key, value in os.environ.items()
         if key in {
@@ -183,6 +534,7 @@ def _environment(base: Path, runtime: Path, fake_bin: Path) -> dict[str, str]:
 
 
 def _repository(base: Path, name: str, environment: dict[str, str]) -> Path:
+    base = _canonical_root(base)
     root = base / "CW Acceptance" / "Projeto São Paulo" / name
     root.mkdir(parents=True)
     _run(["git", "init", "--initial-branch=acceptance"], cwd=root, environment=environment)
@@ -198,12 +550,16 @@ def _repository(base: Path, name: str, environment: dict[str, str]) -> Path:
 
 def _prepare_plan(cw: Path, root: Path, environment: dict[str, str], phases: int) -> None:
     environment["CW_FAKE_CODEX_PHASES"] = str(phases)
-    _run([str(cw), "init", "--json"], cwd=root, environment=environment)
+    _run([str(cw), "init", "--json"], cwd=root, environment=environment,
+         diagnostic_stage="plan.init", diagnostic_executable="cw", diagnostic_command="init")
     _run([
         str(cw), "plan", "--goal", "Implement greeting behavior for José", "--json",
-    ], cwd=root, environment=environment)
-    _run([str(cw), "plan", "show", "--json"], cwd=root, environment=environment)
-    _run([str(cw), "plan", "approve", "--json"], cwd=root, environment=environment)
+    ], cwd=root, environment=environment,
+        diagnostic_stage="plan.create", diagnostic_executable="cw", diagnostic_command="plan")
+    _run([str(cw), "plan", "show", "--json"], cwd=root, environment=environment,
+         diagnostic_stage="plan.show", diagnostic_executable="cw", diagnostic_command="plan")
+    _run([str(cw), "plan", "approve", "--json"], cwd=root, environment=environment,
+         diagnostic_stage="plan.approve", diagnostic_executable="cw", diagnostic_command="plan")
 
 
 def _state(root: Path) -> dict[str, Any]:
@@ -330,24 +686,29 @@ def _interrupt(cw: Path, base: Path, environment: dict[str, str]) -> None:
         if not child_pid or not process_is_alive(child_pid):
             if process.poll() is None:
                 process.kill()
-            stdout, stderr = process.communicate(timeout=5)
+            process.communicate(timeout=5)
             raise AcceptanceFailure(
-                f"interrupt fixture did not start its managed child\n{stdout[-1000:]}\n{stderr[-1000:]}"
+                "interrupt fixture did not start its managed child",
+                stage="interrupt.child_start",
             )
         if os.name == "nt":
             process.send_signal(signal.CTRL_BREAK_EVENT)
         else:
             os.killpg(process.pid, signal.SIGINT)
-        stdout, stderr = process.communicate(timeout=20)
+        process.communicate(timeout=20)
         if process.returncode != 130:
             raise AcceptanceFailure(
-                f"interrupted CW exited {process.returncode}, expected 130\n{stdout[-1000:]}\n{stderr[-1000:]}"
+                "interrupted CW did not exit with the expected signal status",
+                stage="interrupt.parent_exit",
             )
         child_deadline = time.monotonic() + 5
         while process_is_alive(child_pid) and time.monotonic() < child_deadline:
             time.sleep(0.05)
         if process_is_alive(child_pid):
-            raise AcceptanceFailure("interrupted CW left its managed Codex child running")
+            raise AcceptanceFailure(
+                "interrupted CW left its managed child active",
+                stage="interrupt.child_cleanup",
+            )
     finally:
         if process.poll() is None:
             process.kill()
@@ -364,11 +725,23 @@ def _interrupt(cw: Path, base: Path, environment: dict[str, str]) -> None:
                 except ProcessLookupError:
                     pass
     if list((root / ".cw/gates").glob("*.approved.json")):
-        raise AcceptanceFailure("interrupted CW created a partial approval gate")
+        raise AcceptanceFailure(
+            "interrupted CW created a partial approval gate",
+            stage="interrupt.partial_gate",
+        )
     recovered_environment = {**environment, "CW_FAKE_CODEX_SCENARIO": "success"}
-    _run([str(cw), "retry", "--json"], cwd=root, environment=recovered_environment)
+    try:
+        _run([str(cw), "retry", "--json"], cwd=root, environment=recovered_environment)
+    except AcceptanceFailure as error:
+        raise AcceptanceFailure(
+            "interrupted CW retry did not complete",
+            stage="interrupt.retry",
+        ) from error
     if _state(root).get("status") != "COMPLETED":
-        raise AcceptanceFailure("interrupted workflow was not recoverable through cw retry")
+        raise AcceptanceFailure(
+            "interrupted workflow was not recoverable through cw retry",
+            stage="interrupt.recovery",
+        )
 
 
 def _result(status: str, detail: str = "") -> dict[str, str]:
@@ -406,12 +779,86 @@ def _validate_report(report: dict[str, Any]) -> None:
         raise AcceptanceFailure("compatibility report contains forbidden private data")
 
 
+def _write_diagnostic(
+    output: Path, exc: BaseException, *, base: Path, source_commit: str
+) -> None:
+    """Write a failure-only artifact from declared fields, never process payloads."""
+    failure = exc if isinstance(exc, AcceptanceFailure) else AcceptanceFailure(
+        "Acceptance harness exception.", stage="acceptance.harness",
+        executable="unknown", command_name="unknown",
+    )
+    captured = _capture_cw_diagnostic(failure)
+    diagnostic = {
+        "schema": "cw.acceptance-diagnostic.v1",
+        "platform": platform.system(),
+        "python_version": platform.python_version(),
+        "architecture": platform.machine(),
+        "stage": failure.stage,
+        "executable": failure.executable,
+        "command": failure.command_name,
+        "exit_code": failure.exit_code,
+        "diagnostic_status": captured["diagnostic_status"],
+        "diagnostic_source": captured["diagnostic_source"],
+        "cw_error_code": captured.get("cw_error_code"),
+        "correlation_id_sha256": captured.get("correlation_id_sha256"),
+        "exception_type": captured.get("exception_type") or type(exc).__name__,
+        "module": captured.get("module"),
+        "function": captured.get("function"),
+        "line": captured.get("line"),
+        "message": captured.get("message", _REDACTED_MESSAGE),
+        "traceback": captured.get("traceback", []),
+        "next_action": "Inspect the sanitized acceptance diagnostic and repair the declared stage.",
+        "redaction_status": "allowlist_only",
+        **{key: captured[key] for key in (
+            "canonical_root_available", "project_metadata_present", "envelope_code_present",
+            "envelope_correlation_present", "last_error_changed", "last_error_safe_regular",
+            "record_found", "correlation_match", "code_match", "traceback_frame_available",
+            "binding_failure_reason",
+        )},
+    }
+    serialized = json.dumps(diagnostic, ensure_ascii=False, indent=2) + "\n"
+    _validate_diagnostic(diagnostic)
+    destination = output.with_name("compatibility-diagnostic.json")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_output = destination.with_suffix(destination.suffix + ".tmp")
+    temporary_output.write_text(serialized, encoding="utf-8")
+    os.replace(temporary_output, destination)
+
+
+def _validate_diagnostic(diagnostic: dict[str, Any]) -> None:
+    required = {
+        "schema", "platform", "python_version", "architecture", "stage", "executable",
+        "command", "exit_code", "diagnostic_status", "diagnostic_source", "cw_error_code",
+        "correlation_id_sha256", "exception_type", "module", "function", "line", "message",
+        "traceback", "next_action", "redaction_status",
+        "canonical_root_available", "project_metadata_present", "envelope_code_present",
+        "envelope_correlation_present", "last_error_changed", "last_error_safe_regular",
+        "record_found", "correlation_match", "code_match", "traceback_frame_available",
+        "binding_failure_reason",
+    }
+    if set(diagnostic) != required or diagnostic["schema"] != "cw.acceptance-diagnostic.v1":
+        raise AcceptanceFailure("acceptance diagnostic has an invalid contract")
+    serialized = json.dumps(diagnostic, ensure_ascii=False).lower()
+    forbidden = ("\\users\\", "/home/", "bearer ", "api_key", "password=", "secret=", "--goal")
+    if any(value in serialized for value in forbidden):
+        raise AcceptanceFailure("acceptance diagnostic contains private data")
+    booleans = {
+        key
+        for key in required
+        if key.endswith(("_present", "_available", "_changed", "_regular", "_found", "_match"))
+    }
+    if any(not isinstance(diagnostic[key], bool) for key in booleans):
+        raise AcceptanceFailure("acceptance diagnostic has non-boolean binding metadata")
+    if diagnostic["binding_failure_reason"] not in {"project_metadata_missing", "envelope_missing", "envelope_correlation_missing", "diagnostic_record_unchanged", "diagnostic_record_missing", "correlation_mismatch", "code_mismatch", "traceback_unavailable", "none"}:
+        raise AcceptanceFailure("acceptance diagnostic has an invalid binding reason")
+
+
 def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
     source_version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     tests: dict[str, dict[str, str]] = {}
     exit_code = 0
     with tempfile.TemporaryDirectory(prefix="cw-acceptance-") as temporary:
-        base = Path(temporary)
+        base = _canonical_root(Path(temporary))
         bootstrap = os.environ.copy()
         bootstrap.pop("PYTHONPATH", None)
         try:
@@ -517,9 +964,10 @@ def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
             tests["rollback"] = _result("PASS", "manual and failed rollback preserve healthy runtime")
         except (AcceptanceFailure, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
             exit_code = 1
+            _write_diagnostic(output, exc, base=base, source_commit=_source_commit())
             tests.setdefault("acceptance", _result(
                 "FAIL",
-                _sanitize_detail(str(exc), private_roots=(base, ROOT, Path.home())),
+                "Acceptance failed; see the sanitized compatibility diagnostic.",
             ))
     tests.setdefault("interrupts", _result("SKIPPED", "native platform process suite did not complete"))
     tests.setdefault("update", _result("SKIPPED", "deterministic update transaction suite did not complete"))

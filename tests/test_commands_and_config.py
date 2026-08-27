@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
-import subprocess
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -96,11 +96,19 @@ class CommandSecurityTests(unittest.TestCase):
                 required_commands=(RequiredCommand(command_text),),
             )
             workflow = replace(repo.workflow, phases=(phase,))
-            completed = subprocess.CompletedProcess([sys.executable, "-c", "pass"], 0, "", "")
-            with patch("cw.checks.deterministic.subprocess.run", return_value=completed) as run:
+            calls = []
+            real_popen = subprocess.Popen
+
+            def observe(*args, **kwargs):
+                if kwargs.get("stdin") is subprocess.DEVNULL:
+                    calls.append(kwargs)
+                return real_popen(*args, **kwargs)
+
+            with patch("cw.checks.verification.subprocess.Popen", side_effect=observe):
                 validation = validate_phase(repo.root, workflow, phase)
             self.assertTrue(validation.passed)
-            self.assertEqual(subprocess.DEVNULL, run.call_args.kwargs["stdin"])
+            self.assertEqual(1, len(calls))
+            self.assertEqual(subprocess.DEVNULL, calls[0]["stdin"])
         finally:
             repo.close()
 

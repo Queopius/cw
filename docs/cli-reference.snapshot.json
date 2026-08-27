@@ -271,10 +271,16 @@
     {
       "name": "review",
       "options": [
+        "--acknowledge-unverifiable-legacy",
         "--all",
+        "--apply",
         "--cursor",
         "--debug",
+        "--dry-run",
         "--expand",
+        "--expected-review-sha256",
+        "--expected-state-sha256",
+        "--expected-workflow-sha256",
         "--fields",
         "--human-approve",
         "--json",
@@ -282,10 +288,22 @@
         "--llm",
         "--no-color",
         "--output",
+        "--phase",
         "--quiet",
+        "--reason",
+        "--review-ref",
         "--verbose"
       ],
-      "positionals": []
+      "positionals": [
+        {
+          "name": "action",
+          "choices": [
+            "recover-infrastructure",
+            "authorize-retry"
+          ],
+          "required": false
+        }
+      ]
     },
     {
       "name": "history",

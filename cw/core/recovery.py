@@ -11,8 +11,11 @@ from .schema import SCHEMA_VERSION
 from .session import create_session, load_session, readiness_path, session_path
 from .utils import atomic_json, load_json, utc_now
 
-
 RETRYABLE_OPERATIONS: dict[ErrorCode, str] = {
+    ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR: "verification",
+    ErrorCode.VERIFICATION_TIMEOUT: "verification",
+    ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR: "review",
+    ErrorCode.REVIEWER_INVALID_OUTPUT: "review",
     ErrorCode.REVIEWER_NETWORK_ERROR: "review",
     ErrorCode.REVIEWER_PROCESS_ERROR: "review",
     ErrorCode.REVIEW_TIMEOUT: "review",
@@ -145,7 +148,16 @@ def readiness_is_valid(root: Path, workflow: Workflow, phase: Phase) -> bool:
 
         manifest = load_readiness(root, phase)
         session = load_session(root, workflow, phase)
-        return session is not None and manifest["session_id"] == session["session_id"]
+        if session is None or manifest["session_id"] != session["session_id"]:
+            return False
+        receipt = manifest.get("verification_receipt")
+        if receipt is None:
+            return True
+        if not isinstance(receipt, dict) or set(receipt) != {"reference", "sha256", "digest", "receipt_id"}:
+            return False
+        from cw.checks.verification import validate_verification_receipt
+        validate_verification_receipt(root, workflow, phase, receipt["reference"], receipt["sha256"])
+        return True
     except CwError:
         return False
 
@@ -172,6 +184,8 @@ def regenerate_readiness(
         "artifacts": list(phase.artifacts),
         "checks_executed": checks,
     }
+    if validation.receipt is not None:
+        manifest["verification_receipt"] = validation.receipt
     atomic_json(readiness_path(root), manifest)
     return manifest
 
@@ -203,6 +217,7 @@ def recover_orphan_revision_readiness(
         return False
 
     from cw.checks.deterministic import inspect_completed_work, load_readiness
+
     from .reviews import validate_reviewer_result
 
     try:
