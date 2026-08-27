@@ -505,11 +505,13 @@ def _record_error(
         if record is None:
             record_global_diagnostic(
                 exc, source=source, traceback_text=traceback_text, correlation_id=correlation_id,
+                safe_traceback=safe_traceback,
             )
     except Exception:
         try:
             record_global_diagnostic(
                 exc, source=source, traceback_text=traceback_text, correlation_id=correlation_id,
+                safe_traceback=safe_traceback,
             )
         except Exception:
             pass

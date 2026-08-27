@@ -165,7 +165,7 @@ def global_diagnostic_path() -> Path:
 
 def record_global_diagnostic(
     error: CwError, *, source: str | None = None, traceback_text: str | None = None,
-    correlation_id: str | None = None,
+    correlation_id: str | None = None, safe_traceback: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     record: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -179,6 +179,8 @@ def record_global_diagnostic(
     }
     if correlation_id is not None and _CORRELATION_ID.fullmatch(correlation_id):
         record["correlation_id"] = correlation_id
+    if safe_traceback is not None:
+        record["safe_traceback"] = safe_traceback
     atomic_json(global_diagnostic_path(), record)
     return record
 

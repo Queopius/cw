@@ -825,7 +825,11 @@ def _validate_diagnostic(diagnostic: dict[str, Any]) -> None:
     forbidden = ("\\users\\", "/home/", "bearer ", "api_key", "password=", "secret=", "--goal")
     if any(value in serialized for value in forbidden):
         raise AcceptanceFailure("acceptance diagnostic contains private data")
-    booleans = {key for key in required if key.endswith("_present") or key.endswith("_available") or key.endswith("_changed") or key.endswith("_regular") or key.endswith("_found") or key.endswith("_match")}
+    booleans = {
+        key
+        for key in required
+        if key.endswith(("_present", "_available", "_changed", "_regular", "_found", "_match"))
+    }
     if any(not isinstance(diagnostic[key], bool) for key in booleans):
         raise AcceptanceFailure("acceptance diagnostic has non-boolean binding metadata")
     if diagnostic["binding_failure_reason"] not in {"project_metadata_missing", "envelope_missing", "envelope_correlation_missing", "diagnostic_record_unchanged", "diagnostic_record_missing", "correlation_mismatch", "code_mismatch", "traceback_unavailable", "none"}:
