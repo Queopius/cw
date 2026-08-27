@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from scripts.run_acceptance import (
     AcceptanceFailure,
+    _canonical_root,
     _capture_cw_diagnostic,
     _environment,
     _install_fake_codex,
@@ -17,6 +18,7 @@ from scripts.run_acceptance import (
     _run,
     _safe_regular_text,
     _text_traceback_frames,
+    _validate_diagnostic,
     _validate_report,
     _write_diagnostic,
 )
@@ -72,7 +74,7 @@ class AcceptanceHarnessTests(unittest.TestCase):
             root = Path(temporary); logs = root / ".cw/logs"; logs.mkdir(parents=True)
             logs.joinpath("errors.jsonl").write_text(json.dumps(self._record("old_corr")) + "\n" + json.dumps(self._record("corr_456")) + "\n", encoding="utf-8")
             with patch("scripts.run_acceptance.subprocess.run", return_value=self._cw_error("corr_456")):
-                self.assertEqual("captured", _capture_cw_diagnostic(self._failure(root, "corr_456"))["diagnostic_status"])
+                self.assertEqual("unavailable", _capture_cw_diagnostic(self._failure(root, "corr_456"))["diagnostic_status"])
             with patch("scripts.run_acceptance.subprocess.run", return_value=self._cw_error("different_corr")):
                 self.assertEqual("unavailable", _capture_cw_diagnostic(self._failure(root, "different_corr"))["diagnostic_status"])
 
@@ -125,6 +127,25 @@ class AcceptanceHarnessTests(unittest.TestCase):
         self.assertEqual(["cw/cli/runner.py", "cw/checks/verification.py"], [frame["module"] for frame in frames])
         self.assertNotIn("private", json.dumps(frames))
         self.assertEqual([], _text_traceback_frames('File "/outside/private.py", line 1, in leak', "ValueError"))
+
+    def test_canonical_root_is_existing_identity_and_rejects_unrelated_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); alias = root / "."
+            self.assertTrue(os.path.samefile(_canonical_root(root), alias))
+            other = root / "other"; other.mkdir()
+            self.assertFalse(os.path.samefile(_canonical_root(root), other))
+
+    def test_binding_artifact_uses_boolean_allowlist_and_closed_reason_enum(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); output = root / "artifacts/compatibility-report.json"
+            _write_diagnostic(output, self._failure(root), base=root, source_commit="unused")
+            diagnostic = json.loads(output.with_name("compatibility-diagnostic.json").read_text(encoding="utf-8"))
+        fields = ("canonical_root_available", "project_metadata_present", "envelope_code_present", "envelope_correlation_present", "last_error_changed", "last_error_safe_regular", "record_found", "correlation_match", "code_match", "traceback_frame_available")
+        self.assertTrue(all(type(diagnostic[field]) is bool for field in fields))
+        self.assertEqual("project_metadata_missing", diagnostic["binding_failure_reason"])
+        diagnostic["binding_failure_reason"] = "not-an-enum"
+        with self.assertRaises(AcceptanceFailure):
+            _validate_diagnostic(diagnostic)
 
 
 if __name__ == "__main__":

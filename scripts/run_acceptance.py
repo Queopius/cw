@@ -108,6 +108,31 @@ _SAFE_MESSAGES = {"Unexpected internal failure", "Verification Executor failed"}
 _REDACTED_MESSAGE = "Internal exception captured; message redacted."
 
 
+def _canonical_root(root: Path) -> Path:
+    """Return the existing runtime root in its host canonical spelling."""
+    resolved = root.resolve(strict=True)
+    if os.name != "nt":
+        return resolved
+    try:
+        import ctypes
+
+        windll = getattr(ctypes, "windll", None)
+        kernel32 = getattr(windll, "kernel32", None)
+        get_long_path = getattr(kernel32, "GetLongPathNameW", None)
+        if get_long_path is None:
+            return resolved
+        size = get_long_path(str(resolved), None, 0)
+        if size:
+            buffer = ctypes.create_unicode_buffer(size + 1)
+            if get_long_path(str(resolved), buffer, len(buffer)):
+                long_path = Path(buffer.value)
+                if os.path.samefile(resolved, long_path):
+                    return long_path.resolve(strict=True)
+    except (AttributeError, OSError):
+        pass
+    return resolved
+
+
 def _safe_message(value: Any) -> str:
     """Free text is never exported; only fixed diagnostic messages are allowed."""
     return value if isinstance(value, str) and value in _SAFE_MESSAGES else _REDACTED_MESSAGE
@@ -228,7 +253,8 @@ def _text_traceback_frames(value: Any, exception_type: str | None) -> list[dict[
 
 
 def _record_diagnostic(record: dict[str, Any], correlation: str, command: str) -> dict[str, Any] | None:
-    payload = record.get("data") if isinstance(record.get("data"), dict) else record
+    nested_payload = record.get("data")
+    payload: dict[str, Any] = nested_payload if isinstance(nested_payload, dict) else record
     nested_error = payload.get("error")
     error: dict[str, Any] = nested_error if isinstance(nested_error, dict) else payload
     code = error.get("code")
@@ -272,19 +298,61 @@ def _last_correlated_jsonl(path: Path, correlation: str) -> dict[str, Any] | Non
 
 def _capture_cw_diagnostic(failure: AcceptanceFailure) -> dict[str, Any]:
     """Capture only a correlation-bound CW record; no stale-error heuristics."""
-    unavailable = {"diagnostic_status": "unavailable", "diagnostic_source": "none"}
+    unavailable: dict[str, Any] = {
+        "diagnostic_status": "unavailable", "diagnostic_source": "none",
+        "canonical_root_available": False, "project_metadata_present": False,
+        "envelope_code_present": failure.envelope_code is not None,
+        "envelope_correlation_present": failure.envelope_correlation is not None,
+        "last_error_changed": False, "last_error_safe_regular": False,
+        "record_found": False, "correlation_match": False, "code_match": False,
+        "traceback_frame_available": False, "binding_failure_reason": "project_metadata_missing",
+    }
     root = failure.cwd
-    if failure.executable != "cw" or root is None or not (root / ".cw").is_dir() or not failure.executable_path:
+    if failure.executable != "cw" or root is None or not failure.executable_path:
         return unavailable
+    try:
+        root = _canonical_root(root)
+    except OSError:
+        return unavailable
+    unavailable["canonical_root_available"] = True
+    if not (root / ".cw").is_dir():
+        return unavailable
+    unavailable["project_metadata_present"] = True
     correlation = failure.envelope_correlation
+    if failure.envelope_code is None:
+        unavailable["binding_failure_reason"] = "envelope_missing"
+        return unavailable
     if correlation is None:
+        unavailable["binding_failure_reason"] = "envelope_correlation_missing"
+        return unavailable
+    current_fingerprint = _safe_fingerprint(root / ".cw/logs/last-error.json")
+    unavailable["last_error_safe_regular"] = current_fingerprint is not None
+    unavailable["last_error_changed"] = current_fingerprint is not None and current_fingerprint != failure.error_fingerprint
+    if not unavailable["last_error_changed"]:
+        unavailable["binding_failure_reason"] = "diagnostic_record_unchanged"
         return unavailable
     for source, record in (
         ("last_error", _safe_json(root / ".cw/logs/last-error.json")),
         ("errors_jsonl", _last_correlated_jsonl(root / ".cw/logs/errors.jsonl", correlation)),
     ):
-        if record is not None and failure.error_fingerprint != _safe_fingerprint(root / ".cw/logs/last-error.json") and (captured := _record_diagnostic(record, correlation, failure.command_name)) is not None and (failure.envelope_code is None or captured["cw_error_code"] == failure.envelope_code):
-            return {"diagnostic_status": "captured", "diagnostic_source": source, **captured}
+        if record is not None:
+            unavailable["record_found"] = True
+            captured = _record_diagnostic(record, correlation, failure.command_name)
+            if captured is None:
+                unavailable["binding_failure_reason"] = "correlation_mismatch"
+                continue
+            unavailable["correlation_match"] = True
+            if captured["cw_error_code"] != failure.envelope_code:
+                unavailable["binding_failure_reason"] = "code_mismatch"
+                continue
+            unavailable["code_match"] = True
+            unavailable["traceback_frame_available"] = bool(captured["traceback"])
+            if not unavailable["traceback_frame_available"]:
+                unavailable["binding_failure_reason"] = "traceback_unavailable"
+                continue
+            return {**unavailable, "diagnostic_status": "captured", "diagnostic_source": source, "binding_failure_reason": "none", **captured}
+    if not unavailable["record_found"]:
+        unavailable["binding_failure_reason"] = "diagnostic_record_missing"
     return unavailable
 
 
@@ -347,6 +415,7 @@ def _venv_bin(venv_root: Path) -> Path:
 
 
 def _install_wheel(base: Path, environment: dict[str, str]) -> tuple[Path, Path, Path]:
+    base = _canonical_root(base)
     wheelhouse = base / "wheelhouse"
     wheelhouse.mkdir()
     build_tools = base / "build-tools"
@@ -407,6 +476,7 @@ def _install_fake_codex(directory: Path) -> Path:
 
 
 def _environment(base: Path, runtime: Path, fake_bin: Path) -> dict[str, str]:
+    base = _canonical_root(base)
     inherited = {
         key: value for key, value in os.environ.items()
         if key in {
@@ -439,6 +509,7 @@ def _environment(base: Path, runtime: Path, fake_bin: Path) -> dict[str, str]:
 
 
 def _repository(base: Path, name: str, environment: dict[str, str]) -> Path:
+    base = _canonical_root(base)
     root = base / "CW Acceptance" / "Projeto São Paulo" / name
     root.mkdir(parents=True)
     _run(["git", "init", "--initial-branch=acceptance"], cwd=root, environment=environment)
@@ -696,6 +767,12 @@ def _write_diagnostic(
         "traceback": captured.get("traceback", []),
         "next_action": "Inspect the sanitized acceptance diagnostic and repair the declared stage.",
         "redaction_status": "allowlist_only",
+        **{key: captured[key] for key in (
+            "canonical_root_available", "project_metadata_present", "envelope_code_present",
+            "envelope_correlation_present", "last_error_changed", "last_error_safe_regular",
+            "record_found", "correlation_match", "code_match", "traceback_frame_available",
+            "binding_failure_reason",
+        )},
     }
     serialized = json.dumps(diagnostic, ensure_ascii=False, indent=2) + "\n"
     _validate_diagnostic(diagnostic)
@@ -712,6 +789,10 @@ def _validate_diagnostic(diagnostic: dict[str, Any]) -> None:
         "command", "exit_code", "diagnostic_status", "diagnostic_source", "cw_error_code",
         "correlation_id_sha256", "exception_type", "module", "function", "line", "message",
         "traceback", "next_action", "redaction_status",
+        "canonical_root_available", "project_metadata_present", "envelope_code_present",
+        "envelope_correlation_present", "last_error_changed", "last_error_safe_regular",
+        "record_found", "correlation_match", "code_match", "traceback_frame_available",
+        "binding_failure_reason",
     }
     if set(diagnostic) != required or diagnostic["schema"] != "cw.acceptance-diagnostic.v1":
         raise AcceptanceFailure("acceptance diagnostic has an invalid contract")
@@ -719,6 +800,11 @@ def _validate_diagnostic(diagnostic: dict[str, Any]) -> None:
     forbidden = ("\\users\\", "/home/", "bearer ", "api_key", "password=", "secret=", "--goal")
     if any(value in serialized for value in forbidden):
         raise AcceptanceFailure("acceptance diagnostic contains private data")
+    booleans = {key for key in required if key.endswith("_present") or key.endswith("_available") or key.endswith("_changed") or key.endswith("_regular") or key.endswith("_found") or key.endswith("_match")}
+    if any(not isinstance(diagnostic[key], bool) for key in booleans):
+        raise AcceptanceFailure("acceptance diagnostic has non-boolean binding metadata")
+    if diagnostic["binding_failure_reason"] not in {"project_metadata_missing", "envelope_missing", "envelope_correlation_missing", "diagnostic_record_unchanged", "diagnostic_record_missing", "correlation_mismatch", "code_mismatch", "traceback_unavailable", "none"}:
+        raise AcceptanceFailure("acceptance diagnostic has an invalid binding reason")
 
 
 def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
@@ -726,7 +812,7 @@ def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
     tests: dict[str, dict[str, str]] = {}
     exit_code = 0
     with tempfile.TemporaryDirectory(prefix="cw-acceptance-") as temporary:
-        base = Path(temporary)
+        base = _canonical_root(Path(temporary))
         bootstrap = os.environ.copy()
         bootstrap.pop("PYTHONPATH", None)
         try:
