@@ -30,8 +30,8 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install runtime dependencies
-        run: python -m pip install .
+      - name: Install runtime dependencies and deterministic benchmark tokenizer
+        run: python -m pip install . "tiktoken==0.14.0"
       - name: Compile and test
         run: make check
 
@@ -54,14 +54,14 @@ jobs:
       - name: Verify stable updater and immutable public Plugin compatibility
         run: |
           python -m pip install --force-reinstall dist/*.whl
-          public_dir="$RUNNER_TEMP/cw-public-0.14.1"
+          public_dir="$RUNNER_TEMP/cw-public-0.17.0"
           mkdir -p "$public_dir"
           curl --proto '=https' --tlsv1.2 --location --fail --silent --show-error \
-            --output "$public_dir/codex_workflow-0.14.1-py3-none-any.whl" \
-            https://github.com/Queopius/cw/releases/download/v0.14.1/codex_workflow-0.14.1-py3-none-any.whl
+            --output "$public_dir/codex_workflow-0.17.0-py3-none-any.whl" \
+            https://github.com/Queopius/cw/releases/download/v0.17.0/codex_workflow-0.17.0-py3-none-any.whl
           curl --proto '=https' --tlsv1.2 --location --fail --silent --show-error \
-            --output "$public_dir/cw-0.14.1-linux-x86_64.tar.gz" \
-            https://github.com/Queopius/cw/releases/download/v0.14.1/cw-0.14.1-linux-x86_64.tar.gz
+            --output "$public_dir/cw-0.17.0-linux-x86_64.tar.gz" \
+            https://github.com/Queopius/cw/releases/download/v0.17.0/cw-0.17.0-linux-x86_64.tar.gz
           curl --proto '=https' --tlsv1.2 --location --fail --silent --show-error \
             --output "$public_dir/cw-plugin-0.1.0.zip" \
             https://github.com/Queopius/cw/releases/download/v0.14.1/cw-plugin-0.1.0.zip
@@ -69,13 +69,16 @@ jobs:
             --archive "$public_dir/cw-plugin-0.1.0.zip" \
             --sha256 b59275bb7e7a32e58c1d48202c9cf489874a6d21ce15fad3ef4cd6f202512021 \
             --size 546684
+          candidate_version="$(tr -d '\n' < VERSION)"
           python scripts/validate_stable_update_path.py \
-            --stable-wheel "$public_dir/codex_workflow-0.14.1-py3-none-any.whl" \
-            --stable-wheel-sha256 ac8e77bbaefadecf5b9ea7519400f94fbd227c3c7d1420346e0e5b34ae32230a \
-            --stable-archive "$public_dir/cw-0.14.1-linux-x86_64.tar.gz" \
-            --stable-archive-sha256 14e8a49e94117c9a3a5e179947c4d7208c778c1bd1e65a7074008012b776104e \
+            --stable-wheel "$public_dir/codex_workflow-0.17.0-py3-none-any.whl" \
+            --stable-version 0.17.0 \
+            --stable-wheel-sha256 d5055cb6d4452b80b4fab2c7837b8f44610bbb5012eb509c4e22ecf74b890ccd \
+            --stable-archive "$public_dir/cw-0.17.0-linux-x86_64.tar.gz" \
+            --stable-archive-sha256 2c15ccd46831ec488aa013dd286ec493b207f11d0c1477895e312e50f98f3946 \
             --candidate-manifest dist/cw-release-manifest.json \
-            --candidate-archive dist/cw-0.17.0-linux-x86_64.tar.gz \
+            --candidate-archive "dist/cw-${candidate_version}-linux-x86_64.tar.gz" \
+            --candidate-version-file VERSION \
             --candidate-commit "$GITHUB_SHA"
       - name: Verify installed wheel
         run: |

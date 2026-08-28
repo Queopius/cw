@@ -68,6 +68,27 @@ class OutputProtocolTests(unittest.TestCase):
         self.assertEqual("", stderr)
         self.assertEqual({"state": "PLAN_PROPOSED"}, json.loads(stdout))
 
+    def test_machine_json_isolated_from_incidental_stdout_and_console_output(self):
+        def command(_args, console):
+            print("incidental platform warning")
+            console.line("incidental console warning")
+            emit_json({"state": "READY"})
+            return 0
+
+        code, stdout, stderr, _ = self.invoke_runner(["status", "--output=json"], command)
+        self.assertEqual(0, code)
+        self.assertEqual("", stderr)
+        self.assertEqual(1, len(stdout.splitlines()))
+        self.assertEqual("READY", json.loads(stdout)["data"]["state"])
+        self.assertNotIn("incidental", stdout)
+
+        code, stdout, stderr, _ = self.invoke_runner(["status", "--output=json", "--debug"], command)
+        self.assertEqual(0, code)
+        self.assertEqual(1, len(stdout.splitlines()))
+        self.assertNotIn("incidental", stdout)
+        self.assertIn("incidental platform warning", stderr)
+        self.assertIn("incidental console warning", stderr)
+
     def test_llm_alias_compacts_status_without_losing_governance_invariants(self):
         source = {
             "state": "PLAN_PROPOSED", "phase": "01", "verbose_note": "omit",
@@ -174,6 +195,7 @@ class OutputProtocolTests(unittest.TestCase):
         self.assertNotIn("should-not-leak", stdout)
         self.assertNotIn("/home/operator", stdout)
         self.assertNotIn("details", payload["error"])
+        self.assertEqual(payload["error"]["correlation_id"], recorded[0][1]["correlation_id"])
 
     def test_debug_uses_only_redacted_stderr(self):
         failure = CwError(

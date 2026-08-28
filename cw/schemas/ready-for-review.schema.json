@@ -16,6 +16,17 @@
         "required": ["command", "exit_code"],
         "properties": {"command": {"type": "string"}, "exit_code": {"type": "integer"}}
       }
+    },
+    "verification_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "sha256", "digest", "receipt_id"],
+      "properties": {
+        "reference": {"type": "string", "pattern": "^\\.cw/verification-receipts/[A-Za-z0-9._-]+\\.json$"},
+        "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "receipt_id": {"type": "string", "pattern": "^vr-[0-9a-f]{64}$"}
+      }
     }
   }
 }

@@ -6,7 +6,12 @@ import argparse
 import sys
 from pathlib import Path
 
-from hero_demo import HeroDemoError, load_and_validate, recording_is_patch_compatible, source_root
+from hero_demo import (
+    HeroDemoError,
+    load_and_validate,
+    recording_is_patch_compatible,
+    source_root,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     if artifact["cw_version"] != version:
         print(
             f"HERO DEMO NOTICE\n"
-            f"Real recording CW {artifact['cw_version']} remains valid for documentation-only patch {version}.",
+            f"Real recording CW {artifact['cw_version']} remains valid for the compatible public UI contract in {version}.",
             file=sys.stderr,
         )
     print(
