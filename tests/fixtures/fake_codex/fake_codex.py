@@ -8,11 +8,17 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any
+
+_HOOK_CONTRACT_FAILURE = 46
+_HOOK_FAILURE_MESSAGE = "fake reviewer hook contract failed"
+_HOOK_POSTCONDITION_FAILURE = 47
+_HOOK_POSTCONDITION_MESSAGE = "fake reviewer hook postcondition failed"
 
 
 def _option(arguments: list[str], name: str) -> str | None:
@@ -39,6 +45,134 @@ def _write_output(arguments: list[str], payload: Any) -> None:
 
 def _emit(value: dict[str, Any]) -> None:
     print(json.dumps(value, ensure_ascii=False), flush=True)
+
+
+def _acceptance_cw_executable() -> Path:
+    """Resolve the exact installed CW binary without accepting an external alias."""
+
+    executable_value = os.environ.get("CW_ACCEPTANCE_CW_EXECUTABLE")
+    runtime_value = os.environ.get("CW_ACCEPTANCE_RUNTIME_ROOT")
+    if not executable_value or not runtime_value:
+        raise ValueError("acceptance CW identity is unavailable")
+    executable_path = Path(executable_value)
+    runtime_path = Path(runtime_value)
+    if not executable_path.is_absolute() or not runtime_path.is_absolute():
+        raise ValueError("acceptance CW identity is invalid")
+    if executable_path.is_symlink() or runtime_path.is_symlink():
+        raise ValueError("acceptance CW identity is not canonical")
+    executable = executable_path.resolve(strict=True)
+    runtime = runtime_path.resolve(strict=True)
+    metadata = executable.stat()
+    if not executable.is_file() or metadata.st_nlink != 1 or not os.access(executable, os.X_OK):
+        raise ValueError("acceptance CW executable is unsafe")
+    if not os.path.samefile(executable.parent.parent, runtime):
+        raise ValueError("acceptance CW executable is outside its runtime")
+    return executable
+
+
+def _valid_hook_response(value: str) -> bool:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return False
+    return (
+        isinstance(payload, dict)
+        and bool(payload)
+        and payload.get("continue") is False
+        and isinstance(payload.get("stopReason"), str)
+    )
+
+
+def _safe_regular_file(path: Path) -> bool:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return False
+    return stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1
+
+
+def _durable_review_postcondition(
+    root: Path,
+    phase_id: str,
+    next_phase: str | None,
+) -> bool:
+    try:
+        state = json.loads((root / ".cw/state.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(state, dict):
+        return False
+    readiness = root / ".cw/runtime/READY_FOR_REVIEW.json"
+    gate = root / ".cw/gates" / f"{phase_id}.approved.json"
+    if readiness.exists() or readiness.is_symlink() or not _safe_regular_file(gate):
+        return False
+    if next_phase is not None:
+        return (
+            state.get("status") == "IN_PROGRESS"
+            and state.get("current_phase") == next_phase
+            and next_phase != phase_id
+        )
+    return (
+        state.get("status") in {"PLANNED_COMPLETE", "COMPLETED"}
+        and state.get("current_phase") is None
+    )
+
+
+def _parent_review_postcondition(root: Path, phase_id: str) -> bool:
+    """Accept only the exact intermediate state owned by the batch parent."""
+
+    state_path = root / ".cw/state.json"
+    if not _safe_regular_file(state_path):
+        return False
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    readiness = root / ".cw/runtime/READY_FOR_REVIEW.json"
+    gate = root / ".cw/gates" / f"{phase_id}.approved.json"
+    try:
+        gate.lstat()
+    except FileNotFoundError:
+        gate_absent = True
+    except OSError:
+        gate_absent = False
+    else:
+        gate_absent = False
+    return bool(
+        isinstance(state, dict)
+        and state.get("status") == "IN_PROGRESS"
+        and state.get("current_phase") == phase_id
+        and _safe_regular_file(readiness)
+        and gate_absent
+    )
+
+
+def _review_hook(
+    root: Path,
+    environment: dict[str, str],
+    *,
+    phase_id: str,
+    next_phase: str | None,
+    require_durable: bool = True,
+) -> int:
+    try:
+        executable = _acceptance_cw_executable()
+        completed = subprocess.run(
+            [str(executable), "review", "--hook"], cwd=root, env=environment,
+            text=True, capture_output=True, timeout=60, check=False,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        print(_HOOK_FAILURE_MESSAGE, file=sys.stderr)
+        return _HOOK_CONTRACT_FAILURE
+    if completed.returncode != 0 or not _valid_hook_response(completed.stdout):
+        print(_HOOK_FAILURE_MESSAGE, file=sys.stderr)
+        return _HOOK_CONTRACT_FAILURE
+    if require_durable and not _durable_review_postcondition(root, phase_id, next_phase):
+        parent_review = environment.get("CW_ACCEPTANCE_PARENT_REVIEW") == "1"
+        if not (parent_review and _parent_review_postcondition(root, phase_id)):
+            print(_HOOK_POSTCONDITION_MESSAGE, file=sys.stderr)
+            return _HOOK_POSTCONDITION_FAILURE
+    return 0
 
 
 def _plan(root: Path) -> dict[str, Any]:
@@ -206,13 +340,21 @@ def _implement(root: Path, arguments: list[str]) -> int:
             environment = {**os.environ, "CW_FAKE_CODEX_SCENARIO": scenario}
         else:
             environment = os.environ.copy()
-        completed = subprocess.run(
-            ["cw", "review", "--hook"], cwd=root, env=environment,
-            text=True, capture_output=True, timeout=60, check=False,
+        index = plan["phases"].index(phase)
+        next_phase = (
+            plan["phases"][index + 1]["id"]
+            if index + 1 < len(plan["phases"])
+            else None
         )
-        if completed.returncode:
-            print(completed.stderr[-2000:], file=sys.stderr)
-            return completed.returncode
+        hook_result = _review_hook(
+            root,
+            environment,
+            phase_id=phase["id"],
+            next_phase=next_phase,
+            require_durable=scenario == "success",
+        )
+        if hook_result:
+            return hook_result
     if "--json" in arguments:
         _emit({"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}})
     return 0

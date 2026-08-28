@@ -260,14 +260,108 @@ class CliTests(unittest.TestCase):
         session = create_session(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0])
         self.repo.artifact()
         self.repo.ready()
+
+        def revise(root, _workflow, _phase, state):
+            state["status"] = WorkflowState.REVISION_REQUIRED.value
+            save_state(root, state)
+            (root / ".cw/runtime/READY_FOR_REVIEW.json").unlink()
+            return {"decision": "REVISE", "blocking_issues": ["fix"]}
+
         with patch.dict(os.environ, {
             "CW_IMPLEMENTER_ACTIVE": "1", "CW_IMPLEMENTER_SESSION": session["session_id"],
-        }), patch("cw.cli.main.run_review", return_value={"decision": "REVISE", "blocking_issues": ["fix"]}):
+        }), patch("cw.cli.main.run_review", side_effect=revise):
             code, output = self.invoke("review", "--hook")
         self.assertEqual(0, code)
         payload = json.loads(output)
         self.assertFalse(payload["continue"])
         self.assertNotIn("decision", payload)
+
+    def test_hook_approve_requires_a_durable_gate_and_state_advance(self):
+        from cw.core.session import create_session
+
+        session = create_session(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0])
+        self.repo.artifact()
+        self.repo.ready()
+        with patch.dict(os.environ, {
+            "CW_IMPLEMENTER_ACTIVE": "1", "CW_IMPLEMENTER_SESSION": session["session_id"],
+        }), patch(
+            "cw.cli.main.run_review",
+            return_value={"decision": "APPROVE"},
+        ):
+            code, output = self.invoke("review", "--hook")
+        self.assertEqual(0, code)
+        self.assertNotIn("CW phase review completed", output)
+        self.assertIn("Review hook durable postcondition failed", output)
+
+    def test_hook_approve_emits_success_after_real_durable_advance(self):
+        from cw.core.session import create_session
+
+        session = create_session(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0])
+        self.repo.artifact()
+        self.repo.ready()
+        with patch.dict(os.environ, {
+            "CW_IMPLEMENTER_ACTIVE": "1", "CW_IMPLEMENTER_SESSION": session["session_id"],
+        }), patch(
+            "cw.agents.reviewer.CodexAdapter.run_reviewer",
+            return_value=CodexResult(result(), ""),
+        ):
+            code, output = self.invoke("review", "--hook")
+        self.assertEqual(0, code)
+        self.assertFalse(json.loads(output)["continue"])
+        self.assertEqual("02-phase-2", self.repo.state()["current_phase"])
+        self.assertFalse((self.repo.root / ".cw/runtime/READY_FOR_REVIEW.json").exists())
+        self.assertTrue((self.repo.root / ".cw/gates/01-phase-1.approved.json").is_file())
+
+    def test_hook_human_review_requires_its_durable_state(self):
+        from cw.core.session import create_session
+
+        session = create_session(self.repo.root, self.repo.workflow, self.repo.workflow.phases[0])
+        self.repo.artifact()
+        self.repo.ready()
+
+        def require_human(root, _workflow, _phase, state):
+            state["status"] = WorkflowState.HUMAN_REVIEW_REQUIRED.value
+            save_state(root, state)
+            (root / ".cw/runtime/READY_FOR_REVIEW.json").unlink()
+            return {"decision": "HUMAN_REVIEW_REQUIRED"}
+
+        with patch.dict(os.environ, {
+            "CW_IMPLEMENTER_ACTIVE": "1", "CW_IMPLEMENTER_SESSION": session["session_id"],
+        }), patch("cw.cli.main.run_review", side_effect=require_human):
+            code, output = self.invoke("review", "--hook")
+        self.assertEqual(0, code)
+        self.assertFalse(json.loads(output)["continue"])
+        self.assertEqual(
+            WorkflowState.HUMAN_REVIEW_REQUIRED.value,
+            self.repo.state()["status"],
+        )
+
+    def test_hook_approve_accepts_a_durable_last_phase_transition(self):
+        from cw.core.session import create_session
+
+        previous = Path.cwd()
+        single = TempRepo("single-phase", phases=1)
+        try:
+            os.chdir(single.root)
+            session = create_session(single.root, single.workflow, single.workflow.phases[0])
+            single.artifact()
+            single.ready()
+            stream = io.StringIO()
+            with patch.dict(os.environ, {
+                "CW_IMPLEMENTER_ACTIVE": "1",
+                "CW_IMPLEMENTER_SESSION": session["session_id"],
+            }), patch(
+                "cw.agents.reviewer.CodexAdapter.run_reviewer",
+                return_value=CodexResult(result(), ""),
+            ), redirect_stdout(stream):
+                code = main(("review", "--hook"))
+            self.assertEqual(0, code)
+            self.assertFalse(json.loads(stream.getvalue())["continue"])
+            self.assertEqual("COMPLETED", single.state()["status"])
+            self.assertIsNone(single.state()["current_phase"])
+        finally:
+            os.chdir(previous)
+            single.close()
 
     def test_human_review_command_reports_created_gate(self):
         gate = self.repo.root / ".cw/gates/01-phase-1.approved.json"

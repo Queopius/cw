@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import shutil
 import subprocess
-import tempfile
 import threading
 import time
 from pathlib import Path
 
-from cw.core.errors import CwError, ErrorCode
-from cw.adapters.structured_output import validate_codex_output_schema
-from cw.integrations.diagnostics import parse_mcp_diagnostics
 from cw.adapters.invocation import (
     invocation_details,
     managed_codex_environment,
@@ -19,6 +16,10 @@ from cw.adapters.invocation import (
     record_run_result,
 )
 from cw.adapters.result import CodexResult, CodexRunResult
+from cw.adapters.structured_output import validate_codex_output_schema
+from cw.checks.verification import private_runtime_directory
+from cw.core.errors import CwError, ErrorCode
+from cw.core.platform import popen_process_group_kwargs, stop_process_group
 from cw.execution.context import current_event_sink
 from cw.execution.events import (
     CodexEventParser,
@@ -28,12 +29,13 @@ from cw.execution.events import (
     StartupProfile,
 )
 from cw.execution.observability import load_observability_settings
-from cw.core.platform import popen_process_group_kwargs, stop_process_group
+from cw.integrations.diagnostics import parse_mcp_diagnostics
 
 
 class CodexAdapter:
-    def __init__(self, command: str = "codex") -> None:
+    def __init__(self, command: str = "codex", *, persist: bool = True) -> None:
         self.command = command
+        self.persist = persist
 
     def check_availability(self) -> bool:
         return shutil.which(self.command) is not None
@@ -81,14 +83,12 @@ class CodexAdapter:
             startup_profile,
             session_id,
         )
-        record_run_result(
-            root,
-            role,
-            exit_code=result.exit_code,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            diagnostics=tuple(item.to_dict() for item in diagnostics),
-        )
+        if self.persist:
+            record_run_result(
+                root, role, exit_code=result.exit_code, stdout=result.stdout,
+                stderr=result.stderr,
+                diagnostics=tuple(item.to_dict() for item in diagnostics),
+            )
         return result
 
     def _run_streaming(
@@ -328,9 +328,19 @@ class CodexAdapter:
     ) -> CodexResult:
         self._require()
         validate_codex_output_schema(schema, role=role)
-        with tempfile.TemporaryDirectory(prefix=f"cw-{role}-") as temporary:
-            output = Path(temporary) / "result.json"
+        with private_runtime_directory(root, role.replace("-", "_")) as temporary:
+            output = temporary / "result.json"
             environment = managed_codex_environment(role)
+            runtime = Path(temporary) / "runtime"
+            cache = runtime / "cache"
+            temp = runtime / "tmp"
+            for directory in (runtime, cache, temp):
+                directory.mkdir(mode=0o700)
+                os.chmod(directory, 0o700)
+            environment.update({
+                "TMPDIR": str(temp), "TMP": str(temp), "TEMP": str(temp),
+                "XDG_CACHE_HOME": str(cache), "COMPOSER_CACHE_DIR": str(cache / "composer"),
+            })
             command = [
                 self._executable(), "--strict-config", "--config", 'web_search="disabled"',
                 "--config", "project_doc_max_bytes=0",
@@ -338,13 +348,13 @@ class CodexAdapter:
                 "--disable", "hooks", "--sandbox", "read-only",
                 "--ignore-rules", "--color", "never",
             ]
-            if current_event_sink() is not None:
+            if current_event_sink() is not None or role.endswith("reviewer"):
                 command.append("--json")
             command.extend([
                 "--output-schema", str(schema),
                 "--output-last-message", str(output), "--cd", str(root), prompt,
             ])
-            invocation = record_invocation(root, role, command, environment, prompt=prompt)
+            invocation = record_invocation(root, role, command, environment, prompt=prompt) if self.persist else None
             try:
                 result = self._run_streaming(
                     root, role, command, environment, timeout=timeout,
@@ -365,16 +375,23 @@ class CodexAdapter:
                 diagnostic = self._diagnostic(result.stdout, result.stderr)
                 raise CwError(
                     f"{label} unavailable", code, hint,
-                    details=f"{diagnostic}\n\n{invocation_details(invocation)}",
+                    details=f"{diagnostic}\n\n{invocation_details(invocation or {})}",
+                )
+            if role.endswith("reviewer") and self._reviewer_executed_command(result.stdout):
+                raise CwError(
+                    "Semantic reviewer attempted deterministic command execution",
+                    ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR,
+                    "Run: cw retry",
+                    details="The reviewer process was discarded before its semantic result could affect attempts.",
                 )
             try:
                 payload = json.loads(output.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
-                code = ErrorCode.REVIEWER_PROCESS_ERROR if role.endswith("reviewer") else ErrorCode.PLANNER_SCHEMA_ERROR
+                code = ErrorCode.REVIEWER_INVALID_OUTPUT if role.endswith("reviewer") else ErrorCode.PLANNER_SCHEMA_ERROR
                 hint = "Run: cw retry" if role.endswith("reviewer") else "Run: cw error"
                 raise CwError(f"{role.title()} returned invalid JSON", code, hint, details=str(exc)) from exc
             if not isinstance(payload, dict):
-                code = ErrorCode.REVIEWER_PROCESS_ERROR if role.endswith("reviewer") else ErrorCode.PLANNER_SCHEMA_ERROR
+                code = ErrorCode.REVIEWER_INVALID_OUTPUT if role.endswith("reviewer") else ErrorCode.PLANNER_SCHEMA_ERROR
                 hint = "Run: cw retry" if role.endswith("reviewer") else "Run: cw error"
                 raise CwError(f"{role.title()} returned an invalid result", code, hint)
             return CodexRunResult(
@@ -382,6 +399,42 @@ class CodexAdapter:
                 result.integration_diagnostics, result.terminal_error,
                 result.startup_profile, result.session_id,
             )
+
+    @staticmethod
+    def _reviewer_executed_command(stdout: str) -> bool:
+        allowed_events = {
+            "thread.started", "turn.started", "turn.completed", "response.completed",
+            "item.started", "item.completed", "message.created", "message.completed",
+        }
+        saw_result = False
+        for line in stdout.splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise CwError("Reviewer event stream is malformed", ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR) from exc
+            if not isinstance(event, dict):
+                raise CwError("Reviewer event stream contains an invalid record", ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR)
+            event_type = event.get("type")
+            if event_type is not None and event_type not in allowed_events:
+                raise CwError("Reviewer event stream contains an unknown event", ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR)
+            item = event.get("item")
+            if item is not None and not isinstance(item, dict):
+                raise CwError("Reviewer event stream contains an invalid item", ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR)
+            if isinstance(item, dict):
+                item_type = item.get("type")
+                if item_type in {"command_execution", "tool_call", "mcp_tool_call", "function_call", "shell_command"}:
+                    return True
+                if item_type is not None and item_type not in {"message", "reasoning", "output_text"}:
+                    raise CwError("Reviewer event stream contains an unknown item", ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR)
+            if event.get("decision") is not None:
+                if saw_result:
+                    raise CwError("Reviewer event stream contains multiple results", ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR)
+                saw_result = True
+        if stdout and not saw_result:
+            raise CwError("Reviewer event stream has no complete result", ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR)
+        return False
 
     def run_reviewer(self, root: Path, prompt: str, schema: Path, timeout: int) -> CodexResult:
         return self._run_structured(root, prompt, schema, timeout, role="reviewer")

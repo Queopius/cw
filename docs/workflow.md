@@ -29,8 +29,11 @@ CW uses explicit states and rejects transitions outside the state graph:
 UNINITIALIZED → INITIALIZED → PLANNING → PLAN_PROPOSED → READY → IN_PROGRESS
 IN_PROGRESS → READY_FOR_REVIEW → REVIEWING
 REVIEWING → REVISION_REQUIRED | APPROVED | HUMAN_REVIEW_REQUIRED | ERROR
+REVIEWING → ERROR on reviewer infrastructure (attempts/readiness preserved)
+READY_FOR_REVIEW → ERROR on verification infrastructure (attempts preserved)
 REVISION_REQUIRED → authorized plan rebaseline → READY
 IN_PROGRESS (proven post-reopen) → explicit rebaseline recovery → REVISION_REQUIRED
+REVISION_REQUIRED (proven historical misclassification) → explicit review infrastructure recovery → ERROR → separate cw retry
 IN_PROGRESS | READY_FOR_REVIEW | REVISION_REQUIRED
   → governed artifact-only plan amendment → PLAN_PROPOSED
   → human plan approval → READY

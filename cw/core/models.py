@@ -63,7 +63,7 @@ class Criterion:
     severity: CriterionSeverity = CriterionSeverity.BLOCKING
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Criterion":
+    def from_dict(cls, data: dict[str, Any]) -> Criterion:
         return cls(
             str(data["id"]),
             str(data["description"]),
@@ -77,7 +77,7 @@ class RequiredCommand:
     timeout_seconds: int | None = None
 
     @classmethod
-    def from_value(cls, value: Any) -> "RequiredCommand":
+    def from_value(cls, value: Any) -> RequiredCommand:
         if isinstance(value, str):
             return cls(value)
         return cls(str(value["command"]), int(value["timeout_seconds"]) if value.get("timeout_seconds") else None)
@@ -100,7 +100,7 @@ class Phase:
     completion_requirements: tuple[str, ...] = ()
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Phase":
+    def from_dict(cls, data: dict[str, Any]) -> Phase:
         return cls(
             id=str(data["id"]), name=str(data["name"]),
             objective=str(data.get("objective", data["name"])),
@@ -126,7 +126,7 @@ class CompletionRequirement:
     project_specific: bool = False
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CompletionRequirement":
+    def from_dict(cls, data: dict[str, Any]) -> CompletionRequirement:
         return cls(
             id=str(data["id"]),
             description=str(data["description"]),
@@ -145,7 +145,7 @@ class CompletionContract:
     requirements: tuple[CompletionRequirement, ...]
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CompletionContract":
+    def from_dict(cls, data: dict[str, Any]) -> CompletionContract:
         return cls(
             id=str(data["id"]),
             name=str(data["name"]),
@@ -187,3 +187,6 @@ class ValidationResult:
     checks: list[dict[str, Any]] = field(default_factory=list)
     artifact_hashes: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    error_code: str | None = None
+    receipt: dict[str, Any] | None = None
+    receipt_payload: dict[str, Any] | None = None

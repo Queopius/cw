@@ -65,7 +65,9 @@ _FIELD_ALLOWLISTS: dict[str, frozenset[str]] = {
         "consistent", "current_phase", "expected_phase", "approved_through", "issues", "recovery",
         "planned_scope_complete", "completion_mode", "completion_target", "completion_satisfied",
         "completion_review", "extension_proposal", "active_plan_revision", "superseded_plan_revisions",
-        "superseded_reviews", "rebaseline", "rebaseline_explanation",
+        "superseded_reviews", "rebaseline", "rebaseline_explanation", "classification",
+        "failed_operation", "retryable", "readiness_available", "semantic_attempt",
+        "revision_attempt", "reason",
     }),
     "plan.show": frozenset({"workflow", "state", "revision", "proposal", "completion_contract", "phases"}),
     "completion.show": frozenset({
@@ -82,6 +84,23 @@ _FIELD_ALLOWLISTS: dict[str, frozenset[str]] = {
         "changed", "idempotent_replay", "recovery_id", "operation_id", "phase",
         "review_reference", "review_sha256", "workflow_sha256", "state_sha256",
         "previous_status", "resulting_status", "backup", "recovery_receipt", "next_action",
+    }),
+    "review.recover-infrastructure": frozenset({
+        "result", "changed", "mutation", "idempotent_replay", "retryable", "classification",
+        "operation_id", "recovery_id", "phase", "review_reference", "review_sha256",
+        "workflow_sha256", "state_sha256", "attempts_restored", "readiness_available",
+        "backup", "recovery_receipt", "next_action",
+    }),
+    "review.authorize-retry": frozenset({
+        "result", "changed", "idempotent_replay", "classification",
+        "authorization_id", "authorization_status", "verification_required",
+        "next_action",
+    }),
+    "retry": frozenset({
+        "result", "decision", "changed", "mutation", "retryable", "classification",
+        "retry_operation", "phase", "attempt", "revision_attempt", "review_reference",
+        "validation_evidence", "readiness_available", "gate", "next_phase",
+        "idempotent_replay", "next_action",
     }),
 }
 
@@ -109,6 +128,24 @@ _LLM_FIELDS = {
     "explain": (
         "consistent", "current_phase", "expected_phase", "approved_through", "issues", "recovery",
         "planned_scope_complete", "completion_satisfied", "active_plan_revision", "rebaseline",
+        "classification", "failed_operation", "retryable", "readiness_available",
+        "semantic_attempt", "revision_attempt", "reason",
+    ),
+    "review.recover-infrastructure": (
+        "result", "changed", "mutation", "retryable", "classification", "phase",
+        "review_reference", "review_sha256", "workflow_sha256", "state_sha256",
+        "attempts_restored", "readiness_available", "backup", "recovery_receipt",
+        "idempotent_replay", "next_action",
+    ),
+    "review.authorize-retry": (
+        "result", "changed", "idempotent_replay", "classification",
+        "authorization_id", "authorization_status", "verification_required",
+        "next_action",
+    ),
+    "retry": (
+        "result", "decision", "changed", "mutation", "retryable", "classification",
+        "retry_operation", "phase", "attempt", "revision_attempt", "readiness_available",
+        "gate", "idempotent_replay", "next_action",
     ),
 }
 
@@ -186,7 +223,7 @@ def command_name(args: argparse.Namespace) -> str:
     action = getattr(args, "action", None)
     if command == "plan" and action == "rebaseline" and getattr(args, "rebaseline_action", None):
         return f"plan.rebaseline.{args.rebaseline_action}"
-    if command in {"plan", "completion", "governance", "schema"} and action:
+    if command in {"plan", "completion", "governance", "schema", "review"} and action:
         return f"{command}.{action}"
     if command == "doctor" and getattr(args, "reviewer", False):
         return "doctor.reviewer"
@@ -507,6 +544,10 @@ def changed_for(command: str, status: OutputStatus, data: Any) -> bool:
         if data.get("idempotent_replay") is True:
             return False
         return data.get("changed") is True
+    if command == "review.recover-infrastructure" and isinstance(data, dict):
+        return data.get("changed") is True and data.get("idempotent_replay") is not True
+    if command == "review.authorize-retry" and isinstance(data, dict):
+        return data.get("changed") is True and data.get("idempotent_replay") is not True
     return True
 
 

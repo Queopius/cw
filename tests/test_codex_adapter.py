@@ -115,6 +115,30 @@ class CodexAdapterTests(unittest.TestCase):
             self.assertIsInstance(result, CodexRunResult)
             self.assertEqual("APPROVE", result.payload["decision"])
 
+    def test_reviewer_discards_apparent_approval_when_runtime_cleanup_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            schema = root / "schema.json"; schema.write_text("{}")
+
+            def fake_run(command, **_kwargs):
+                output = Path(command[command.index("--output-last-message") + 1])
+                output.write_text(json.dumps({"decision": "APPROVE"}), encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            cleanup = CwError(
+                "Verification runtime cleanup failed",
+                ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR,
+                "Run: cw retry",
+                details="[redacted]",
+            )
+            with patch("cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"), patch(
+                "cw.adapters.codex.subprocess.run", side_effect=fake_run
+            ), patch("cw.checks.verification._cleanup_runtime", side_effect=cleanup), self.assertRaises(CwError) as raised:
+                CodexAdapter().run_reviewer(root, "review", schema, 10)
+
+        self.assertIs(cleanup, raised.exception)
+        self.assertEqual(ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR, raised.exception.code)
+
     def test_planner_is_structured_read_only_ephemeral_and_rules_disabled(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
