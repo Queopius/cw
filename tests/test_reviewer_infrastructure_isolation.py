@@ -266,6 +266,9 @@ class VerificationExecutorTests(unittest.TestCase):
             (self.repo.root / ".cw/runtime/active-run.json").write_text(
                 "{}", encoding="utf-8",
             )
+            (self.repo.root / ".cw/runtime/.active-run.json.fixture.tmp").write_text(
+                "{}", encoding="utf-8",
+            )
             return real_popen(*args, **kwargs)
 
         with patch("cw.checks.verification.subprocess.Popen", side_effect=record_then_spawn):
