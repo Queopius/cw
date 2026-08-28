@@ -7,30 +7,188 @@ import json
 import os
 import queue
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import unittest
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from cw.adapters.mcp import MCPReadOnlyRuntime, RuntimeConfig
 from cw.adapters.result import CodexRunResult
 from cw.agents.reviewer import run_review
 from cw.application import ApplicationError, ApplicationErrorCode, CWApplication
-from cw.cli.commands.read import status_payload as cli_status_payload
 from cw.application.context import load_project_context
+from cw.cli.commands.read import status_payload as cli_status_payload
 from cw.cli.main import command_mcp
 from cw.cli.parser import parse_args
-from cw.ui.console import Console
 from cw.core.completion import run_completion_review
 from cw.core.errors import CwError, ErrorCode
 from cw.core.state import save_state
-from cw.core.workflow import load_workflow, write_workflow, workflow_hash
+from cw.core.workflow import load_workflow, workflow_hash, write_workflow
 from cw.planning.planner import Planner
+from cw.ui.console import Console
 from tests.helpers import FakeAdapter, TempRepo, result
+
+INTERMEDIATE_OPERATION_STATES = frozenset({"QUEUED", "RUNNING"})
+TERMINAL_OPERATION_STATES = frozenset({"SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED"})
+OPERATION_STATES = INTERMEDIATE_OPERATION_STATES | TERMINAL_OPERATION_STATES
+PUBLIC_ERROR_CODES = frozenset(item.value for item in ErrorCode)
+
+
+@dataclass(frozen=True)
+class OperationPollResult:
+    payload: dict[str, Any]
+    states: tuple[str, ...]
+    polls: int
+    duration: float
+
+
+@dataclass
+class ManualClock:
+    current: float = 0.0
+
+    def monotonic(self) -> float:
+        return self.current
+
+    def wait(self, timeout: float) -> bool:
+        self.current += timeout
+        return False
+
+
+def parse_operation_response(
+    response: object,
+    *,
+    expected_request_id: int,
+    target_operation_id: str,
+) -> dict[str, Any]:
+    if not isinstance(response, dict):
+        raise TypeError("MCP response must be one JSON object")
+    response_id = response.get("id")
+    if (
+        response.get("jsonrpc") != "2.0"
+        or not isinstance(response_id, int)
+        or isinstance(response_id, bool)
+        or response_id != expected_request_id
+    ):
+        raise AssertionError("MCP response identity does not match the request")
+    if "error" in response:
+        raise AssertionError("MCP response contains a JSON-RPC error")
+    result_document = response.get("result")
+    if not isinstance(result_document, dict) or result_document.get("isError") is not False:
+        raise AssertionError("MCP result envelope is missing or reports an error")
+    payload = result_document.get("structuredContent")
+    content = result_document.get("content")
+    if not isinstance(payload, dict) or not isinstance(content, list) or len(content) != 1:
+        raise AssertionError("MCP response must contain one structured CW payload")
+    item = content[0]
+    if not isinstance(item, dict) or item.get("type") != "text" or not isinstance(item.get("text"), str):
+        raise AssertionError("MCP compatibility content is malformed")
+    try:
+        compatibility_payload = json.loads(item["text"])
+    except json.JSONDecodeError as error:
+        raise AssertionError("MCP compatibility content is not one JSON document") from error
+    if compatibility_payload != payload:
+        raise AssertionError("MCP payload projections are ambiguous")
+    schema_version = payload.get("schema_version")
+    if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version != 1:
+        raise AssertionError("CW operation payload schema is unsupported")
+    operation_id = payload.get("operation_id")
+    if (
+        not isinstance(operation_id, str)
+        or not operation_id.isascii()
+        or not operation_id
+        or len(operation_id) > 128
+        or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for character in operation_id)
+    ):
+        raise AssertionError("CW operation ID is malformed")
+    if operation_id != target_operation_id:
+        raise AssertionError("CW operation response belongs to another operation")
+    status = payload.get("status")
+    if status not in OPERATION_STATES:
+        raise AssertionError("CW operation status is unknown")
+    if payload.get("operation") != "phase.start" or payload.get("capability") != "phase.start":
+        raise AssertionError("CW operation capability is inconsistent")
+    return payload
+
+
+def poll_operation_until_terminal(
+    *,
+    send: Callable[[dict[str, Any]], None],
+    receive: Callable[[int, float], object],
+    target_operation_id: str,
+    initial_payload: dict[str, Any],
+    deadline: float,
+    first_request_id: int = 3,
+    monotonic: Callable[[], float] = time.monotonic,
+    wait: Callable[[float], bool] | None = None,
+    cadence: float = 0.01,
+) -> OperationPollResult:
+    wait_for_cadence = wait if wait is not None else threading.Event().wait
+    started = monotonic()
+    states = [str(initial_payload["status"])]
+    if states[0] in TERMINAL_OPERATION_STATES:
+        if states[0] != "SUCCEEDED":
+            raise AssertionError(f"CW operation terminated as {states[0]}")
+        return OperationPollResult(initial_payload, tuple(states), 0, monotonic() - started)
+    request_id = first_request_id
+    polls = 0
+    previous = states[0]
+    while True:
+        now = monotonic()
+        if now >= deadline:
+            raise AssertionError(
+                f"CW operation deadline expired: state={previous}; states={states}; "
+                f"polls={polls}; duration={now - started:.3f}; operation_id={target_operation_id}"
+            )
+        send({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {
+                "name": "cw_operation_status",
+                "arguments": {
+                    "operation_id": f"stdio-poll-{request_id}",
+                    "target_operation_id": target_operation_id,
+                },
+            },
+        })
+        response = receive(request_id, deadline - monotonic())
+        received_at = monotonic()
+        if received_at > deadline:
+            raise AssertionError(
+                f"CW operation deadline expired: state={previous}; states={states}; "
+                f"polls={polls}; duration={received_at - started:.3f}; "
+                f"operation_id={target_operation_id}"
+            )
+        payload = parse_operation_response(
+            response,
+            expected_request_id=request_id,
+            target_operation_id=target_operation_id,
+        )
+        polls += 1
+        current = str(payload["status"])
+        if previous == "RUNNING" and current == "QUEUED":
+            raise AssertionError("CW operation status regressed from RUNNING to QUEUED")
+        states.append(current)
+        if current in TERMINAL_OPERATION_STATES:
+            if current != "SUCCEEDED":
+                error = payload.get("error")
+                code = error.get("code") if isinstance(error, dict) else None
+                safe_code = code if code in PUBLIC_ERROR_CODES else "unavailable"
+                raise AssertionError(f"CW operation terminated as {current}; error_code={safe_code}")
+            return OperationPollResult(payload, tuple(states), polls, monotonic() - started)
+        previous = current
+        request_id += 1
+        remaining = deadline - monotonic()
+        if remaining > 0:
+            wait_for_cadence(min(cadence, remaining))
 
 
 def tree_digest(root: Path) -> str:
@@ -118,6 +276,271 @@ def approve(repo: TempRepo) -> None:
             repo.root, repo.workflow, repo.workflow.phases[phase - 1],
             repo.state(), FakeAdapter(result(phase)),
         )
+
+
+def operation_response(
+    request_id: int,
+    status: str,
+    *,
+    operation_id: str = "phase-start-stdio",
+    error_code: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "operation_id": operation_id,
+        "operation": "phase.start",
+        "capability": "phase.start",
+        "status": status,
+        "data": {},
+    }
+    if error_code is not None:
+        payload["error"] = {"code": error_code}
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": {
+            "content": [{"type": "text", "text": json.dumps(payload)}],
+            "structuredContent": payload,
+            "isError": False,
+        },
+    }
+
+
+def operation_response_reader(
+    status: str,
+    *,
+    error_code: str | None = None,
+) -> Callable[[int, float], object]:
+    def receive(request_id: int, _remaining: float) -> object:
+        return operation_response(request_id, status, error_code=error_code)
+
+    return receive
+
+
+class MCPPollingContractTests(unittest.TestCase):
+    @staticmethod
+    def initial(status: str = "QUEUED") -> dict[str, Any]:
+        return parse_operation_response(
+            operation_response(2, status),
+            expected_request_id=2,
+            target_operation_id="phase-start-stdio",
+        )
+
+    def poll_sequence(self, statuses: list[str]) -> tuple[OperationPollResult, list[dict[str, Any]]]:
+        sent: list[dict[str, Any]] = []
+        remaining = iter(statuses)
+
+        def receive(request_id: int, _remaining: float) -> object:
+            return operation_response(request_id, next(remaining))
+
+        result = poll_operation_until_terminal(
+            send=sent.append,
+            receive=receive,
+            target_operation_id="phase-start-stdio",
+            initial_payload=self.initial(),
+            deadline=time.monotonic() + 1,
+            wait=lambda _timeout: False,
+        )
+        return result, sent
+
+    def test_immediate_and_intermediate_success_transitions(self) -> None:
+        immediate = poll_operation_until_terminal(
+            send=lambda _payload: self.fail("terminal submission must not be polled"),
+            receive=lambda _request_id, _remaining: self.fail(
+                "terminal submission must not be read"
+            ),
+            target_operation_id="phase-start-stdio",
+            initial_payload=self.initial("SUCCEEDED"),
+            deadline=time.monotonic() + 1,
+        )
+        self.assertEqual(("SUCCEEDED",), immediate.states)
+        for statuses, expected in (
+            (["SUCCEEDED"], ("QUEUED", "SUCCEEDED")),
+            (["RUNNING", "SUCCEEDED"], ("QUEUED", "RUNNING", "SUCCEEDED")),
+            (["RUNNING", "RUNNING", "RUNNING", "SUCCEEDED"],
+             ("QUEUED", "RUNNING", "RUNNING", "RUNNING", "SUCCEEDED")),
+        ):
+            with self.subTest(statuses=statuses):
+                result, _sent = self.poll_sequence(statuses)
+                self.assertEqual(expected, result.states)
+        running = poll_operation_until_terminal(
+            send=lambda _payload: None,
+            receive=lambda request_id, _remaining: operation_response(
+                request_id, "SUCCEEDED"
+            ),
+            target_operation_id="phase-start-stdio",
+            initial_payload=self.initial("RUNNING"),
+            deadline=time.monotonic() + 1,
+            wait=lambda _timeout: False,
+        )
+        self.assertEqual(("RUNNING", "SUCCEEDED"), running.states)
+
+    def test_terminal_failures_stop_polling_immediately(self) -> None:
+        for initial, terminal in (
+            ("QUEUED", "FAILED"),
+            ("RUNNING", "FAILED"),
+            ("RUNNING", "BLOCKED"),
+            ("RUNNING", "CANCELLED"),
+        ):
+            sent: list[dict[str, Any]] = []
+            with self.subTest(initial=initial, terminal=terminal), self.assertRaisesRegex(
+                AssertionError, terminal
+            ):
+                poll_operation_until_terminal(
+                    send=sent.append,
+                    receive=operation_response_reader(
+                        terminal, error_code="INTERNAL_ERROR"
+                    ),
+                    target_operation_id="phase-start-stdio",
+                    initial_payload=self.initial(initial),
+                    deadline=time.monotonic() + 1,
+                    wait=lambda _timeout: False,
+                )
+            self.assertEqual(1, len(sent))
+
+    def test_deadline_expires_for_queued_and_running(self) -> None:
+        for state in ("QUEUED", "RUNNING"):
+            clock = ManualClock()
+            sent: list[dict[str, Any]] = []
+
+            with self.subTest(state=state), self.assertRaisesRegex(
+                AssertionError, f"state={state}"
+            ):
+                poll_operation_until_terminal(
+                    send=sent.append,
+                    receive=operation_response_reader(state),
+                    target_operation_id="phase-start-stdio",
+                    initial_payload=self.initial(state),
+                    deadline=0.025,
+                    monotonic=clock.monotonic,
+                    wait=clock.wait,
+                    cadence=0.01,
+                )
+            self.assertGreaterEqual(len(sent), 2)
+
+        late_clock = ManualClock()
+
+        def receive_late_success(request_id: int, _remaining: float) -> object:
+            late_clock.current = 0.026
+            return operation_response(request_id, "SUCCEEDED")
+
+        with self.assertRaisesRegex(AssertionError, "deadline expired"):
+            poll_operation_until_terminal(
+                send=lambda _payload: None,
+                receive=receive_late_success,
+                target_operation_id="phase-start-stdio",
+                initial_payload=self.initial("RUNNING"),
+                deadline=0.025,
+                monotonic=late_clock.monotonic,
+                wait=late_clock.wait,
+            )
+
+    def test_unknown_state_and_running_regression_are_rejected(self) -> None:
+        unknown = operation_response(2, "MYSTERY")
+        with self.assertRaisesRegex(AssertionError, "unknown"):
+            parse_operation_response(
+                unknown, expected_request_id=2, target_operation_id="phase-start-stdio"
+            )
+        with self.assertRaisesRegex(AssertionError, "regressed"):
+            poll_operation_until_terminal(
+                send=lambda _payload: None,
+                receive=lambda request_id, _remaining: operation_response(
+                    request_id, "QUEUED"
+                ),
+                target_operation_id="phase-start-stdio",
+                initial_payload=self.initial("RUNNING"),
+                deadline=time.monotonic() + 1,
+                wait=lambda _timeout: False,
+            )
+
+    def test_response_request_operation_and_jsonrpc_identity_are_strict(self) -> None:
+        cases = (
+            operation_response(9, "RUNNING"),
+            operation_response(2, "RUNNING", operation_id="another-operation"),
+            {"jsonrpc": "2.0", "id": 2, "error": {"code": -32000}},
+        )
+        for response in cases:
+            with self.subTest(response=response), self.assertRaises(AssertionError):
+                parse_operation_response(
+                    response, expected_request_id=2, target_operation_id="phase-start-stdio"
+                )
+
+    def test_missing_duplicate_and_ambiguous_payloads_are_rejected(self) -> None:
+        missing = operation_response(2, "RUNNING")
+        del missing["result"]["structuredContent"]
+        duplicate = operation_response(2, "RUNNING")
+        duplicate["result"]["content"].append(duplicate["result"]["content"][0])
+        ambiguous = operation_response(2, "RUNNING")
+        ambiguous["result"]["content"][0]["text"] = json.dumps(
+            {**ambiguous["result"]["structuredContent"], "status": "SUCCEEDED"}
+        )
+        for response in (missing, duplicate, ambiguous):
+            with self.subTest(response=response), self.assertRaises(AssertionError):
+                parse_operation_response(
+                    response, expected_request_id=2, target_operation_id="phase-start-stdio"
+                )
+
+    def test_succeeded_text_does_not_override_running_status(self) -> None:
+        response = operation_response(2, "RUNNING")
+        response["result"]["structuredContent"]["data"] = {
+            "message": "SUCCEEDED is incidental text"
+        }
+        response["result"]["content"][0]["text"] = json.dumps(
+            response["result"]["structuredContent"]
+        )
+        payload = parse_operation_response(
+            response, expected_request_id=2, target_operation_id="phase-start-stdio"
+        )
+        self.assertEqual("RUNNING", payload["status"])
+
+    def test_poll_requests_are_unique_and_never_resubmit(self) -> None:
+        result, sent = self.poll_sequence(["RUNNING", "RUNNING", "SUCCEEDED"])
+        self.assertEqual("SUCCEEDED", result.payload["status"])
+        self.assertEqual(len(sent), len({item["id"] for item in sent}))
+        self.assertTrue(all(item["params"]["name"] == "cw_operation_status" for item in sent))
+        self.assertTrue(all(
+            item["params"]["arguments"]["target_operation_id"] == "phase-start-stdio"
+            for item in sent
+        ))
+
+    def test_barrier_holds_running_worker_until_observed_then_succeeds(self) -> None:
+        worker_started = threading.Event()
+        release_worker = threading.Event()
+        worker_finished = threading.Event()
+        status = ["RUNNING"]
+
+        def worker() -> None:
+            worker_started.set()
+            release_worker.wait(timeout=1)
+            status[0] = "SUCCEEDED"
+            worker_finished.set()
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        self.assertTrue(worker_started.wait(timeout=1))
+        observed_running = threading.Event()
+
+        def receive(request_id: int, _remaining: float) -> object:
+            observed_running.set()
+            return operation_response(request_id, status[0])
+
+        def wait(_timeout: float) -> bool:
+            self.assertTrue(observed_running.is_set())
+            release_worker.set()
+            self.assertTrue(worker_finished.wait(timeout=1))
+            return True
+
+        polled = poll_operation_until_terminal(
+            send=lambda _payload: None,
+            receive=receive,
+            target_operation_id="phase-start-stdio",
+            initial_payload=self.initial("RUNNING"),
+            deadline=time.monotonic() + 1,
+            wait=wait,
+        )
+        thread.join(timeout=1)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(("RUNNING", "RUNNING", "SUCCEEDED"), polled.states)
 
 
 class MCPRuntimeTests(unittest.TestCase):
@@ -541,37 +964,52 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
     def test_stdio_controlled_action_submission_and_polling(self) -> None:
         repo = TempRepo(phases=1)
         process = None
+        stdout_thread = None
+        stderr_thread = None
         try:
             root = Path(__file__).resolve().parents[1]
             environment = {**os.environ, "PYTHONPATH": str(root)}
             process = subprocess.Popen(
-                [os.environ.get("PYTHON", os.sys.executable), "-m", "cw", "mcp", "serve", "--project", str(repo.root)],
+                [os.environ.get("PYTHON", sys.executable), "-m", "cw", "mcp", "serve", "--project", str(repo.root)],
                 cwd=root, env=environment, text=True, stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1,
             )
             assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+            stdin = process.stdin
+            stdout = process.stdout
+            stderr_stream = process.stderr
             frames: queue.Queue[dict | BaseException | None] = queue.Queue()
+            stderr_lines: list[str] = []
+            sent: list[dict[str, Any]] = []
 
             def collect() -> None:
                 try:
-                    for line in process.stdout:
+                    for line in stdout:
                         frames.put(json.loads(line))
                 except BaseException as exc:
                     frames.put(exc)
                 finally:
                     frames.put(None)
 
-            threading.Thread(target=collect, daemon=True).start()
-            threading.Thread(target=lambda: list(process.stderr), daemon=True).start()
+            stdout_thread = threading.Thread(target=collect)
+            stderr_thread = threading.Thread(
+                target=lambda: stderr_lines.extend(stderr_stream)
+            )
+            stdout_thread.start()
+            stderr_thread.start()
 
-            def send(payload: dict) -> None:
-                process.stdin.write(json.dumps(payload) + "\n")
-                process.stdin.flush()
+            def send(payload: dict[str, Any]) -> None:
+                sent.append(payload)
+                stdin.write(json.dumps(payload) + "\n")
+                stdin.flush()
 
-            def receive(identifier: int) -> dict:
-                deadline = time.monotonic() + 20
+            def receive(identifier: int, remaining: float = 20.0) -> dict:
+                deadline = time.monotonic() + max(0.0, remaining)
                 while time.monotonic() < deadline:
-                    item = frames.get(timeout=max(0.01, deadline - time.monotonic()))
+                    try:
+                        item = frames.get(timeout=max(0.0, deadline - time.monotonic()))
+                    except queue.Empty:
+                        self.fail(f"stdio server did not answer request {identifier}")
                     if item is None:
                         self.fail("stdio server stopped before controlled action response")
                     if isinstance(item, BaseException):
@@ -590,26 +1028,43 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
                 "name": "cw_phase_start", "arguments": {"operation_id": "phase-start-stdio"},
             }})
             submitted = receive(2)
-            self.assertIn("phase-start-stdio", json.dumps(submitted))
-
-            terminal = None
-            for identifier in range(3, 30):
-                send({"jsonrpc": "2.0", "id": identifier, "method": "tools/call", "params": {
-                    "name": "cw_operation_status",
-                    "arguments": {
-                        "operation_id": f"stdio-poll-{identifier}",
-                        "target_operation_id": "phase-start-stdio",
-                    },
-                }})
-                terminal = receive(identifier)
-                if "SUCCEEDED" in json.dumps(terminal):
-                    break
-                time.sleep(0.01)
-            self.assertIsNotNone(terminal)
-            self.assertIn("SUCCEEDED", json.dumps(terminal))
+            initial = parse_operation_response(
+                submitted,
+                expected_request_id=2,
+                target_operation_id="phase-start-stdio",
+            )
+            polled = poll_operation_until_terminal(
+                send=send,
+                receive=receive,
+                target_operation_id="phase-start-stdio",
+                initial_payload=initial,
+                deadline=time.monotonic() + 20,
+            )
+            self.assertEqual("SUCCEEDED", polled.payload["status"])
+            self.assertEqual("phase-start-stdio", polled.payload["operation_id"])
+            self.assertEqual(
+                1,
+                sum(
+                    item.get("params", {}).get("name") == "cw_phase_start"
+                    for item in sent
+                ),
+            )
+            poll_requests = [
+                item for item in sent
+                if item.get("params", {}).get("name") == "cw_operation_status"
+            ]
+            self.assertEqual(len(poll_requests), len({item["id"] for item in poll_requests}))
+            self.assertTrue(all(
+                item["params"]["arguments"]["target_operation_id"] == "phase-start-stdio"
+                for item in poll_requests
+            ))
             self.assertTrue((repo.root / ".cw/runtime/implementer-session.json").is_file())
-            process.stdin.close()
-            self.assertEqual(0, process.wait(timeout=20))
+            stdin.close()
+            self.assertEqual(0, process.wait(timeout=20), "".join(stderr_lines))
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
+            self.assertFalse(stdout_thread.is_alive())
+            self.assertFalse(stderr_thread.is_alive())
         finally:
             if process is not None and process.poll() is None:
                 process.kill()
@@ -618,6 +1073,9 @@ class MCPDependencyAndProtocolTests(unittest.TestCase):
                 for stream in (process.stdin, process.stdout, process.stderr):
                     if stream is not None and not stream.closed:
                         stream.close()
+            for thread in (stdout_thread, stderr_thread):
+                if thread is not None:
+                    thread.join(timeout=5)
             repo.close()
 
 
