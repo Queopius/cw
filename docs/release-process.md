@@ -84,8 +84,9 @@ remain welcome; only maintainers decide which reviewed changes are merged.
    ```bash
    git switch prod
    git pull --ff-only origin prod
-   git tag -a v0.17.0 -m "CW CLI v0.17.0"
-   git push origin v0.17.0
+   release_version="$(cat VERSION)"
+   git tag -a "v${release_version}" -m "CW CLI v${release_version}"
+   git push origin "v${release_version}"
    ```
 
 The Release Check workflow rejects tags whose commit is not reachable from
@@ -101,11 +102,10 @@ names, sizes, and SHA-256 digests already match; assets are never replaced with
 `--clobber`.
 
 Plugin validation remains a separate CI job. Its outputs are unpublished
-candidates outside the Core release directory. Core `0.17.0` does not build or
-attach `cw-plugin-0.1.0.zip`; the existing public asset remains canonical at
+candidates outside the Core release directory. Core releases do not build or
+attach the public Plugin; `cw-plugin-0.1.0.zip` remains immutable and canonical at
 SHA-256 `b59275bb7e7a32e58c1d48202c9cf489874a6d21ce15fad3ef4cd6f202512021`.
-Publishing current Plugin source requires a separately authorized Plugin
-`0.2.0` ceremony.
+Publishing the current Plugin requires a separately authorized Plugin ceremony.
 
 ## Platform release gate
 
