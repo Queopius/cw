@@ -21,6 +21,7 @@ class ReleaseHygieneTests(unittest.TestCase):
         for version in ("3.10", "3.11", "3.12", "3.13", "3.14"):
             self.assertIn(f'"{version}"', workflow)
         self.assertIn("python -m build", workflow)
+        self.assertIn('tiktoken==0.14.0', workflow)
         self.assertIn("cw version --json", workflow)
         self.assertIn("cw --version", workflow)
         self.assertIn("python scripts/build_release.py --output dist --channel stable --component core", workflow)

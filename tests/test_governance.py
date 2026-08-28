@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import io
+import json
 import subprocess
 import tempfile
 import unittest
@@ -10,11 +10,24 @@ from unittest.mock import patch
 
 from cw.cli.parser import parse_args
 from cw.core.errors import CwError
-from cw.core.governance import (Check, Collaborator, GovernanceMode, PullRequestSnapshot, Review,
-                                authorize_solo_promotion, configure_governance, governance_diagnosis,
-                                classify_authorization_evidence, invalidate_governance_authorization,
-                                load_governance_policy, recommend_mode, remote_protection_plan,
-                                review_diagnosis, validate_promotion_authorization, validate_promotion_preflight)
+from cw.core.governance import (
+    Check,
+    Collaborator,
+    GovernanceMode,
+    PullRequestSnapshot,
+    Review,
+    authorize_solo_promotion,
+    classify_authorization_evidence,
+    configure_governance,
+    governance_diagnosis,
+    invalidate_governance_authorization,
+    load_governance_policy,
+    recommend_mode,
+    remote_protection_plan,
+    review_diagnosis,
+    validate_promotion_authorization,
+    validate_promotion_preflight,
+)
 
 SHA = "a" * 40
 BASE_SHA = "c" * 40
@@ -255,7 +268,7 @@ class GovernanceTests(unittest.TestCase):
 
     def test_component_boundaries_remain_independent(self) -> None:
         repository = Path(__file__).resolve().parents[1]
-        self.assertEqual("0.17.0", (repository / "VERSION").read_text().strip())
+        self.assertEqual("0.18.0", (repository / "VERSION").read_text().strip())
         self.assertEqual("0.1.0", (repository / "plugins/cw/VERSION").read_text().strip())
         self.assertIn("cw.remote.v1", (repository / "cw/remote/protocol.py").read_text())
 

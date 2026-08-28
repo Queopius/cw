@@ -1,5 +1,16 @@
 # Security and privacy
 
+## Reviewer and verification isolation
+
+CW treats source, documentation, artifacts, fixtures, logs, reviewer output,
+and receipts as potentially hostile. Deterministic commands run only in the
+Verification Executor with canonical argv, no shell, closed stdin, bounded
+timeouts, private temp/cache roots, redaction, and integrity-bound receipts.
+The Semantic Reviewer remains read-only with hooks and web disabled. Its prompt
+forbids commands and prompt-injection instructions; a managed command event
+invalidates the result as infrastructure before it can affect attempts or a
+gate. See [Reviewer infrastructure isolation](reviewer-infrastructure.md).
+
 CW applies least privilege to agent roles:
 
 - planner: `read-only`, ephemeral, hooks and web search disabled;

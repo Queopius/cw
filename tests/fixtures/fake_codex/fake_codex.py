@@ -6,13 +6,208 @@ emits model reasoning and is intentionally unsuitable as a production backend.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
+import stat
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any
+
+_HOOK_CONTRACT_FAILURE = 46
+_HOOK_FAILURE_MESSAGE = "fake reviewer hook contract failed"
+_HOOK_POSTCONDITION_FAILURE = 47
+_HOOK_POSTCONDITION_MESSAGE = "fake reviewer hook postcondition failed"
+_FIXTURE_FAILURE = 48
+_FIXTURE_FAILURE_MESSAGE = "fake acceptance fixture failed"
+_EVIDENCE_NAME = "acceptance-fixture-evidence.json"
+_EVIDENCE_STAGES = {
+    "process_start", "runtime_verified", "repository_verified", "readiness_observed",
+    "hook_start", "hook_exit", "hook_envelope_valid", "handoff_accepted",
+    "completion_written", "process_exit",
+}
+_EVIDENCE_REASONS = {
+    "runtime_invalid", "repository_invalid", "readiness_missing", "hook_spawn_failed",
+    "hook_exit_nonzero", "hook_envelope_missing", "hook_envelope_invalid",
+    "hook_contract_rejected", "handoff_incompatible", "completion_not_written",
+    "unexpected_exception", "none",
+}
+_PUBLIC_ERROR_CODES = {
+    "AUTHORIZATION_REQUIRED", "BATCH_INTERRUPTED", "BATCH_REVISION_EXHAUSTED",
+    "BATCH_TIME_EXHAUSTED", "BATCH_TOO_LARGE", "CODEX_CONFIG_ERROR",
+    "CODEX_NOT_FOUND", "COMPLETION_CONTRACT_CHANGE_REQUIRES_REBUILD",
+    "EXECUTION_INTERRUPTED", "FORBIDDEN_PLAN_CHANGE", "HOOK_UNTRUSTED",
+    "IMPLEMENTER_PROCESS_ERROR", "INTEGRITY_ERROR", "INTERNAL_ERROR",
+    "INVALID_ARTIFACT", "INVALID_GATE", "INVALID_STATE", "LOCKED",
+    "MCP_AUTH_REQUIRED", "MCP_DISABLED", "MCP_NOT_CONFIGURED",
+    "MCP_OPTIONAL_UNAVAILABLE", "MCP_REQUIRED_UNAVAILABLE", "MCP_SERVER_ERROR",
+    "MCP_TRANSPORT_ERROR", "NOTHING_TO_VALIDATE", "OPERATION_CONFLICT",
+    "PLANNER_NETWORK_ERROR", "PLANNER_PROCESS_ERROR", "PLANNER_SCHEMA_ERROR",
+    "PLANNER_TRANSPORT_ERROR", "PLAN_AMEND_INTEGRITY_ERROR",
+    "PLAN_AMEND_ROLLBACK_FAILED", "PLAN_REBASELINE_REQUIRED", "PLAN_REQUIRED",
+    "PLAN_REVISION_INVALID", "PLAN_TIMEOUT", "PLAN_UNCLEAR",
+    "PROJECT_SCOPE_VIOLATION", "PROTECTED_PATH_MODIFIED", "REVIEWER_INFRASTRUCTURE_ERROR",
+    "REVIEWER_INVALID_OUTPUT", "REVIEWER_NETWORK_ERROR", "REVIEWER_PROCESS_ERROR",
+    "REVIEW_TIMEOUT", "RUNTIME_NOT_WRITABLE", "SCHEMA_VALIDATION_ERROR",
+    "SCHEMA_VERSION_ERROR", "STALE_STATE_SHA", "STALE_WORKFLOW_SHA",
+    "STATE_INCONSISTENT", "SUPERSESSION_INVALID", "TRANSACTION_RECOVERY_REQUIRED",
+    "UPDATE_CHECKSUM_ERROR", "UPDATE_CHECK_ERROR", "UPDATE_DEVELOPMENT_INSTALL",
+    "UPDATE_DOWNLOAD_ERROR", "UPDATE_INCOMPATIBLE", "UPDATE_INSTALL_ERROR",
+    "UPDATE_MANIFEST_ERROR", "UPDATE_ROLLBACK_ERROR", "UPDATE_SIGNATURE_ERROR",
+    "UPDATE_SMOKE_TEST_ERROR", "USAGE_ERROR", "VERIFICATION_COMMAND_FAILED",
+    "VERIFICATION_INFRASTRUCTURE_ERROR", "VERIFICATION_TIMEOUT", "WORKFLOW_ERROR",
+    "WORKFLOW_PROJECT_MISMATCH",
+}
+_CORRELATION_ID = re.compile(r"^[0-9a-f]{16}$")
+_HOOK_SUCCESS_REASONS = {
+    "CW independent review requires revision. Run: cw history",
+    "CW phase review completed. Run: cw status",
+}
+
+
+def _write_all(descriptor: int, payload: bytes) -> None:
+    offset = 0
+    while offset < len(payload):
+        written = os.write(descriptor, payload[offset:])
+        if written <= 0:
+            raise OSError("fixture evidence write made no progress")
+        offset += written
+
+
+def _fixture_evidence_path(root: Path) -> Path:
+    canonical = root.resolve(strict=True)
+    if root.is_symlink():
+        raise OSError("unsafe fixture project root")
+    runtime = canonical / ".cw/runtime"
+    metadata = runtime.lstat()
+    if not stat.S_ISDIR(metadata.st_mode) or runtime.is_symlink():
+        raise OSError("unsafe fixture runtime")
+    return runtime / _EVIDENCE_NAME
+
+
+def _record_fixture_evidence(
+    root: Path,
+    last_stage: str,
+    failure_reason: str,
+    *,
+    cw_error_code: str | None = None,
+    correlation_sha256: str | None = None,
+) -> bool:
+    """Atomically persist only closed acceptance evidence for the active invocation."""
+
+    invocation = os.environ.get("CW_ACCEPTANCE_INVOCATION_ID")
+    if invocation is None:
+        return False
+    if not re.fullmatch(r"[0-9a-f]{64}", invocation):
+        raise OSError("invalid fixture invocation identity")
+    if last_stage not in _EVIDENCE_STAGES or failure_reason not in _EVIDENCE_REASONS:
+        raise ValueError("invalid fixture evidence enum")
+    if cw_error_code is not None and cw_error_code not in _PUBLIC_ERROR_CODES:
+        raise ValueError("invalid fixture error code")
+    if correlation_sha256 is not None and not re.fullmatch(r"[0-9a-f]{64}", correlation_sha256):
+        raise ValueError("invalid fixture correlation hash")
+    invocation_hash = hashlib.sha256(invocation.encode("ascii")).hexdigest()
+    payload = json.dumps({
+        "schema_version": 1,
+        "invocation_sha256": invocation_hash,
+        "last_stage": last_stage,
+        "failure_reason": failure_reason,
+        "cw_error_code": cw_error_code,
+        "correlation_sha256": correlation_sha256,
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+    destination = _fixture_evidence_path(root)
+    temporary = destination.with_name(f".{_EVIDENCE_NAME}.{invocation_hash[:16]}.tmp")
+    try:
+        try:
+            destination_metadata = destination.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            if (
+                not stat.S_ISREG(destination_metadata.st_mode)
+                or destination_metadata.st_nlink != 1
+            ):
+                raise OSError("unsafe fixture evidence destination")
+        try:
+            existing = temporary.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            if not stat.S_ISREG(existing.st_mode) or existing.st_nlink != 1:
+                raise OSError("unsafe fixture evidence temporary")
+            temporary.unlink()
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_BINARY", 0)
+        descriptor = os.open(temporary, flags, 0o600)
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+                raise OSError("unsafe fixture evidence descriptor")
+            _write_all(descriptor, payload)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, destination)
+        persisted = destination.lstat()
+        if not stat.S_ISREG(persisted.st_mode) or persisted.st_nlink != 1:
+            raise OSError("unsafe fixture evidence destination")
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+    return True
+
+
+def _safe_hook_diagnostic(
+    root: Path,
+    previous_fingerprint: str | None,
+) -> tuple[str | None, str | None]:
+    """Extract only allowlisted identity from the diagnostic written by this hook."""
+
+    path = root / ".cw/logs/last-error.json"
+    if not _safe_regular_file(path):
+        return None, None
+    try:
+        payload_bytes = path.read_bytes()
+    except OSError:
+        return None, None
+    if len(payload_bytes) > 16_384:
+        return None, None
+    fingerprint = hashlib.sha256(payload_bytes).hexdigest()
+    if fingerprint == previous_fingerprint:
+        return None, None
+    try:
+        payload = json.loads(payload_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, None
+    if not isinstance(payload, dict) or payload.get("source") != "review":
+        return None, None
+    code = payload.get("code")
+    correlation = payload.get("correlation_id")
+    safe_code = code if isinstance(code, str) and code in _PUBLIC_ERROR_CODES else None
+    safe_hash = (
+        hashlib.sha256(correlation.encode("ascii")).hexdigest()
+        if isinstance(correlation, str) and _CORRELATION_ID.fullmatch(correlation)
+        else None
+    )
+    return safe_code, safe_hash
+
+
+def _acceptance_project_verified(root: Path) -> bool:
+    expected_value = os.environ.get("CW_ACCEPTANCE_PROJECT_ROOT")
+    if expected_value is None:
+        return True
+    expected = Path(expected_value)
+    if not expected.is_absolute() or expected.is_symlink() or root.is_symlink():
+        return False
+    try:
+        return os.path.samefile(expected.resolve(strict=True), root.resolve(strict=True))
+    except OSError:
+        return False
 
 
 def _option(arguments: list[str], name: str) -> str | None:
@@ -39,6 +234,192 @@ def _write_output(arguments: list[str], payload: Any) -> None:
 
 def _emit(value: dict[str, Any]) -> None:
     print(json.dumps(value, ensure_ascii=False), flush=True)
+
+
+def _acceptance_cw_executable() -> Path:
+    """Resolve the exact installed CW binary without accepting an external alias."""
+
+    executable_value = os.environ.get("CW_ACCEPTANCE_CW_EXECUTABLE")
+    runtime_value = os.environ.get("CW_ACCEPTANCE_RUNTIME_ROOT")
+    if not executable_value or not runtime_value:
+        raise ValueError("acceptance CW identity is unavailable")
+    executable_path = Path(executable_value)
+    runtime_path = Path(runtime_value)
+    if not executable_path.is_absolute() or not runtime_path.is_absolute():
+        raise ValueError("acceptance CW identity is invalid")
+    if executable_path.is_symlink() or runtime_path.is_symlink():
+        raise ValueError("acceptance CW identity is not canonical")
+    executable = executable_path.resolve(strict=True)
+    runtime = runtime_path.resolve(strict=True)
+    metadata = executable.stat()
+    if not executable.is_file() or metadata.st_nlink != 1 or not os.access(executable, os.X_OK):
+        raise ValueError("acceptance CW executable is unsafe")
+    if not os.path.samefile(executable.parent.parent, runtime):
+        raise ValueError("acceptance CW executable is outside its runtime")
+    return executable
+
+
+def _valid_hook_response(value: str) -> bool:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return False
+    return (
+        isinstance(payload, dict)
+        and bool(payload)
+        and payload.get("continue") is False
+        and isinstance(payload.get("stopReason"), str)
+    )
+
+
+def _hook_response_failure(value: str) -> str | None:
+    if not value.strip():
+        return "hook_envelope_missing"
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return "hook_envelope_invalid"
+    if not isinstance(payload, dict):
+        return "hook_envelope_invalid"
+    if (
+        not payload
+        or payload.get("continue") is not False
+        or not isinstance(payload.get("stopReason"), str)
+    ):
+        return "hook_contract_rejected"
+    if payload["stopReason"] not in _HOOK_SUCCESS_REASONS:
+        return "hook_contract_rejected"
+    return None
+
+
+def _safe_regular_file(path: Path) -> bool:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return False
+    return stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1
+
+
+def _durable_review_postcondition(
+    root: Path,
+    phase_id: str,
+    next_phase: str | None,
+) -> bool:
+    try:
+        state = json.loads((root / ".cw/state.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(state, dict):
+        return False
+    readiness = root / ".cw/runtime/READY_FOR_REVIEW.json"
+    gate = root / ".cw/gates" / f"{phase_id}.approved.json"
+    if readiness.exists() or readiness.is_symlink() or not _safe_regular_file(gate):
+        return False
+    if next_phase is not None:
+        return (
+            state.get("status") == "IN_PROGRESS"
+            and state.get("current_phase") == next_phase
+            and next_phase != phase_id
+        )
+    return (
+        state.get("status") in {"PLANNED_COMPLETE", "COMPLETED"}
+        and state.get("current_phase") is None
+    )
+
+
+def _parent_review_postcondition(root: Path, phase_id: str) -> bool:
+    """Accept only the exact intermediate state owned by the batch parent."""
+
+    state_path = root / ".cw/state.json"
+    if not _safe_regular_file(state_path):
+        return False
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    readiness = root / ".cw/runtime/READY_FOR_REVIEW.json"
+    gate = root / ".cw/gates" / f"{phase_id}.approved.json"
+    try:
+        gate.lstat()
+    except FileNotFoundError:
+        gate_absent = True
+    except OSError:
+        gate_absent = False
+    else:
+        gate_absent = False
+    return bool(
+        isinstance(state, dict)
+        and state.get("status") == "IN_PROGRESS"
+        and state.get("current_phase") == phase_id
+        and _safe_regular_file(readiness)
+        and gate_absent
+    )
+
+
+def _review_hook(
+    root: Path,
+    environment: dict[str, str],
+    *,
+    phase_id: str,
+    next_phase: str | None,
+    require_durable: bool = True,
+) -> int:
+    _record_fixture_evidence(root, "hook_start", "none")
+    diagnostic = root / ".cw/logs/last-error.json"
+    try:
+        previous_diagnostic = (
+            hashlib.sha256(diagnostic.read_bytes()).hexdigest()
+            if _safe_regular_file(diagnostic)
+            else None
+        )
+    except OSError:
+        previous_diagnostic = None
+    try:
+        executable = _acceptance_cw_executable()
+        completed = subprocess.run(
+            [str(executable), "review", "--hook"], cwd=root, env=environment,
+            text=True, capture_output=True, timeout=60, check=False,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        _record_fixture_evidence(root, "hook_start", "hook_spawn_failed")
+        print(_HOOK_FAILURE_MESSAGE, file=sys.stderr)
+        return _HOOK_CONTRACT_FAILURE
+    if completed.returncode != 0:
+        _record_fixture_evidence(root, "hook_exit", "hook_exit_nonzero")
+        print(_HOOK_FAILURE_MESSAGE, file=sys.stderr)
+        return _HOOK_CONTRACT_FAILURE
+    _record_fixture_evidence(root, "hook_exit", "none")
+    response_failure = _hook_response_failure(completed.stdout)
+    if response_failure is not None:
+        error_code, correlation_hash = _safe_hook_diagnostic(root, previous_diagnostic)
+        _record_fixture_evidence(
+            root,
+            "hook_exit",
+            response_failure,
+            cw_error_code=error_code,
+            correlation_sha256=correlation_hash,
+        )
+        print(_HOOK_FAILURE_MESSAGE, file=sys.stderr)
+        return _HOOK_CONTRACT_FAILURE
+    _record_fixture_evidence(root, "hook_envelope_valid", "none")
+    if require_durable and not _durable_review_postcondition(root, phase_id, next_phase):
+        parent_review = environment.get("CW_ACCEPTANCE_PARENT_REVIEW") == "1"
+        if not (parent_review and _parent_review_postcondition(root, phase_id)):
+            reason = "handoff_incompatible" if parent_review else "hook_contract_rejected"
+            if next_phase is None and _safe_regular_file(
+                root / ".cw/gates" / f"{phase_id}.approved.json"
+            ):
+                reason = "completion_not_written"
+            _record_fixture_evidence(root, "hook_envelope_valid", reason)
+            print(_HOOK_POSTCONDITION_MESSAGE, file=sys.stderr)
+            return _HOOK_POSTCONDITION_FAILURE
+    _record_fixture_evidence(
+        root,
+        "handoff_accepted" if environment.get("CW_ACCEPTANCE_PARENT_REVIEW") == "1"
+        else "completion_written",
+        "none",
+    )
+    return 0
 
 
 def _plan(root: Path) -> dict[str, Any]:
@@ -162,6 +543,7 @@ def _extension_plan(root: Path) -> dict[str, Any]:
 
 
 def _implement(root: Path, arguments: list[str]) -> int:
+    _record_fixture_evidence(root, "process_start", "none")
     scenario = _scenario()
     if scenario == "implementer_failure":
         print("fake implementer process failure", file=sys.stderr)
@@ -169,6 +551,18 @@ def _implement(root: Path, arguments: list[str]) -> int:
     if scenario == "implementer_timeout":
         time.sleep(float(os.environ.get("CW_FAKE_CODEX_SLEEP", "30")))
         return 0
+    try:
+        _acceptance_cw_executable()
+    except (OSError, ValueError):
+        _record_fixture_evidence(root, "process_start", "runtime_invalid")
+        print(_FIXTURE_FAILURE_MESSAGE, file=sys.stderr)
+        return _FIXTURE_FAILURE
+    _record_fixture_evidence(root, "runtime_verified", "none")
+    if not _acceptance_project_verified(root):
+        _record_fixture_evidence(root, "runtime_verified", "repository_invalid")
+        print(_FIXTURE_FAILURE_MESSAGE, file=sys.stderr)
+        return _FIXTURE_FAILURE
+    _record_fixture_evidence(root, "repository_verified", "none")
     state = json.loads((root / ".cw/state.json").read_text(encoding="utf-8"))
     plan = json.loads((root / ".codex/workflow/phases.yaml").read_text(encoding="utf-8"))
     phase = next(item for item in plan["phases"] if item["id"] == state["current_phase"])
@@ -202,19 +596,32 @@ def _implement(root: Path, arguments: list[str]) -> int:
         (root / ".cw/runtime/READY_FOR_REVIEW.json").write_text(
             json.dumps(readiness, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n",
         )
+        _record_fixture_evidence(root, "readiness_observed", "none")
         if scenario == "reviewer_infrastructure_failure":
             environment = {**os.environ, "CW_FAKE_CODEX_SCENARIO": scenario}
         else:
             environment = os.environ.copy()
-        completed = subprocess.run(
-            ["cw", "review", "--hook"], cwd=root, env=environment,
-            text=True, capture_output=True, timeout=60, check=False,
+        index = plan["phases"].index(phase)
+        next_phase = (
+            plan["phases"][index + 1]["id"]
+            if index + 1 < len(plan["phases"])
+            else None
         )
-        if completed.returncode:
-            print(completed.stderr[-2000:], file=sys.stderr)
-            return completed.returncode
+        hook_result = _review_hook(
+            root,
+            environment,
+            phase_id=phase["id"],
+            next_phase=next_phase,
+            require_durable=scenario == "success",
+        )
+        if hook_result:
+            return hook_result
+    else:
+        _record_fixture_evidence(root, "repository_verified", "readiness_missing")
     if "--json" in arguments:
         _emit({"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}})
+    if scenario != "missing_readiness":
+        _record_fixture_evidence(root, "process_exit", "none")
     return 0
 
 
@@ -259,4 +666,16 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        result = main()
+    except Exception:
+        if os.environ.get("CW_ACCEPTANCE_INVOCATION_ID") is None:
+            raise
+        project_root = Path(_option(sys.argv[1:], "--cd") or os.getcwd())
+        try:
+            _record_fixture_evidence(project_root, "process_start", "unexpected_exception")
+        except (OSError, ValueError):
+            pass
+        print(_FIXTURE_FAILURE_MESSAGE, file=sys.stderr)
+        result = _FIXTURE_FAILURE
+    raise SystemExit(result)

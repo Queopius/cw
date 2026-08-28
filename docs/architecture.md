@@ -21,6 +21,13 @@ adapts to narrower terminals.
 CW's engine and normal CLI use the Python standard library. The optional local
 MCP adapter adds its SDK only through the `mcp` packaging extra.
 
+Deterministic verification and semantic review are distinct trust domains. The
+Verification Executor owns authorized command execution, private temp/cache
+preflight, redaction, artifact binding, and append-only receipts. The Semantic
+Reviewer owns acceptance meaning, Completion Contract, scope, coherence,
+integrity, and risk. It receives a validated receipt and cannot execute project
+commands; managed command events invalidate its result before state accounting.
+
 ```text
 cw.cli      argument parsing and thin command orchestration
 cw.cli.commands  independently testable command implementations
@@ -28,6 +35,8 @@ cw.application UI-independent project scope, capabilities, operation results,
                authorization context, and stable adapter facade
 cw.ui       text/ANSI/JSON presentation
 cw.output_protocol versioned projection, redaction, pagination, serialization
+cw.checks.verification deterministic executor, private runtime, receipts
+cw.agents.reviewer semantic-only review and state transition
 cw.core     project identity, workflow, state, locks, gates, completion, persistence
 cw.planning repository inspection and plan proposal
 cw.checks   deterministic validation
