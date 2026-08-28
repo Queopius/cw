@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.18.0",
+      "changes": [
+        "Separated deterministic execution into a private Verification Executor with integrity-bound receipts while keeping the Semantic Reviewer unable to execute project commands.",
+        "Added governed classification and recovery for infrastructure failures without consuming semantic review or revision attempts.",
+        "Hardened cross-platform verification and sanitized diagnostics with safe binary and partial writes plus narrow exclusion of active RunRecorder operational records."
+      ]
+    },
+    {
       "version": "0.17.0",
       "changes": [
         "Added explicit, CAS-bound rebaseline recovery for a proven post-reopen state without changing the workflow or approving execution.",
