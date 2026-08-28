@@ -4,6 +4,8 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.18.0 — 2026-08-28
+
 - Separate deterministic command execution into a private Verification
   Executor with preflighted temp/cache roots and integrity-bound append-only
   receipts. The Semantic Reviewer consumes those receipts, treats repository
@@ -19,6 +21,8 @@ All notable changes to CW are documented here.
 - Recommend Core `0.18.0`. Plugin `0.1.0`, its 12 tools, `cw.remote.v1`,
   `cw.output.v1`, project schema `1`, and governance evidence schema `2` remain
   unchanged.
+
+## 0.17.0 — 2026-08-25
 
 - Add explicit `cw plan rebaseline recover` preview/apply flows for a proven
   `repair --reopen` state. Recovery requires the exact REVISE review digest,
