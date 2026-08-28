@@ -115,6 +115,45 @@ class CodexAdapterTests(unittest.TestCase):
             self.assertIsInstance(result, CodexRunResult)
             self.assertEqual("APPROVE", result.payload["decision"])
 
+    def test_reviewer_accepts_current_agent_message_stream_and_structured_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            schema = root / "schema.json"
+            schema.write_text("{}", encoding="utf-8")
+
+            def fake_run(command, **_kwargs):
+                output = Path(command[command.index("--output-last-message") + 1])
+                output.write_text(
+                    json.dumps({"decision": "APPROVE"}), encoding="utf-8"
+                )
+                stdout = "\n".join(
+                    (
+                        json.dumps({"type": "thread.started", "thread_id": "synthetic"}),
+                        json.dumps({"type": "turn.started"}),
+                        json.dumps(
+                            {
+                                "type": "item.completed",
+                                "item": {
+                                    "id": "item_0",
+                                    "type": "agent_message",
+                                    "text": "{\"decision\":\"APPROVE\"}",
+                                },
+                            }
+                        ),
+                        json.dumps({"type": "turn.completed", "usage": {}}),
+                    )
+                )
+                return subprocess.CompletedProcess(command, 0, stdout, "")
+
+            with patch(
+                "cw.adapters.codex.shutil.which", return_value="/usr/bin/codex"
+            ), patch("cw.adapters.codex.subprocess.run", side_effect=fake_run):
+                result = CodexAdapter(persist=False).run_reviewer(
+                    root, "review", schema, 10
+                )
+
+        self.assertEqual("APPROVE", result.payload["decision"])
+
     def test_reviewer_discards_apparent_approval_when_runtime_cleanup_fails(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

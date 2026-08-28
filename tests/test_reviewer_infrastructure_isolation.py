@@ -18,8 +18,11 @@ from cw.adapters.result import CodexResult
 from cw.agents.reviewer import reviewer_prompt, run_review
 from cw.checks.verification import (
     VerificationExecutor,
+    _LEGACY_PRIVATE_ENV,
     _cleanup_runtime,
     _git_metadata_snapshot,
+    _receipt_digest,
+    _runtime_environment,
     _safe_runtime,
     doctor_verification_runtime,
     private_runtime_directory,
@@ -92,7 +95,7 @@ class VerificationExecutorTests(unittest.TestCase):
         validation = VerificationExecutor().execute(
             self.repo.root, self.workflow, self.phase
         )
-        self.assertTrue(validation.passed, validation.errors)
+        self.assertTrue(validation.passed, (validation.errors, validation.checks))
         reference = validation.receipt["reference"]
         path = self.repo.root / reference
         original = path.read_bytes()
@@ -138,6 +141,27 @@ class VerificationExecutorTests(unittest.TestCase):
             )
         self.assertEqual(ErrorCode.INTEGRITY_ERROR, raised.exception.code)
 
+    def test_0181_receipt_environment_remains_valid_after_cache_extension(self) -> None:
+        validation = VerificationExecutor().execute(
+            self.repo.root, self.workflow, self.phase
+        )
+        reference = validation.receipt["reference"]
+        path = self.repo.root / reference
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["runtime"]["environment"] = list(_LEGACY_PRIVATE_ENV)
+        payload["receipt_sha256"] = _receipt_digest(payload)
+        atomic_json(path, payload)
+
+        validated = validate_verification_receipt(
+            self.repo.root,
+            self.workflow,
+            self.phase,
+            reference,
+            sha256_file(path),
+        )
+
+        self.assertEqual(list(_LEGACY_PRIVATE_ENV), validated["runtime"]["environment"])
+
     def test_runtime_environment_is_private_redacted_and_removed(self) -> None:
         captured: dict[str, str] = {}
         real_popen = __import__("subprocess").Popen
@@ -153,6 +177,11 @@ class VerificationExecutorTests(unittest.TestCase):
                             "TEMP",
                             "XDG_CACHE_HOME",
                             "COMPOSER_CACHE_DIR",
+                            "APP_CONFIG_CACHE",
+                            "APP_EVENTS_CACHE",
+                            "APP_PACKAGES_CACHE",
+                            "APP_ROUTES_CACHE",
+                            "APP_SERVICES_CACHE",
                         )
                     }
                 )
@@ -250,6 +279,116 @@ class VerificationExecutorTests(unittest.TestCase):
         validation = VerificationExecutor().execute(self.repo.root, workflow, mutation)
         self.assertFalse(validation.passed)
         self.assertEqual(ErrorCode.VERIFICATION_COMMAND_FAILED.value, validation.error_code)
+        self.assertIn("generated.txt", validation.checks[-1]["details"])
+
+    def test_bounded_php_and_testbench_caches_do_not_mask_product_mutations(self) -> None:
+        script = (
+            "[(path.parent.mkdir(parents=True, exist_ok=True), "
+            "path.open('a', encoding='utf-8').write('cache\\n')) "
+            "for path in map(__import__('pathlib').Path, ["
+            "'.phpunit.cache/test-run-history', "
+            "'.phpstan.cache/resultCache.php', "
+            "'vendor/orchestra/testbench-core/laravel/bootstrap/cache/services.php', "
+            "__import__('os').environ['APP_SERVICES_CACHE']])]"
+        )
+        phase = replace(
+            self.phase,
+            required_commands=(RequiredCommand(f"python3 -c {json.dumps(script)}", 20),),
+        )
+        workflow = replace(self.workflow, phases=(phase, *self.workflow.phases[1:]))
+        (
+            self.repo.root
+            / "vendor/orchestra/testbench-core/laravel/bootstrap/cache"
+        ).mkdir(parents=True)
+
+        validation = VerificationExecutor().execute(self.repo.root, workflow, phase)
+
+        self.assertTrue(validation.passed, (validation.errors, validation.checks))
+        self.assertEqual("cache\n", (self.repo.root / ".phpunit.cache/test-run-history").read_text())
+        self.assertEqual("cache\n", (self.repo.root / ".phpstan.cache/resultCache.php").read_text())
+        self.assertEqual(
+            "cache\n",
+            (
+                self.repo.root
+                / "vendor/orchestra/testbench-core/laravel/bootstrap/cache/services.php"
+            ).read_text(),
+        )
+        self.assertEqual("complete\n", self.repo.artifact().read_text())
+
+        (self.repo.root / ".gitignore").write_text(
+            "ignored-output\n", encoding="utf-8"
+        )
+        (self.repo.root / "vendor/orchestra/testbench-core/src").mkdir()
+        product_mutation = replace(
+            phase,
+            required_commands=(
+                RequiredCommand(
+                    "python3 -c '(open(\"ignored-output\", \"w\").write(\"x\"), open(\"vendor/orchestra/testbench-core/src/changed.php\", \"w\").write(\"x\"))'",
+                    20,
+                ),
+            ),
+        )
+        workflow = replace(
+            workflow, phases=(product_mutation, *workflow.phases[1:])
+        )
+        rejected = VerificationExecutor().execute(
+            self.repo.root, workflow, product_mutation
+        )
+        self.assertFalse(rejected.passed)
+        self.assertEqual(
+            ErrorCode.VERIFICATION_COMMAND_FAILED.value, rejected.error_code
+        )
+        self.assertIn("ignored-output", rejected.checks[-1]["details"])
+        self.assertIn(
+            "vendor/orchestra/testbench-core/src/changed.php",
+            rejected.checks[-1]["details"],
+        )
+
+    def test_ephemeral_cache_namespaces_reject_symlinks_and_hardlinks(self) -> None:
+        outside = self.repo.root.parent / "outside-cache"
+        outside.mkdir()
+        (self.repo.root / ".phpstan.cache").symlink_to(
+            outside, target_is_directory=True
+        )
+        validation = VerificationExecutor().execute(
+            self.repo.root, self.workflow, self.phase
+        )
+        self.assertFalse(validation.passed)
+        self.assertEqual(
+            ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR.value,
+            validation.error_code,
+        )
+        (self.repo.root / ".phpstan.cache").unlink()
+
+        cache = self.repo.root / ".phpunit.cache"
+        cache.mkdir()
+        source = outside / "shared-cache"
+        source.write_text("cache\n", encoding="utf-8")
+        os.link(source, cache / "test-run-history")
+        validation = VerificationExecutor().execute(
+            self.repo.root, self.workflow, self.phase
+        )
+        self.assertFalse(validation.passed)
+        self.assertEqual(
+            ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR.value,
+            validation.error_code,
+        )
+
+    def test_laravel_cache_environment_is_private_and_file_scoped(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary)
+            environment = _runtime_environment(runtime)
+            for name in (
+                "APP_CONFIG_CACHE",
+                "APP_EVENTS_CACHE",
+                "APP_PACKAGES_CACHE",
+                "APP_ROUTES_CACHE",
+                "APP_SERVICES_CACHE",
+            ):
+                path = Path(environment[name])
+                self.assertTrue(path.is_relative_to(runtime))
+                self.assertEqual(".php", path.suffix)
+                self.assertTrue(path.parent.is_dir())
 
     def test_concurrent_run_recorder_metadata_is_not_project_mutation(self) -> None:
         phase = replace(
@@ -668,6 +807,95 @@ class SemanticReviewerIsolationTests(unittest.TestCase):
             ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR, raised.exception.code
         )
 
+    def test_current_codex_agent_message_is_read_only_and_terminal(self) -> None:
+        stdout = "\n".join(
+            (
+                json.dumps({"type": "thread.started", "thread_id": "synthetic"}),
+                json.dumps({"type": "turn.started"}),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "id": "item_0",
+                            "type": "agent_message",
+                            "text": "{\"decision\":\"APPROVE\"}",
+                        },
+                    }
+                ),
+                json.dumps({"type": "turn.completed", "usage": {}}),
+            )
+        )
+        self.assertFalse(CodexAdapter._reviewer_executed_command(stdout))
+
+        incomplete = "\n".join(
+            (
+                json.dumps(
+                    {
+                        "type": "item.started",
+                        "item": {"id": "item_0", "type": "agent_message"},
+                    }
+                ),
+                json.dumps({"type": "turn.completed"}),
+            )
+        )
+        with self.assertRaises(CwError) as raised:
+            CodexAdapter._reviewer_executed_command(incomplete)
+        self.assertIn("no complete result", raised.exception.message)
+
+        invalid_narrative = "\n".join(
+            (
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "id": "item_0",
+                            "type": "agent_message",
+                            "text": "reviewed",
+                            "command": "python3 -c pass",
+                        },
+                    }
+                ),
+                json.dumps({"type": "turn.completed"}),
+            )
+        )
+        with self.assertRaises(CwError) as raised:
+            CodexAdapter._reviewer_executed_command(invalid_narrative)
+        self.assertIn("invalid agent_message", raised.exception.message)
+
+    def test_reviewer_rejects_every_mutating_item_and_names_unknown_types(self) -> None:
+        for event_type in ("item.started", "item.completed"):
+            for item_type in (
+                "command_execution",
+                "tool_call",
+                "mcp_tool_call",
+                "function_call",
+                "shell_command",
+            ):
+                with self.subTest(event=event_type, item=item_type):
+                    stdout = json.dumps(
+                        {"type": event_type, "item": {"type": item_type}}
+                    )
+                    self.assertTrue(CodexAdapter._reviewer_executed_command(stdout))
+
+        with self.assertRaises(CwError) as raised:
+            CodexAdapter._reviewer_executed_command(
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {"type": "future_read_only_item"},
+                    }
+                )
+            )
+        self.assertIn("future_read_only_item", raised.exception.message)
+
+        with self.assertRaises(CwError) as raised:
+            CodexAdapter._reviewer_executed_command(
+                json.dumps(
+                    {"type": "item.completed", "item": {"type": "secret/type"}}
+                )
+            )
+        self.assertIn("[invalid]", raised.exception.message)
+
     def test_reviewer_infrastructure_preserves_both_attempt_counters_and_readiness(
         self,
     ) -> None:
@@ -1049,7 +1277,7 @@ class PublicReviewerInfrastructureContractTests(unittest.TestCase):
 
     def test_public_reviewer_infrastructure_contracts(self) -> None:
         requirements = [
-        ("core-version", "VERSION", "0.18.1"),
+        ("core-version", "VERSION", "0.18.2"),
         ("plugin-version", "plugins/cw/VERSION", "0.1.0"),
         ("remote-protocol", "cw/remote/protocol.py", "cw.remote.v1"),
         ("output-schema", "cw/output_protocol.py", "cw.output.v1"),
