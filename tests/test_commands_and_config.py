@@ -17,7 +17,6 @@ from cw.core.config import load_policy
 from cw.core.errors import CwError, ErrorCode
 from cw.core.gates import create_gate
 from cw.core.models import RequiredCommand
-from cw.core.utils import sha256_file
 from cw.planning.planner import Planner
 from tests.helpers import TempRepo
 
@@ -125,7 +124,7 @@ class CommandSecurityTests(unittest.TestCase):
         finally:
             repo.close()
 
-    def test_validation_hashes_artifact_after_required_command(self):
+    def test_validation_rejects_artifact_mutated_by_required_command(self):
         repo = TempRepo(phases=1)
         try:
             artifact = repo.artifact(content="before\n")
@@ -140,9 +139,14 @@ class CommandSecurityTests(unittest.TestCase):
 
             validation = validate_phase(repo.root, workflow, phase)
 
-            self.assertTrue(validation.passed)
+            self.assertFalse(validation.passed)
+            self.assertEqual(
+                ErrorCode.VERIFICATION_COMMAND_FAILED.value,
+                validation.error_code,
+            )
             self.assertEqual("after\n", artifact.read_text(encoding="utf-8"))
-            self.assertEqual(sha256_file(artifact), validation.artifact_hashes["docs/phase-1.md"])
+            self.assertEqual({}, validation.artifact_hashes)
+            self.assertIn("docs/phase-1.md", validation.checks[-1]["details"])
         finally:
             repo.close()
 

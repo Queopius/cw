@@ -24,6 +24,19 @@
   "v0_18_expected": {
     "classification": "REVIEWER_INFRASTRUCTURE_ERROR",
     "attempts_consumed": 0,
+    "ephemeral_tool_caches": [
+      ".phpunit.cache/test-run-history",
+      ".phpstan.cache/resultCache.php",
+      "vendor/orchestra/testbench-core/laravel/bootstrap/cache/services.php"
+    ],
+    "laravel_cache_environment": [
+      "APP_CONFIG_CACHE",
+      "APP_EVENTS_CACHE",
+      "APP_PACKAGES_CACHE",
+      "APP_ROUTES_CACHE",
+      "APP_SERVICES_CACHE"
+    ],
+    "read_only_reviewer_item": "agent_message",
     "retry": "cw retry",
     "historical_recovery": "cw review recover-infrastructure",
     "automatic_approval": false,
