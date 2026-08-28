@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from cw.core.diagnostics import redact
+from cw.core.errors import ErrorCode
 from cw.core.platform import popen_process_group_kwargs, process_is_alive
 
 FAKE_CODEX = ROOT / "tests/fixtures/fake_codex/fake_codex.py"
@@ -57,6 +58,7 @@ class AcceptanceFailure(RuntimeError):
         envelope_code: str | None = None,
         envelope_correlation: str | None = None,
         error_fingerprint: str | None = None,
+        second_run: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.stage = stage or _OPERATION_STAGE.get()
@@ -70,6 +72,7 @@ class AcceptanceFailure(RuntimeError):
         self.envelope_code = envelope_code
         self.envelope_correlation = envelope_correlation
         self.error_fingerprint = error_fingerprint
+        self.second_run = second_run or {}
 
 
 def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str:
@@ -110,9 +113,24 @@ def _sanitize_detail(value: str, *, private_roots: tuple[Path, ...] = ()) -> str
 _MAX_DIAGNOSTIC_BYTES = 64 * 1024
 _SAFE_STAGE = re.compile(r"^[a-z][a-z0-9_.-]{0,80}$")
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,120}$")
+_SAFE_PHASE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$")
 _SAFE_CORRELATION_ID = re.compile(r"^[0-9a-f]{16}$")
 _SAFE_MESSAGES = {"Unexpected internal failure", "Verification Executor failed"}
 _REDACTED_MESSAGE = "Internal exception captured; message redacted."
+_PUBLIC_ERROR_CODES = {item.value for item in ErrorCode}
+_WORKFLOW_STATUSES = {
+    "UNINITIALIZED", "INITIALIZED", "PLANNING", "PLAN_PROPOSED", "READY",
+    "IN_PROGRESS", "READY_FOR_REVIEW", "REVIEWING", "REVISION_REQUIRED",
+    "APPROVED", "HUMAN_REVIEW_REQUIRED", "ERROR", "PAUSED",
+    "PLANNED_COMPLETE", "COMPLETION_REVIEW", "EXTENSION_PROPOSED",
+    "COMPLETION_BLOCKED", "COMPLETED", "UNKNOWN",
+}
+_SECOND_RUN_ENVELOPE_KINDS = {"success", "error", "invalid", "missing"}
+_SECOND_RUN_FAILURE_REASONS = {
+    "process_exit", "envelope_missing", "envelope_invalid", "hook_error",
+    "state_not_advanced", "readiness_not_consumed", "gate_missing",
+    "phase_mismatch", "unexpected_terminal_state", "artifact_binding_failed", "none",
+}
 
 
 @contextlib.contextmanager
@@ -226,6 +244,69 @@ def _correlation_id(value: Any) -> str | None:
         if isinstance(nested, dict) and (correlation := _correlation_id(nested)) is not None:
             return correlation
     return None
+
+
+def _second_run_defaults() -> dict[str, Any]:
+    return {
+        "second_run_exit_expected": False,
+        "second_run_envelope_kind": "missing",
+        "second_run_error_code_present": False,
+        "second_run_error_code": None,
+        "second_run_correlation_hash_present": False,
+        "pre_status": "UNKNOWN",
+        "post_status": "UNKNOWN",
+        "phase_changed": False,
+        "readiness_before": False,
+        "readiness_after": False,
+        "gate_before": False,
+        "gate_after": False,
+        "hook_postcondition_passed": False,
+        "second_run_failure_reason": "process_exit",
+    }
+
+
+def _second_run_envelope_metadata(stdout: str) -> dict[str, Any]:
+    """Classify one in-memory envelope without retaining its payload."""
+
+    result = _second_run_defaults()
+    if not stdout.strip():
+        return result
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        result.update(
+            second_run_envelope_kind="invalid",
+            second_run_failure_reason="envelope_invalid",
+        )
+        return result
+    if not isinstance(payload, dict):
+        result.update(
+            second_run_envelope_kind="invalid",
+            second_run_failure_reason="envelope_invalid",
+        )
+        return result
+    error = payload.get("error")
+    if isinstance(error, dict):
+        code = error.get("code")
+        safe_code = code if isinstance(code, str) and code in _PUBLIC_ERROR_CODES else None
+        correlation = _correlation_id(error)
+        result.update(
+            second_run_envelope_kind="error",
+            second_run_error_code_present=safe_code is not None,
+            second_run_error_code=safe_code,
+            second_run_correlation_hash_present=correlation is not None,
+            second_run_failure_reason="hook_error",
+        )
+        if correlation is not None:
+            result["correlation_id_sha256"] = hashlib.sha256(
+                correlation.encode("utf-8"),
+            ).hexdigest()
+        return result
+    result.update(
+        second_run_envelope_kind="success",
+        second_run_failure_reason="none",
+    )
+    return result
 
 
 def _relative_cw_path(value: Any) -> str | None:
@@ -431,6 +512,11 @@ def _run(
         ) from exc
     if completed.returncode not in expected:
         code, correlation = _failure_envelope(completed.stdout) if diagnostic_executable == "cw" else (None, None)
+        second_run = (
+            _second_run_envelope_metadata(completed.stdout)
+            if diagnostic_stage == "acceptance.operation.second_run"
+            else None
+        )
         raise AcceptanceFailure(
             "Acceptance command failed.",
             stage=diagnostic_stage,
@@ -443,6 +529,7 @@ def _run(
             envelope_code=code,
             envelope_correlation=correlation,
             error_fingerprint=before_error,
+            second_run=second_run,
         )
     return completed
 
@@ -667,7 +754,197 @@ def _safe_fixed_file_present(root: Path, relative: Path) -> bool:
     return True
 
 
-def _single_state_failure_stage(root: Path, state: dict[str, Any]) -> str:
+def _safe_project_evidence_present(root: Path, relative: Path) -> bool | None:
+    """Return fixed evidence presence without following or publishing its path."""
+
+    if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+        return None
+    canonical_root = _canonical_root(root)
+    candidate = canonical_root / relative
+    try:
+        candidate.relative_to(canonical_root)
+        cursor = canonical_root
+        for component in relative.parts[:-1]:
+            cursor /= component
+            if cursor.is_symlink():
+                return None
+        metadata = candidate.lstat()
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError):
+        return None
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        return None
+    return True
+
+
+def _second_run_snapshot(root: Path, expected_phase: str | None) -> dict[str, Any]:
+    state_safe = _safe_project_evidence_present(root, Path(".cw/state.json"))
+    try:
+        state = _state(root) if state_safe is True else {}
+    except (OSError, ValueError, json.JSONDecodeError, AcceptanceFailure):
+        state = {}
+    status = state.get("status")
+    safe_status = status if isinstance(status, str) and status in _WORKFLOW_STATUSES else "UNKNOWN"
+    phase = state.get("current_phase")
+    safe_phase = phase if isinstance(phase, str) and _SAFE_PHASE_IDENTIFIER.fullmatch(phase) else None
+    readiness = _safe_project_evidence_present(
+        root, Path(".cw/runtime/READY_FOR_REVIEW.json"),
+    )
+    gate = (
+        _safe_project_evidence_present(
+            root, Path(".cw/gates") / f"{expected_phase}.approved.json",
+        )
+        if isinstance(expected_phase, str) and _SAFE_PHASE_IDENTIFIER.fullmatch(expected_phase)
+        else False
+    )
+    return {
+        "status": safe_status,
+        "phase": safe_phase,
+        "readiness": readiness,
+        "gate": gate,
+        "binding_safe": state_safe is True and readiness is not None and gate is not None,
+    }
+
+
+def _run_second_phase(
+    cw: Path,
+    arguments: list[str],
+    *,
+    root: Path,
+    environment: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    pre = _second_run_snapshot(root, None)
+    expected_phase = pre["phase"]
+    pre = _second_run_snapshot(root, expected_phase)
+    try:
+        return _run(
+            [str(cw), *arguments],
+            cwd=root,
+            environment=environment,
+            timeout=240,
+            diagnostic_stage="acceptance.operation.second_run",
+            diagnostic_executable="cw",
+            diagnostic_command="run",
+        )
+    except AcceptanceFailure as error:
+        post = _second_run_snapshot(root, expected_phase)
+        metadata = {**_second_run_defaults(), **error.second_run}
+        phase_changed = (
+            expected_phase is not None
+            and expected_phase != post["phase"]
+        )
+        terminal = post["status"] in {"PLANNED_COMPLETE", "COMPLETED"}
+        hook_passed = bool(
+            post["binding_safe"]
+            and post["gate"] is True
+            and post["readiness"] is False
+            and (
+                (phase_changed and post["status"] == "IN_PROGRESS")
+                or (terminal and post["phase"] is None)
+            )
+        )
+        metadata.update({
+            "second_run_exit_expected": False,
+            "pre_status": pre["status"],
+            "post_status": post["status"],
+            "phase_changed": phase_changed,
+            "readiness_before": pre["readiness"] is True,
+            "readiness_after": post["readiness"] is True,
+            "gate_before": pre["gate"] is True,
+            "gate_after": post["gate"] is True,
+            "hook_postcondition_passed": hook_passed,
+        })
+        envelope_kind = metadata["second_run_envelope_kind"]
+        if not pre["binding_safe"] or not post["binding_safe"]:
+            reason = "artifact_binding_failed"
+        elif envelope_kind == "error":
+            reason = "hook_error"
+        elif post["readiness"] is True:
+            reason = "readiness_not_consumed"
+        elif post["status"] == "IN_PROGRESS" and post["gate"] is not True:
+            reason = "gate_missing"
+        elif terminal and post["phase"] is not None:
+            reason = "unexpected_terminal_state"
+        elif post["status"] == "IN_PROGRESS" and not phase_changed:
+            reason = "state_not_advanced"
+        elif phase_changed and not hook_passed:
+            reason = "phase_mismatch"
+        elif envelope_kind == "missing":
+            reason = "envelope_missing"
+        elif envelope_kind == "invalid":
+            reason = "envelope_invalid"
+        else:
+            reason = "process_exit"
+        metadata["second_run_failure_reason"] = reason
+        error.second_run = metadata
+        raise
+
+
+def _review_hook_failure_stage(
+    root: Path,
+    state: dict[str, Any],
+    expected_phase: str | None,
+) -> str:
+    prefix = "acceptance.operation.review_hook."
+    if (
+        not isinstance(expected_phase, str)
+        or not _SAFE_PHASE_IDENTIFIER.fullmatch(expected_phase)
+    ):
+        return prefix + "unknown"
+
+    completion = _safe_project_evidence_present(
+        root, Path(".cw/completion/completion.satisfied.json"),
+    )
+    gate = _safe_project_evidence_present(
+        root, Path(".cw/gates") / f"{expected_phase}.approved.json",
+    )
+    review_reference = state.get("last_review")
+    review: bool | None
+    if review_reference is None:
+        review = False
+    elif (
+        isinstance(review_reference, str)
+        and _SAFE_IDENTIFIER.fullmatch(review_reference.removeprefix(".").replace("/", "."))
+        and review_reference.startswith(".cw/reviews/")
+    ):
+        review = _safe_project_evidence_present(root, Path(review_reference))
+    else:
+        review = None
+
+    history = state.get("history", [])
+    advanced: bool | None = False
+    if not isinstance(history, list):
+        advanced = None
+    else:
+        for event in history:
+            if not isinstance(event, dict):
+                advanced = None
+                break
+            action = event.get("action")
+            phase = event.get("phase")
+            if action in {"approved", "human_approved"} and phase == expected_phase:
+                advanced = True
+                break
+
+    if completion is True:
+        return prefix + "completion_without_state"
+    if advanced is True and state.get("current_phase") == expected_phase:
+        return prefix + "state_regressed"
+    if gate is True and state.get("current_phase") == expected_phase:
+        return prefix + "gate_without_advance"
+    if review is True and gate is False:
+        return prefix + "review_without_gate"
+    if review is False and gate is False:
+        return prefix + "no_review"
+    return prefix + "unknown"
+
+
+def _single_state_failure_stage(
+    root: Path,
+    state: dict[str, Any],
+    expected_phase: str | None = None,
+) -> str:
     status = state.get("status")
     current_phase = state.get("current_phase")
     prefix = "acceptance.operation.single_state."
@@ -680,7 +957,15 @@ def _single_state_failure_stage(root: Path, state: dict[str, Any]) -> str:
         return prefix + ("planned_complete_gate_present" if present else "planned_complete_gate_absent")
     if status == "IN_PROGRESS":
         present = _safe_fixed_file_present(root, Path(".cw/runtime/READY_FOR_REVIEW.json"))
-        return prefix + ("in_progress_readiness_present" if present else "in_progress_readiness_absent")
+        if present:
+            return _review_hook_failure_stage(
+                root,
+                state,
+                expected_phase if expected_phase is not None else (
+                    current_phase if isinstance(current_phase, str) else None
+                ),
+            )
+        return prefix + "in_progress_readiness_absent"
     known = {
         "READY_FOR_REVIEW": "ready_for_review",
         "REVIEWING": "reviewing",
@@ -707,6 +992,9 @@ def _single_phase(
     name = "single phase" if cycle is None else f"single phase {cycle}"
     root = _repository(base, name, phase_environment)
     _prepare_plan(cw, root, phase_environment, 1)
+    initial_state = _state(root)
+    initial_phase = initial_state.get("current_phase")
+    expected_phase = initial_phase if isinstance(initial_phase, str) else None
     phase_environment["CW_FAKE_CODEX_SCENARIO"] = "success"
     with _operation_stage("acceptance.operation.first_run"):
         _run([str(cw)], cwd=root, environment=phase_environment)
@@ -715,7 +1003,7 @@ def _single_phase(
         if state.get("status") != "COMPLETED" or state.get("current_phase") is not None:
             raise AcceptanceFailure(
                 "single-phase state contract was not satisfied",
-                stage=_single_state_failure_stage(root, state),
+                stage=_single_state_failure_stage(root, state, expected_phase),
             )
     with _operation_stage("acceptance.operation.single_gate"):
         gates = sorted((root / ".cw/gates").glob("*.approved.json"))
@@ -760,14 +1048,17 @@ def _single_phase(
 
 
 def _multi_phase(cw: Path, base: Path, environment: dict[str, str]) -> None:
+    batch_environment = environment.copy()
+    batch_environment["CW_ACCEPTANCE_PARENT_REVIEW"] = "1"
     root = _repository(base, "multi phase", environment)
     _prepare_plan(cw, root, environment, 3)
-    environment["CW_FAKE_CODEX_SCENARIO"] = "success"
-    with _operation_stage("acceptance.operation.second_run"):
-        _run(
-            [str(cw), "run", "3", "--yes", "--non-interactive", "--no-color"],
-            cwd=root, environment=environment, timeout=240,
-        )
+    batch_environment["CW_FAKE_CODEX_SCENARIO"] = "success"
+    _run_second_phase(
+        cw,
+        ["run", "3", "--yes", "--non-interactive", "--no-color"],
+        root=root,
+        environment=batch_environment,
+    )
     with _operation_stage("acceptance.operation.multi_state"):
         state = _state(root)
         if state.get("status") != "COMPLETED" or state.get("current_phase") is not None:
@@ -785,11 +1076,12 @@ def _multi_phase(cw: Path, base: Path, environment: dict[str, str]) -> None:
 
     bounded = _repository(base, "multi phase until", environment)
     _prepare_plan(cw, bounded, environment, 3)
-    with _operation_stage("acceptance.operation.second_run"):
-        _run(
-            [str(cw), "run", "--until", "02-acceptance-2", "--yes", "--non-interactive", "--no-color"],
-            cwd=bounded, environment=environment, timeout=240,
-        )
+    _run_second_phase(
+        cw,
+        ["run", "--until", "02-acceptance-2", "--yes", "--non-interactive", "--no-color"],
+        root=bounded,
+        environment=batch_environment,
+    )
     with _operation_stage("acceptance.operation.until_state"):
         bounded_state = _state(bounded)
         if bounded_state.get("current_phase") != "03-acceptance-3":
@@ -977,6 +1269,7 @@ def _write_diagnostic(
         executable="unknown", command_name="unknown",
     )
     captured = _capture_cw_diagnostic(failure)
+    second_run = {**_second_run_defaults(), **failure.second_run}
     diagnostic = {
         "schema": "cw.acceptance-diagnostic.v1",
         "platform": platform.system(),
@@ -989,7 +1282,10 @@ def _write_diagnostic(
         "diagnostic_status": captured["diagnostic_status"],
         "diagnostic_source": captured["diagnostic_source"],
         "cw_error_code": captured.get("cw_error_code"),
-        "correlation_id_sha256": captured.get("correlation_id_sha256"),
+        "correlation_id_sha256": (
+            captured.get("correlation_id_sha256")
+            or second_run.get("correlation_id_sha256")
+        ),
         "exception_type": captured.get("exception_type") or type(exc).__name__,
         "module": captured.get("module"),
         "function": captured.get("function"),
@@ -1003,6 +1299,14 @@ def _write_diagnostic(
             "envelope_correlation_present", "last_error_changed", "last_error_safe_regular",
             "record_found", "correlation_match", "code_match", "traceback_frame_available",
             "binding_failure_reason",
+        )},
+        **{key: second_run[key] for key in (
+            "second_run_exit_expected", "second_run_envelope_kind",
+            "second_run_error_code_present", "second_run_error_code",
+            "second_run_correlation_hash_present", "pre_status", "post_status",
+            "phase_changed", "readiness_before", "readiness_after",
+            "gate_before", "gate_after", "hook_postcondition_passed",
+            "second_run_failure_reason",
         )},
     }
     serialized = json.dumps(diagnostic, ensure_ascii=False, indent=2) + "\n"
@@ -1024,6 +1328,11 @@ def _validate_diagnostic(diagnostic: dict[str, Any]) -> None:
         "envelope_correlation_present", "last_error_changed", "last_error_safe_regular",
         "record_found", "correlation_match", "code_match", "traceback_frame_available",
         "binding_failure_reason",
+        "second_run_exit_expected", "second_run_envelope_kind",
+        "second_run_error_code_present", "second_run_error_code",
+        "second_run_correlation_hash_present", "pre_status", "post_status",
+        "phase_changed", "readiness_before", "readiness_after", "gate_before",
+        "gate_after", "hook_postcondition_passed", "second_run_failure_reason",
     }
     if set(diagnostic) != required or diagnostic["schema"] != "cw.acceptance-diagnostic.v1":
         raise AcceptanceFailure("acceptance diagnostic has an invalid contract")
@@ -1038,8 +1347,25 @@ def _validate_diagnostic(diagnostic: dict[str, Any]) -> None:
     }
     if any(not isinstance(diagnostic[key], bool) for key in booleans):
         raise AcceptanceFailure("acceptance diagnostic has non-boolean binding metadata")
+    for key in (
+        "second_run_exit_expected", "phase_changed", "readiness_before",
+        "readiness_after", "gate_before", "gate_after", "hook_postcondition_passed",
+    ):
+        if not isinstance(diagnostic[key], bool):
+            raise AcceptanceFailure("acceptance diagnostic has non-boolean second-run metadata")
     if diagnostic["binding_failure_reason"] not in {"project_metadata_missing", "envelope_missing", "envelope_correlation_missing", "diagnostic_record_unchanged", "diagnostic_record_missing", "correlation_mismatch", "code_mismatch", "traceback_unavailable", "none"}:
         raise AcceptanceFailure("acceptance diagnostic has an invalid binding reason")
+    if (
+        diagnostic["second_run_envelope_kind"] not in _SECOND_RUN_ENVELOPE_KINDS
+        or diagnostic["second_run_failure_reason"] not in _SECOND_RUN_FAILURE_REASONS
+        or diagnostic["pre_status"] not in _WORKFLOW_STATUSES
+        or diagnostic["post_status"] not in _WORKFLOW_STATUSES
+        or (
+            diagnostic["second_run_error_code"] is not None
+            and diagnostic["second_run_error_code"] not in _PUBLIC_ERROR_CODES
+        )
+    ):
+        raise AcceptanceFailure("acceptance diagnostic has invalid second-run metadata")
 
 
 def run_acceptance(output: Path) -> tuple[dict[str, Any], int]:
