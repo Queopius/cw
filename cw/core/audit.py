@@ -26,6 +26,7 @@ EVENT_ACTIONS = {
     "plan_amended",
     "phase_artifacts_amended",
     "rebaseline_recovery_applied",
+    "semantic_review_superseded_as_infrastructure",
 }
 
 
@@ -242,6 +243,37 @@ def audit_history(root: Path, workflow: Workflow, state: dict[str, Any]) -> dict
             and (not isinstance(event.get("error_code"), str) or not isinstance(event.get("operation"), str))
         ):
             raise CwError(f"Workflow infrastructure event is invalid: {index}", ErrorCode.INVALID_STATE)
+        if action == "semantic_review_superseded_as_infrastructure":
+            from .review_infrastructure_recovery import (
+                validate_review_infrastructure_recovery_receipt,
+            )
+
+            recovery = event.get("recovery_receipt")
+            review = event.get("review")
+            backup = event.get("backup")
+            if (
+                not isinstance(recovery, str)
+                or not recovery.startswith(".cw/review-infrastructure-recoveries/")
+                or not isinstance(review, str)
+                or review not in review_references
+                or not isinstance(backup, str)
+                or not backup.startswith(".cw/backups/")
+                or event.get("attempt_restored") != 1
+            ):
+                raise CwError(
+                    f"Review infrastructure recovery event is invalid: {index}",
+                    ErrorCode.INVALID_STATE,
+                )
+            recovery_path = safe_project_path(root, recovery, must_exist=True)
+            receipt = load_json(recovery_path)
+            if not isinstance(receipt, dict) or receipt.get("backup") != backup:
+                raise CwError(
+                    f"Review infrastructure recovery event is inconsistent: {index}",
+                    ErrorCode.INVALID_STATE,
+                )
+            validate_review_infrastructure_recovery_receipt(
+                root, recovery_path, receipt, require_current_state=False
+            )
         if action in {"retry_started", "readiness_resume_started"} and not isinstance(event.get("operation"), str):
             raise CwError(f"Workflow retry event is invalid: {index}", ErrorCode.INVALID_STATE)
         if action == "plan_rebaseline_proposed":

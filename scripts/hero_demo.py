@@ -10,16 +10,16 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPOSITORY_ROOT))
 
 from cw.core.diagnostics import redact
-
 
 SCHEMA_VERSION = 1
 RECORDING_KIND = "real-workflow-recording"
@@ -39,7 +39,7 @@ SECRET_PATTERNS = (
 
 
 def recording_is_patch_compatible(recorded: str, current: str) -> bool:
-    """Allow a real recording to remain evidence across non-UX patch releases."""
+    """Retain a validated real recording for at most one compatible minor line."""
 
     release_version = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
     recorded_match = release_version.fullmatch(recorded)
@@ -48,7 +48,11 @@ def recording_is_patch_compatible(recorded: str, current: str) -> bool:
         return False
     recorded_parts = tuple(int(part) for part in recorded_match.groups())
     current_parts = tuple(int(part) for part in current_match.groups())
-    return recorded_parts[:2] == current_parts[:2] and recorded_parts <= current_parts
+    return (
+        recorded_parts[0] == current_parts[0]
+        and recorded_parts <= current_parts
+        and current_parts[1] - recorded_parts[1] <= 1
+    )
 
 
 class HeroDemoError(RuntimeError):

@@ -50,6 +50,10 @@ stored diagnostic proves that retry is safe.
 | `IMPLEMENTER_PROCESS_ERROR` | Implementer exited without a terminal review or valid readiness | Yes, when recorded | `cw retry`; valid readiness proceeds directly to review |
 | `EXECUTION_INTERRUPTED` | User requested a safe foreground stop | No automatic retry | Inspect status, then intentionally continue |
 | `NOTHING_TO_VALIDATE` | Current phase has no valid readiness to validate | No | Run/finish implementation or follow current status |
+| `VERIFICATION_COMMAND_FAILED` | An authorized deterministic command returned non-zero | No infrastructure retry | Correct the implementation and validate again |
+| `VERIFICATION_INFRASTRUCTURE_ERROR` | Private runtime/temp/cache preflight or process startup failed | Yes, when recorded | `cw retry` without consuming semantic attempts |
+| `VERIFICATION_TIMEOUT` | An authorized deterministic command exceeded its timeout | Yes, when recorded | `cw retry` |
+| `INTEGRITY_ERROR` | Receipt or recovery evidence identity/integrity is incompatible | No | Preserve evidence and diagnose the exact mismatch |
 
 ## Review errors
 
@@ -58,6 +62,8 @@ stored diagnostic proves that retry is safe.
 | `REVIEW_TIMEOUT` | Independent review exceeded its timeout | Yes, when recorded | `cw retry` without rerunning valid implementation |
 | `REVIEWER_NETWORK_ERROR` | Reviewer network request failed | Yes, when recorded | `cw retry` |
 | `REVIEWER_PROCESS_ERROR` | Reviewer exited or returned invalid structured output | Context | Inspect diagnostics; retry if CW preserved valid readiness |
+| `REVIEWER_INFRASTRUCTURE_ERROR` | Reviewer isolation failed or it attempted deterministic command execution | Yes, when recorded | `cw retry`; the semantic result is discarded |
+| `REVIEWER_INVALID_OUTPUT` | Reviewer returned missing, malformed, or non-object structured output | Yes, when recorded | Inspect redacted diagnostics, then `cw retry` |
 
 Semantic `REVISE` is not an infrastructure error code. It is a valid reviewer
 decision and consumes one semantic revision attempt.

@@ -52,14 +52,22 @@ The order is fixed:
 2. dependency gates;
 3. artifact declaration and existence;
 4. repository containment and symlink safety;
-5. approved workflow commands;
+5. approved workflow commands in a private Verification Executor runtime;
 6. dependency gate revalidation;
-7. final SHA-256 artifact capture;
-8. independent semantic review.
+7. final SHA-256 artifact capture and append-only Verification Receipt;
+8. receipt integrity validation;
+9. independent semantic review.
 
 Commands run before authoritative hashes are captured. CW then revalidates
 dependencies, preventing a test or formatter from silently changing current
 artifacts or previously approved evidence.
+
+The Verification Executor uses canonical argv with `shell=False`, closed stdin,
+bounded timeouts and the canonical repository root. Each execution receives a
+new owner-only temp/cache root via `TMPDIR`, `TMP`, `TEMP`, `XDG_CACHE_HOME`, and
+`COMPOSER_CACHE_DIR`. A write/fsync/rename/delete preflight must pass before a
+command starts. Only redacted stream digests—not secrets, host paths, or full
+output—enter the receipt.
 
 ## Independent reviewer contract
 
@@ -72,6 +80,8 @@ The reviewer uses a separate ephemeral `codex exec` process with:
 | Hooks | disabled |
 | Output | validated structured schema |
 | Scope | current-phase artifacts and configured review paths |
+| Commands | prohibited; any observed command event discards the result |
+| Deterministic evidence | validated Verification Receipt |
 
 It evaluates every acceptance criterion and every blocking criterion exactly
 once. Each evidence entry must begin with an existing repository-relative file
@@ -92,11 +102,23 @@ These outcomes have different accounting:
 | `APPROVE` | Criteria pass | No additional revision | CW verifies and creates the gate |
 | `REVISE` | Implementation needs semantic correction | Yes | Same phase runs again |
 | `HUMAN_REVIEW_REQUIRED` | Policy requires a person | No | Explicit human approval |
-| Timeout/network/process/schema failure | Review could not produce a decision | No | `cw retry` when classified retryable |
+| Verification infrastructure/timeout | Executor did not produce authoritative evidence | No | `cw retry` |
+| Reviewer timeout/network/process/invalid output/command event | Review could not produce a semantic decision | No | `cw retry` |
 
 Infrastructure failures preserve valid session-bound readiness so retry can run
 only the reviewer. If the implementer exits after writing readiness but before
 the Stop hook completes, retry also proceeds directly to review.
+
+Repository content is hostile input to the reviewer. Instructions in Markdown,
+artifacts, fixtures, logs, or source cannot alter its mandate. The reviewer
+evaluates acceptance semantics, scope, Completion Contract, artifacts,
+coherence, integrity, and risk; it neither reruns deterministic checks nor
+approves merely because they passed.
+
+Historical misclassification is corrected only with [`cw review
+recover-infrastructure`](reviewer-infrastructure.md). Recovery and retry are
+separate: recovery repairs append-only evidence and accounting; retry performs
+the later fresh verification/review operation.
 
 !!! note "Optional integrations"
     Optional MCP startup or authentication diagnostics cannot turn an otherwise

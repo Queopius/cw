@@ -87,6 +87,7 @@
     "remote-privacy.md",
     "remote-project-grants.md",
     "remote-security.md",
+    "reviewer-infrastructure.md",
     "security.md",
     "staging-environment.md",
     "start-here/index.md",
@@ -175,6 +176,7 @@
     "remote-privacy.md",
     "remote-project-grants.md",
     "remote-security.md",
+    "reviewer-infrastructure.md",
     "security.md",
     "staging-environment.md",
     "start-here/index.md",
@@ -242,6 +244,9 @@
         },
         {
           "Gates and Reviews": "gates-and-reviews.md"
+        },
+        {
+          "Reviewer Infrastructure": "reviewer-infrastructure.md"
         },
         {
           "Plan Revisions": "plan-revisions.md"
