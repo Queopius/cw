@@ -28,10 +28,25 @@ from cw.execution.events import ExecutionEvent, ExecutionEventType
 
 RECEIPT_SCHEMA = "cw.verification-receipt.v1"
 RECEIPT_DIR = ".cw/verification-receipts"
-_PRIVATE_ENV = (
+_LEGACY_PRIVATE_ENV = (
     "TMPDIR", "TMP", "TEMP", "XDG_CACHE_HOME", "COMPOSER_CACHE_DIR",
     "MYPY_CACHE_DIR", "PIP_CACHE_DIR", "PYTHONPYCACHEPREFIX", "RUFF_CACHE_DIR",
 )
+_LARAVEL_CACHE_ENV = (
+    "APP_CONFIG_CACHE", "APP_EVENTS_CACHE", "APP_PACKAGES_CACHE",
+    "APP_ROUTES_CACHE", "APP_SERVICES_CACHE",
+)
+_PRIVATE_ENV = (*_LEGACY_PRIVATE_ENV, *_LARAVEL_CACHE_ENV)
+_EPHEMERAL_CACHE_PREFIXES = (".phpunit.cache", ".phpstan.cache")
+_EPHEMERAL_CACHE_FILES = {
+    ".phpunit.result.cache",
+    "vendor/orchestra/testbench-core/laravel/bootstrap/cache/config.php",
+    "vendor/orchestra/testbench-core/laravel/bootstrap/cache/events.php",
+    "vendor/orchestra/testbench-core/laravel/bootstrap/cache/packages.php",
+    "vendor/orchestra/testbench-core/laravel/bootstrap/cache/routes.php",
+    "vendor/orchestra/testbench-core/laravel/bootstrap/cache/routes-v7.php",
+    "vendor/orchestra/testbench-core/laravel/bootstrap/cache/services.php",
+}
 _RECEIPT_FIELDS = {
     "schema_version", "schema", "receipt_id", "correlation_id", "created_at",
     "workflow_id", "workflow_sha256", "state_sha256_before", "plan_revision_id",
@@ -116,7 +131,8 @@ def _runtime_environment(runtime: Path) -> dict[str, str]:
     cache = runtime / "cache"
     temporary = runtime / "tmp"
     composer = cache / "composer"
-    for directory in (home, cache, temporary, composer):
+    laravel = cache / "laravel"
+    for directory in (home, cache, temporary, composer, laravel):
         directory.mkdir(mode=0o700)
         _safe_runtime(directory)
     environment["HOME"] = str(home)
@@ -135,6 +151,15 @@ def _runtime_environment(runtime: Path) -> dict[str, str]:
     for path in values.values():
         path.mkdir(mode=0o700, parents=True, exist_ok=True)
     environment.update({name: str(path) for name, path in values.items()})
+    environment.update(
+        {
+            "APP_CONFIG_CACHE": str(laravel / "config.php"),
+            "APP_EVENTS_CACHE": str(laravel / "events.php"),
+            "APP_PACKAGES_CACHE": str(laravel / "packages.php"),
+            "APP_ROUTES_CACHE": str(laravel / "routes.php"),
+            "APP_SERVICES_CACHE": str(laravel / "services.php"),
+        }
+    )
     return environment
 
 
@@ -203,6 +228,57 @@ def _record_runtime_cleanup_failure(result: ValidationResult, error: CwError) ->
     )
 
 
+def _is_safe_ephemeral_cache_path(root: Path, path: Path, reference: str) -> bool:
+    recognized = reference in _EPHEMERAL_CACHE_FILES or any(
+        reference == prefix or reference.startswith(prefix + "/")
+        for prefix in _EPHEMERAL_CACHE_PREFIXES
+    )
+    if not recognized:
+        return False
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=True))
+    except (OSError, ValueError):
+        return False
+    candidate = path
+    while candidate != root:
+        if candidate.is_symlink():
+            return False
+        candidate = candidate.parent
+    metadata = path.lstat()
+    if stat.S_ISREG(metadata.st_mode):
+        return metadata.st_nlink == 1
+    return stat.S_ISDIR(metadata.st_mode)
+
+
+def _validate_ephemeral_cache_namespaces(root: Path) -> None:
+    for reference in _EPHEMERAL_CACHE_PREFIXES:
+        namespace = root / reference
+        if not namespace.exists() and not namespace.is_symlink():
+            continue
+        candidates = (namespace, *namespace.rglob("*"))
+        for candidate in candidates:
+            metadata = candidate.lstat()
+            regular = stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1
+            if not (regular or stat.S_ISDIR(metadata.st_mode)):
+                raise CwError(
+                    "Verification cache namespace is unsafe",
+                    ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR,
+                    "Run: cw retry",
+                    details=f"Cache path: {reference}",
+                )
+    for reference in _EPHEMERAL_CACHE_FILES:
+        candidate = root / reference
+        if not candidate.exists() and not candidate.is_symlink():
+            continue
+        if not _is_safe_ephemeral_cache_path(root, candidate, reference):
+            raise CwError(
+                "Verification cache file is unsafe",
+                ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR,
+                "Run: cw retry",
+                details=f"Cache path: {reference}",
+            )
+
+
 def _project_snapshot(
     root: Path, allowed_mutations: tuple[str, ...] = ()
 ) -> dict[str, tuple[str, int, str | None]]:
@@ -228,11 +304,31 @@ def _project_snapshot(
             continue
         if active_run_temporary:
             continue
+        if _is_safe_ephemeral_cache_path(root, path, reference):
+            continue
         metadata = path.lstat()
         kind = "symlink" if stat.S_ISLNK(metadata.st_mode) else "directory" if stat.S_ISDIR(metadata.st_mode) else "file" if stat.S_ISREG(metadata.st_mode) else "special"
         digest = sha256_file(path) if kind == "file" else None
         snapshot[reference] = (kind, stat.S_IMODE(metadata.st_mode), digest)
     return snapshot
+
+
+def _snapshot_changes(
+    before: dict[str, tuple[str, int, str | None]],
+    after: dict[str, tuple[str, int, str | None]],
+) -> list[str]:
+    return sorted(
+        reference
+        for reference in before.keys() | after.keys()
+        if before.get(reference) != after.get(reference)
+    )
+
+
+def _snapshot_change_diagnostic(changes: list[str], *, limit: int = 20) -> str:
+    visible = [redact(reference) or "[redacted]" for reference in changes[:limit]]
+    if len(changes) > limit:
+        visible.append(f"… and {len(changes) - limit} more")
+    return "Changed paths: " + ", ".join(visible)
 
 def _git_metadata_snapshot(root: Path) -> dict[str, tuple[str, int, str | None]]:
     """Snapshot the administrative metadata of precisely ``root``'s Git worktree."""
@@ -558,7 +654,8 @@ def validate_verification_receipt(
         or set(runtime) != {"id", "private", "cache_isolated", "environment"}
         or runtime.get("private") is not True
         or runtime.get("cache_isolated") is not True
-        or runtime.get("environment") != list(_PRIVATE_ENV)
+        or runtime.get("environment")
+        not in (list(_LEGACY_PRIVATE_ENV), list(_PRIVATE_ENV))
     ):
         raise CwError(
             "Verification receipt preflight is invalid", ErrorCode.INTEGRITY_ERROR
@@ -630,7 +727,9 @@ class VerificationExecutor:
             # them inside the classified boundary so platform filesystem or
             # Git failures cannot escape as an unstructured CLI internal error.
             state_sha = sha256_file(root / ".cw/state.json")
+            _validate_ephemeral_cache_namespaces(root)
             project_before = _project_snapshot(root, phase.artifacts)
+            artifacts_before = artifact_hashes(root, phase.artifacts)
             git_before = _git_metadata_snapshot(root)
             validate_dependencies(root, workflow, phase)
             result.checks.append({"name": "Previous gates", "status": "passed"})
@@ -748,11 +847,22 @@ class VerificationExecutor:
                     )
             stage = "integrity"
             validate_dependencies(root, workflow, phase)
-            if _project_snapshot(root, phase.artifacts) != project_before:
+            _validate_ephemeral_cache_namespaces(root)
+            artifacts_after = artifact_hashes(root, phase.artifacts)
+            project_after = _project_snapshot(root, phase.artifacts)
+            project_changes = _snapshot_changes(project_before, project_after)
+            artifact_changes = sorted(
+                reference
+                for reference in artifacts_before.keys() | artifacts_after.keys()
+                if artifacts_before.get(reference) != artifacts_after.get(reference)
+            )
+            all_changes = sorted(set(project_changes) | set(artifact_changes))
+            if all_changes:
                 raise CwError(
                     "Verification command mutated the project",
                     ErrorCode.VERIFICATION_COMMAND_FAILED,
                     "Restore project files and configure tool caches under the private runtime.",
+                    details=_snapshot_change_diagnostic(all_changes),
                 )
             if _git_metadata_snapshot(root) != git_before:
                 raise CwError(
@@ -827,17 +937,18 @@ class VerificationExecutor:
         except CwError as exc:
             result.error_code = exc.code.value
             result.errors.append(exc.message)
-            result.checks.append(
-                {
-                    "name": "Verification",
-                    "status": "failed",
-                    "phase": stage,
-                    "operation": "verification-executor",
-                    "detail": exc.message,
-                    "error_code": exc.code.value,
-                    "next_action": exc.hint or "Run: cw validate",
-                }
-            )
+            diagnostic = {
+                "name": "Verification",
+                "status": "failed",
+                "phase": stage,
+                "operation": "verification-executor",
+                "detail": exc.message,
+                "error_code": exc.code.value,
+                "next_action": exc.hint or "Run: cw validate",
+            }
+            if exc.details:
+                diagnostic["details"] = redact(exc.details)
+            result.checks.append(diagnostic)
         except OSError as exc:
             error = CwError(
                 "Verification runtime preflight failed",

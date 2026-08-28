@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import threading
@@ -407,6 +408,8 @@ class CodexAdapter:
             "item.started", "item.completed", "message.created", "message.completed",
         }
         saw_result = False
+        saw_completed_narrative = False
+        saw_terminal = False
         for line in stdout.splitlines():
             if not line.strip():
                 continue
@@ -419,6 +422,8 @@ class CodexAdapter:
             event_type = event.get("type")
             if event_type is not None and event_type not in allowed_events:
                 raise CwError("Reviewer event stream contains an unknown event", ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR)
+            if event_type in {"turn.completed", "response.completed"}:
+                saw_terminal = True
             item = event.get("item")
             if item is not None and not isinstance(item, dict):
                 raise CwError("Reviewer event stream contains an invalid item", ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR)
@@ -426,13 +431,38 @@ class CodexAdapter:
                 item_type = item.get("type")
                 if item_type in {"command_execution", "tool_call", "mcp_tool_call", "function_call", "shell_command"}:
                     return True
-                if item_type is not None and item_type not in {"message", "reasoning", "output_text"}:
-                    raise CwError("Reviewer event stream contains an unknown item", ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR)
+                if item_type is not None and item_type not in {
+                    "message", "reasoning", "output_text", "agent_message",
+                }:
+                    label = (
+                        item_type
+                        if isinstance(item_type, str)
+                        and re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", item_type)
+                        else "[invalid]"
+                    )
+                    raise CwError(
+                        f"Reviewer event stream contains an unknown item type: {label}",
+                        ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR,
+                    )
+                if item_type == "agent_message":
+                    if set(item) - {"id", "type", "text"} or (
+                        event_type == "item.completed"
+                        and not isinstance(item.get("text"), str)
+                    ):
+                        raise CwError(
+                            "Reviewer event stream contains an invalid agent_message",
+                            ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR,
+                        )
+                if (
+                    event_type in {"item.completed", "message.completed"}
+                    and item_type in {"message", "output_text", "agent_message"}
+                ):
+                    saw_completed_narrative = True
             if event.get("decision") is not None:
                 if saw_result:
                     raise CwError("Reviewer event stream contains multiple results", ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR)
                 saw_result = True
-        if stdout and not saw_result:
+        if stdout and not (saw_result or (saw_completed_narrative and saw_terminal)):
             raise CwError("Reviewer event stream has no complete result", ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR)
         return False
 

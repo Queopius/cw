@@ -30,6 +30,13 @@ performs a staged smoke test, and atomically changes `current`. Failure leaves
 the running installation selected. The previous healthy version remains for
 rollback and retention is bounded.
 
+Core 0.18.2 preserves project schema 1 and reads 0.18.1 verification receipts,
+legacy readiness/reviewer infrastructure records, and pending human-authorized
+legacy retries. Its Verification Executor isolates narrowly recognized
+PHPUnit, PHPStan, Laravel, and Testbench caches, and its read-only Semantic
+Reviewer accepts the current narrative-only Codex `agent_message` event while
+remaining fail-closed for executable or unknown event types.
+
 Core 0.18.1 preserves project schema 1 and reads legacy readiness/reviewer
 infrastructure records. Existing receipt-free readiness is reverified once by
 the Verification Executor before semantic review. Managed installation,

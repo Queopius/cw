@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.18.2",
+      "changes": [
+        "Redirected Laravel and Testbench cache files into the private Verification Executor runtime and bounded tolerated cache output to explicit safe PHPUnit, PHPStan, and Testbench paths.",
+        "Accepted the current narrative-only Codex agent_message event while keeping command, tool, MCP, malformed, and unknown event types fail-closed.",
+        "Preserved 0.18.1 verification receipt compatibility and pending legacy retry authorization semantics without consuming attempts for infrastructure failures."
+      ]
+    },
+    {
       "version": "0.18.1",
       "changes": [
         "Aligned the immutable Release Check environment with CI by installing the pinned benchmark tokenizer before running the complete test suite."
