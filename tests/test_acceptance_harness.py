@@ -760,6 +760,8 @@ class AcceptanceHarnessTests(unittest.TestCase):
             "invocation_sha256": invocation_hash,
             "last_stage": "hook_exit",
             "failure_reason": "hook_exit_nonzero",
+            "cw_error_code": None,
+            "correlation_sha256": None,
         }
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -767,7 +769,12 @@ class AcceptanceHarnessTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_text(json.dumps(payload), encoding="utf-8")
             self.assertEqual(
-                {"last_stage": "hook_exit", "failure_reason": "hook_exit_nonzero"},
+                {
+                    "last_stage": "hook_exit",
+                    "failure_reason": "hook_exit_nonzero",
+                    "cw_error_code": None,
+                    "correlation_sha256": None,
+                },
                 _fixture_evidence(root, invocation_hash, None),
             )
             fingerprint = sha256(path.read_text(encoding="utf-8").encode()).hexdigest()
@@ -785,6 +792,8 @@ class AcceptanceHarnessTests(unittest.TestCase):
             "invocation_sha256": invocation_hash,
             "last_stage": "process_start",
             "failure_reason": "none",
+            "cw_error_code": None,
+            "correlation_sha256": None,
         })
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -829,6 +838,8 @@ class AcceptanceHarnessTests(unittest.TestCase):
                     "invocation_sha256": invocation_hash,
                     "last_stage": "hook_exit",
                     "failure_reason": "hook_exit_nonzero",
+                    "cw_error_code": None,
+                    "correlation_sha256": None,
                 }), encoding="utf-8")
                 raise AcceptanceFailure(
                     "private failure", stage="acceptance.operation.first_run",
@@ -866,6 +877,61 @@ class AcceptanceHarnessTests(unittest.TestCase):
         self.assertFalse(any(key.startswith("second_run_") for key in diagnostic))
         for private in (*self.canaries, "private-cw", "CW_ACCEPTANCE_INVOCATION_ID"):
             self.assertNotIn(private, json.dumps(diagnostic))
+
+    def test_first_run_uses_safe_nested_hook_identity_when_outer_stream_is_invalid(self):
+        correlation_hash = sha256(b"nested-correlation").hexdigest()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cw/runtime").mkdir(parents=True)
+            (root / ".cw/gates").mkdir()
+            (root / ".cw/state.json").write_text(
+                json.dumps({"status": "READY", "current_phase": "01-phase"}),
+                encoding="utf-8",
+            )
+
+            def fail(_command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                environment = kwargs["environment"]
+                assert isinstance(environment, dict)
+                invocation_hash = sha256(
+                    environment["CW_ACCEPTANCE_INVOCATION_ID"].encode("ascii"),
+                ).hexdigest()
+                (root / ".cw/runtime/acceptance-fixture-evidence.json").write_text(
+                    json.dumps({
+                        "schema_version": 1,
+                        "invocation_sha256": invocation_hash,
+                        "last_stage": "hook_exit",
+                        "failure_reason": "hook_contract_rejected",
+                        "cw_error_code": "VERIFICATION_INFRASTRUCTURE_ERROR",
+                        "correlation_sha256": correlation_hash,
+                    }),
+                    encoding="utf-8",
+                )
+                raise AcceptanceFailure(
+                    "private failure",
+                    stage="acceptance.operation.first_run",
+                    exit_code=1,
+                    invocation=_InvocationKind.FIRST_RUN,
+                    first_run={
+                        **_first_run_defaults(),
+                        "first_run_envelope_kind": "invalid",
+                    },
+                )
+
+            with patch("scripts.run_acceptance._run", side_effect=fail), self.assertRaises(
+                AcceptanceFailure,
+            ) as raised:
+                _run_first_phase(Path("cw"), root=root, environment={})
+            output = root / "artifacts/compatibility-report.json"
+            _write_diagnostic(output, raised.exception, base=root, source_commit="unused")
+            diagnostic = json.loads(
+                output.with_name("compatibility-diagnostic.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual("VERIFICATION_INFRASTRUCTURE_ERROR", diagnostic["first_run_error_code"])
+        self.assertTrue(diagnostic["first_run_error_code_present"])
+        self.assertTrue(diagnostic["first_run_correlation_hash_present"])
+        self.assertEqual(correlation_hash, diagnostic["correlation_id_sha256"])
+        self.assertEqual("hook_contract", diagnostic["first_run_failure_reason"])
+        self.assertFalse(any(key.startswith("second_run_") for key in diagnostic))
 
     def test_interrupt_failures_have_specific_safe_stages(self):
         cases = {

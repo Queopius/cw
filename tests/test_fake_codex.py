@@ -124,7 +124,10 @@ class FakeCodexContractTests(unittest.TestCase):
 
     def test_implementer_reaches_hook_contract_without_publishing_hook_output(self):
         canary = "HOOK_PRIVATE_CANARY"
-        valid = json.dumps({"continue": False, "stopReason": canary})
+        valid = json.dumps({
+            "continue": False,
+            "stopReason": "CW phase review completed. Run: cw status",
+        })
         invalid_values = (
             "{}", "{not-json", valid + valid, "[]",
             json.dumps({"continue": True, "stopReason": canary}),
@@ -221,7 +224,10 @@ class FakeCodexContractTests(unittest.TestCase):
 
     def test_valid_hook_response_without_durable_transition_fails_closed(self):
         canary = "HOOK_PRIVATE_CANARY"
-        valid = json.dumps({"continue": False, "stopReason": canary})
+        valid = json.dumps({
+            "continue": False,
+            "stopReason": "CW phase review completed. Run: cw status",
+        })
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _executable, environment = self._runtime_identity(root)
@@ -245,7 +251,10 @@ class FakeCodexContractTests(unittest.TestCase):
 
     def test_batch_parent_may_own_the_deferred_review_transition(self):
         canary = "HOOK_PRIVATE_CANARY"
-        valid = json.dumps({"continue": False, "stopReason": canary})
+        valid = json.dumps({
+            "continue": False,
+            "stopReason": "CW phase review completed. Run: cw status",
+        })
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _executable, environment = self._runtime_identity(root)
@@ -271,7 +280,10 @@ class FakeCodexContractTests(unittest.TestCase):
             self.assertNotIn(canary, stdout.getvalue() + stderr.getvalue())
 
     def test_batch_parent_handoff_rejects_incompatible_durable_evidence(self):
-        valid = json.dumps({"continue": False, "stopReason": "private reason"})
+        valid = json.dumps({
+            "continue": False,
+            "stopReason": "CW phase review completed. Run: cw status",
+        })
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _executable, environment = self._runtime_identity(root)
@@ -324,10 +336,13 @@ class FakeCodexContractTests(unittest.TestCase):
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual({
                 "schema_version", "invocation_sha256", "last_stage", "failure_reason",
+                "cw_error_code", "correlation_sha256",
             }, set(payload))
             self.assertEqual(sha256(invocation.encode("ascii")).hexdigest(), payload["invocation_sha256"])
             self.assertEqual("hook_exit", payload["last_stage"])
             self.assertEqual("hook_exit_nonzero", payload["failure_reason"])
+            self.assertIsNone(payload["cw_error_code"])
+            self.assertIsNone(payload["correlation_sha256"])
             self.assertNotIn(invocation, path.read_text(encoding="utf-8"))
 
     def test_fixture_evidence_completes_partial_binary_writes(self):
@@ -425,8 +440,58 @@ class FakeCodexContractTests(unittest.TestCase):
                 self.assertNotIn("STDERR_PRIVATE_CANARY", serialized)
                 self.assertNotIn(str(root), serialized)
 
+    def test_controlled_hook_error_preserves_only_code_and_correlation_hash(self):
+        correlation = "41e0163899520133"
+        response = json.dumps({
+            "continue": False,
+            "stopReason": "Review hook durable postcondition failed. Run: cw status",
+            "systemMessage": "Review hook durable postcondition failed. Run: cw status",
+        })
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _executable, environment = self._runtime_identity(root)
+            self._implementer_project(root)
+            environment["CW_ACCEPTANCE_INVOCATION_ID"] = "d" * 64
+
+            def controlled_error(*_args, **_kwargs):
+                logs = root / ".cw/logs"
+                logs.mkdir()
+                (logs / "last-error.json").write_text(json.dumps({
+                    "schema_version": 1,
+                    "source": "review",
+                    "code": "VERIFICATION_INFRASTRUCTURE_ERROR",
+                    "correlation_id": correlation,
+                    "message": "PRIVATE_MESSAGE",
+                }), encoding="utf-8")
+                return subprocess.CompletedProcess(["cw"], 0, response, "PRIVATE_STDERR")
+
+            with patch.dict(os.environ, environment, clear=False), patch(
+                "tests.fixtures.fake_codex.fake_codex.subprocess.run",
+                side_effect=controlled_error,
+            ), contextlib.redirect_stderr(io.StringIO()):
+                result = fake_codex._review_hook(
+                    root,
+                    os.environ.copy(),
+                    phase_id="01-acceptance-1",
+                    next_phase=None,
+                )
+            payload = json.loads(
+                (root / ".cw/runtime/acceptance-fixture-evidence.json").read_text(
+                    encoding="utf-8",
+                )
+            )
+        self.assertEqual(fake_codex._HOOK_CONTRACT_FAILURE, result)
+        self.assertEqual("hook_contract_rejected", payload["failure_reason"])
+        self.assertEqual("VERIFICATION_INFRASTRUCTURE_ERROR", payload["cw_error_code"])
+        self.assertEqual(sha256(correlation.encode("ascii")).hexdigest(), payload["correlation_sha256"])
+        self.assertNotIn(correlation, json.dumps(payload))
+        self.assertNotIn("PRIVATE", json.dumps(payload))
+
     def test_hook_spawn_handoff_and_completion_failures_are_distinct(self):
-        valid = json.dumps({"continue": False, "stopReason": "PRIVATE_REASON"})
+        valid = json.dumps({
+            "continue": False,
+            "stopReason": "CW phase review completed. Run: cw status",
+        })
         cases = (
             (OSError("PRIVATE_PATH"), {}, False, "hook_spawn_failed"),
             (
@@ -531,7 +596,10 @@ class FakeCodexContractTests(unittest.TestCase):
 
     def test_successful_implementer_records_process_exit_without_private_payload(self):
         canary = "HOOK_PRIVATE_CANARY"
-        valid = json.dumps({"continue": False, "stopReason": canary})
+        valid = json.dumps({
+            "continue": False,
+            "stopReason": "CW phase review completed. Run: cw status",
+        })
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _executable, environment = self._runtime_identity(root)

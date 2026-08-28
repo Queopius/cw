@@ -35,6 +35,37 @@ _EVIDENCE_REASONS = {
     "hook_contract_rejected", "handoff_incompatible", "completion_not_written",
     "unexpected_exception", "none",
 }
+_PUBLIC_ERROR_CODES = {
+    "AUTHORIZATION_REQUIRED", "BATCH_INTERRUPTED", "BATCH_REVISION_EXHAUSTED",
+    "BATCH_TIME_EXHAUSTED", "BATCH_TOO_LARGE", "CODEX_CONFIG_ERROR",
+    "CODEX_NOT_FOUND", "COMPLETION_CONTRACT_CHANGE_REQUIRES_REBUILD",
+    "EXECUTION_INTERRUPTED", "FORBIDDEN_PLAN_CHANGE", "HOOK_UNTRUSTED",
+    "IMPLEMENTER_PROCESS_ERROR", "INTEGRITY_ERROR", "INTERNAL_ERROR",
+    "INVALID_ARTIFACT", "INVALID_GATE", "INVALID_STATE", "LOCKED",
+    "MCP_AUTH_REQUIRED", "MCP_DISABLED", "MCP_NOT_CONFIGURED",
+    "MCP_OPTIONAL_UNAVAILABLE", "MCP_REQUIRED_UNAVAILABLE", "MCP_SERVER_ERROR",
+    "MCP_TRANSPORT_ERROR", "NOTHING_TO_VALIDATE", "OPERATION_CONFLICT",
+    "PLANNER_NETWORK_ERROR", "PLANNER_PROCESS_ERROR", "PLANNER_SCHEMA_ERROR",
+    "PLANNER_TRANSPORT_ERROR", "PLAN_AMEND_INTEGRITY_ERROR",
+    "PLAN_AMEND_ROLLBACK_FAILED", "PLAN_REBASELINE_REQUIRED", "PLAN_REQUIRED",
+    "PLAN_REVISION_INVALID", "PLAN_TIMEOUT", "PLAN_UNCLEAR",
+    "PROJECT_SCOPE_VIOLATION", "PROTECTED_PATH_MODIFIED", "REVIEWER_INFRASTRUCTURE_ERROR",
+    "REVIEWER_INVALID_OUTPUT", "REVIEWER_NETWORK_ERROR", "REVIEWER_PROCESS_ERROR",
+    "REVIEW_TIMEOUT", "RUNTIME_NOT_WRITABLE", "SCHEMA_VALIDATION_ERROR",
+    "SCHEMA_VERSION_ERROR", "STALE_STATE_SHA", "STALE_WORKFLOW_SHA",
+    "STATE_INCONSISTENT", "SUPERSESSION_INVALID", "TRANSACTION_RECOVERY_REQUIRED",
+    "UPDATE_CHECKSUM_ERROR", "UPDATE_CHECK_ERROR", "UPDATE_DEVELOPMENT_INSTALL",
+    "UPDATE_DOWNLOAD_ERROR", "UPDATE_INCOMPATIBLE", "UPDATE_INSTALL_ERROR",
+    "UPDATE_MANIFEST_ERROR", "UPDATE_ROLLBACK_ERROR", "UPDATE_SIGNATURE_ERROR",
+    "UPDATE_SMOKE_TEST_ERROR", "USAGE_ERROR", "VERIFICATION_COMMAND_FAILED",
+    "VERIFICATION_INFRASTRUCTURE_ERROR", "VERIFICATION_TIMEOUT", "WORKFLOW_ERROR",
+    "WORKFLOW_PROJECT_MISMATCH",
+}
+_CORRELATION_ID = re.compile(r"^[0-9a-f]{16}$")
+_HOOK_SUCCESS_REASONS = {
+    "CW independent review requires revision. Run: cw history",
+    "CW phase review completed. Run: cw status",
+}
 
 
 def _write_all(descriptor: int, payload: bytes) -> None:
@@ -57,7 +88,14 @@ def _fixture_evidence_path(root: Path) -> Path:
     return runtime / _EVIDENCE_NAME
 
 
-def _record_fixture_evidence(root: Path, last_stage: str, failure_reason: str) -> bool:
+def _record_fixture_evidence(
+    root: Path,
+    last_stage: str,
+    failure_reason: str,
+    *,
+    cw_error_code: str | None = None,
+    correlation_sha256: str | None = None,
+) -> bool:
     """Atomically persist only closed acceptance evidence for the active invocation."""
 
     invocation = os.environ.get("CW_ACCEPTANCE_INVOCATION_ID")
@@ -67,12 +105,18 @@ def _record_fixture_evidence(root: Path, last_stage: str, failure_reason: str) -
         raise OSError("invalid fixture invocation identity")
     if last_stage not in _EVIDENCE_STAGES or failure_reason not in _EVIDENCE_REASONS:
         raise ValueError("invalid fixture evidence enum")
+    if cw_error_code is not None and cw_error_code not in _PUBLIC_ERROR_CODES:
+        raise ValueError("invalid fixture error code")
+    if correlation_sha256 is not None and not re.fullmatch(r"[0-9a-f]{64}", correlation_sha256):
+        raise ValueError("invalid fixture correlation hash")
     invocation_hash = hashlib.sha256(invocation.encode("ascii")).hexdigest()
     payload = json.dumps({
         "schema_version": 1,
         "invocation_sha256": invocation_hash,
         "last_stage": last_stage,
         "failure_reason": failure_reason,
+        "cw_error_code": cw_error_code,
+        "correlation_sha256": correlation_sha256,
     }, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
     destination = _fixture_evidence_path(root)
     temporary = destination.with_name(f".{_EVIDENCE_NAME}.{invocation_hash[:16]}.tmp")
@@ -116,6 +160,41 @@ def _record_fixture_evidence(root: Path, last_stage: str, failure_reason: str) -
         except FileNotFoundError:
             pass
     return True
+
+
+def _safe_hook_diagnostic(
+    root: Path,
+    previous_fingerprint: str | None,
+) -> tuple[str | None, str | None]:
+    """Extract only allowlisted identity from the diagnostic written by this hook."""
+
+    path = root / ".cw/logs/last-error.json"
+    if not _safe_regular_file(path):
+        return None, None
+    try:
+        payload_bytes = path.read_bytes()
+    except OSError:
+        return None, None
+    if len(payload_bytes) > 16_384:
+        return None, None
+    fingerprint = hashlib.sha256(payload_bytes).hexdigest()
+    if fingerprint == previous_fingerprint:
+        return None, None
+    try:
+        payload = json.loads(payload_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, None
+    if not isinstance(payload, dict) or payload.get("source") != "review":
+        return None, None
+    code = payload.get("code")
+    correlation = payload.get("correlation_id")
+    safe_code = code if isinstance(code, str) and code in _PUBLIC_ERROR_CODES else None
+    safe_hash = (
+        hashlib.sha256(correlation.encode("ascii")).hexdigest()
+        if isinstance(correlation, str) and _CORRELATION_ID.fullmatch(correlation)
+        else None
+    )
+    return safe_code, safe_hash
 
 
 def _acceptance_project_verified(root: Path) -> bool:
@@ -208,6 +287,8 @@ def _hook_response_failure(value: str) -> str | None:
         or not isinstance(payload.get("stopReason"), str)
     ):
         return "hook_contract_rejected"
+    if payload["stopReason"] not in _HOOK_SUCCESS_REASONS:
+        return "hook_contract_rejected"
     return None
 
 
@@ -284,6 +365,15 @@ def _review_hook(
     require_durable: bool = True,
 ) -> int:
     _record_fixture_evidence(root, "hook_start", "none")
+    diagnostic = root / ".cw/logs/last-error.json"
+    try:
+        previous_diagnostic = (
+            hashlib.sha256(diagnostic.read_bytes()).hexdigest()
+            if _safe_regular_file(diagnostic)
+            else None
+        )
+    except OSError:
+        previous_diagnostic = None
     try:
         executable = _acceptance_cw_executable()
         completed = subprocess.run(
@@ -301,7 +391,14 @@ def _review_hook(
     _record_fixture_evidence(root, "hook_exit", "none")
     response_failure = _hook_response_failure(completed.stdout)
     if response_failure is not None:
-        _record_fixture_evidence(root, "hook_exit", response_failure)
+        error_code, correlation_hash = _safe_hook_diagnostic(root, previous_diagnostic)
+        _record_fixture_evidence(
+            root,
+            "hook_exit",
+            response_failure,
+            cw_error_code=error_code,
+            correlation_sha256=correlation_hash,
+        )
         print(_HOOK_FAILURE_MESSAGE, file=sys.stderr)
         return _HOOK_CONTRACT_FAILURE
     _record_fixture_evidence(root, "hook_envelope_valid", "none")

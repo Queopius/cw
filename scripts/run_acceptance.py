@@ -938,12 +938,17 @@ def _fixture_evidence(
         payload = json.loads(text)
     except json.JSONDecodeError:
         return None
-    required = {"schema_version", "invocation_sha256", "last_stage", "failure_reason"}
+    required = {
+        "schema_version", "invocation_sha256", "last_stage", "failure_reason",
+        "cw_error_code", "correlation_sha256",
+    }
     if not isinstance(payload, dict) or set(payload) != required:
         return None
     last_stage = payload.get("last_stage")
     failure_reason = payload.get("failure_reason")
     stored_hash = payload.get("invocation_sha256")
+    error_code = payload.get("cw_error_code")
+    correlation_hash = payload.get("correlation_sha256")
     if not (
         payload.get("schema_version") == 1
         and isinstance(stored_hash, str)
@@ -951,9 +956,20 @@ def _fixture_evidence(
         and hmac.compare_digest(stored_hash, invocation_sha256)
         and last_stage in _FIRST_RUN_FIXTURE_STAGES
         and failure_reason in _FIRST_RUN_FIXTURE_REASONS
+        and (error_code is None or error_code in _PUBLIC_ERROR_CODES)
+        and (
+            correlation_hash is None
+            or isinstance(correlation_hash, str)
+            and re.fullmatch(r"[0-9a-f]{64}", correlation_hash)
+        )
     ):
         return None
-    return {"last_stage": last_stage, "failure_reason": failure_reason}
+    return {
+        "last_stage": last_stage,
+        "failure_reason": failure_reason,
+        "cw_error_code": error_code,
+        "correlation_sha256": correlation_hash,
+    }
 
 
 def _second_run_snapshot(root: Path, expected_phase: str | None) -> dict[str, Any]:
@@ -1056,6 +1072,12 @@ def _run_first_phase(
             "first_run_readiness_present": post["readiness"] is True,
             "first_run_gate_present": post["gate"] is True,
         })
+        if evidence and metadata["first_run_error_code"] is None:
+            metadata["first_run_error_code"] = evidence["cw_error_code"]
+            metadata["first_run_error_code_present"] = evidence["cw_error_code"] is not None
+        if evidence and evidence["correlation_sha256"] is not None:
+            metadata["correlation_id_sha256"] = evidence["correlation_sha256"]
+            metadata["first_run_correlation_hash_present"] = True
         metadata["first_run_failure_reason"] = _first_run_failure_reason(
             metadata["first_run_envelope_kind"],
             evidence["failure_reason"] if evidence else None,
