@@ -118,6 +118,35 @@ def _durable_review_postcondition(
     )
 
 
+def _parent_review_postcondition(root: Path, phase_id: str) -> bool:
+    """Accept only the exact intermediate state owned by the batch parent."""
+
+    state_path = root / ".cw/state.json"
+    if not _safe_regular_file(state_path):
+        return False
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    readiness = root / ".cw/runtime/READY_FOR_REVIEW.json"
+    gate = root / ".cw/gates" / f"{phase_id}.approved.json"
+    try:
+        gate.lstat()
+    except FileNotFoundError:
+        gate_absent = True
+    except OSError:
+        gate_absent = False
+    else:
+        gate_absent = False
+    return bool(
+        isinstance(state, dict)
+        and state.get("status") == "IN_PROGRESS"
+        and state.get("current_phase") == phase_id
+        and _safe_regular_file(readiness)
+        and gate_absent
+    )
+
+
 def _review_hook(
     root: Path,
     environment: dict[str, str],
@@ -139,8 +168,10 @@ def _review_hook(
         print(_HOOK_FAILURE_MESSAGE, file=sys.stderr)
         return _HOOK_CONTRACT_FAILURE
     if require_durable and not _durable_review_postcondition(root, phase_id, next_phase):
-        print(_HOOK_POSTCONDITION_MESSAGE, file=sys.stderr)
-        return _HOOK_POSTCONDITION_FAILURE
+        parent_review = environment.get("CW_ACCEPTANCE_PARENT_REVIEW") == "1"
+        if not (parent_review and _parent_review_postcondition(root, phase_id)):
+            print(_HOOK_POSTCONDITION_MESSAGE, file=sys.stderr)
+            return _HOOK_POSTCONDITION_FAILURE
     return 0
 
 

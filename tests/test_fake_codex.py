@@ -242,6 +242,73 @@ class FakeCodexContractTests(unittest.TestCase):
             self.assertEqual(fake_codex._HOOK_POSTCONDITION_MESSAGE + "\n", stderr.getvalue())
             self.assertNotIn(canary, stderr.getvalue())
 
+    def test_batch_parent_may_own_the_deferred_review_transition(self):
+        canary = "HOOK_PRIVATE_CANARY"
+        valid = json.dumps({"continue": False, "stopReason": canary})
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _executable, environment = self._runtime_identity(root)
+            self._implementer_project(root)
+            readiness = root / ".cw/runtime/READY_FOR_REVIEW.json"
+            readiness.write_text("{}", encoding="utf-8")
+            environment["CW_ACCEPTANCE_PARENT_REVIEW"] = "1"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch.dict(os.environ, environment, clear=False), patch(
+                "tests.fixtures.fake_codex.fake_codex.subprocess.run",
+                return_value=subprocess.CompletedProcess(["cw"], 0, valid, canary),
+            ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                result = fake_codex._review_hook(
+                    root,
+                    os.environ.copy(),
+                    phase_id="01-acceptance-1",
+                    next_phase=None,
+                )
+            self.assertEqual(0, result)
+            self.assertEqual("", stdout.getvalue())
+            self.assertEqual("", stderr.getvalue())
+            self.assertNotIn(canary, stdout.getvalue() + stderr.getvalue())
+
+    def test_batch_parent_handoff_rejects_incompatible_durable_evidence(self):
+        valid = json.dumps({"continue": False, "stopReason": "private reason"})
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _executable, environment = self._runtime_identity(root)
+            environment["CW_ACCEPTANCE_PARENT_REVIEW"] = "1"
+            cases = ("readiness_missing", "gate_present", "phase_changed", "error")
+            for case in cases:
+                with self.subTest(case=case):
+                    self._implementer_project(root)
+                    readiness = root / ".cw/runtime/READY_FOR_REVIEW.json"
+                    readiness.unlink(missing_ok=True)
+                    gate = root / ".cw/gates/01-acceptance-1.approved.json"
+                    gate.unlink(missing_ok=True)
+                    if case != "readiness_missing":
+                        readiness.write_text("{}", encoding="utf-8")
+                    if case == "gate_present":
+                        gate.parent.mkdir(parents=True, exist_ok=True)
+                        gate.write_text("{}", encoding="utf-8")
+                    if case in {"phase_changed", "error"}:
+                        status = "ERROR" if case == "error" else "IN_PROGRESS"
+                        phase = "01-acceptance-1" if case == "error" else "02-acceptance-2"
+                        (root / ".cw/state.json").write_text(
+                            json.dumps({"status": status, "current_phase": phase}),
+                            encoding="utf-8",
+                        )
+                    stderr = io.StringIO()
+                    with patch.dict(os.environ, environment, clear=False), patch(
+                        "tests.fixtures.fake_codex.fake_codex.subprocess.run",
+                        return_value=subprocess.CompletedProcess(["cw"], 0, valid, ""),
+                    ), contextlib.redirect_stderr(stderr):
+                        result = fake_codex._review_hook(
+                            root,
+                            os.environ.copy(),
+                            phase_id="01-acceptance-1",
+                            next_phase=None,
+                        )
+                    self.assertEqual(fake_codex._HOOK_POSTCONDITION_FAILURE, result)
+                    self.assertEqual(fake_codex._HOOK_POSTCONDITION_MESSAGE + "\n", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

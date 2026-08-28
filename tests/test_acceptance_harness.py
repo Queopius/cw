@@ -22,8 +22,11 @@ from scripts.run_acceptance import (
     _result,
     _review_hook_failure_stage,
     _run,
+    _run_second_phase,
     _safe_fixed_file_present,
     _safe_regular_text,
+    _second_run_defaults,
+    _second_run_envelope_metadata,
     _single_phase,
     _single_phase_cycles,
     _single_state_failure_stage,
@@ -548,6 +551,103 @@ class AcceptanceHarnessTests(unittest.TestCase):
         self.assertTrue(all(type(diagnostic[field]) is bool for field in fields))
         self.assertEqual("project_metadata_missing", diagnostic["binding_failure_reason"])
         diagnostic["binding_failure_reason"] = "not-an-enum"
+        with self.assertRaises(AcceptanceFailure):
+            _validate_diagnostic(diagnostic)
+
+    def test_second_run_envelope_classification_is_single_document_and_allowlisted(self):
+        correlation = "41e0163899520133"
+        error = _second_run_envelope_metadata(json.dumps({
+            "error": {"code": "INTEGRITY_ERROR", "correlation_id": correlation},
+        }))
+        self.assertEqual("error", error["second_run_envelope_kind"])
+        self.assertEqual("INTEGRITY_ERROR", error["second_run_error_code"])
+        self.assertTrue(error["second_run_error_code_present"])
+        self.assertTrue(error["second_run_correlation_hash_present"])
+        self.assertNotIn(correlation, json.dumps(error))
+        self.assertEqual(
+            "success",
+            _second_run_envelope_metadata(json.dumps({"ok": True, "data": {}}))[
+                "second_run_envelope_kind"
+            ],
+        )
+        self.assertEqual("missing", _second_run_envelope_metadata("")["second_run_envelope_kind"])
+        for value in ("{", "{}{}", "[]"):
+            self.assertEqual(
+                "invalid",
+                _second_run_envelope_metadata(value)["second_run_envelope_kind"],
+            )
+
+    def test_second_run_preserves_first_safe_failed_condition(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cw/runtime").mkdir(parents=True)
+            (root / ".cw/gates").mkdir()
+            state_path = root / ".cw/state.json"
+            state_path.write_text(
+                json.dumps({"status": "READY", "current_phase": "01-phase"}),
+                encoding="utf-8",
+            )
+            readiness = root / ".cw/runtime/READY_FOR_REVIEW.json"
+            readiness.write_text("{}", encoding="utf-8")
+            failure = AcceptanceFailure(
+                "private process output",
+                stage="acceptance.operation.second_run",
+                executable="cw",
+                command_name="run",
+                exit_code=1,
+                second_run={
+                    **_second_run_defaults(),
+                    "second_run_envelope_kind": "success",
+                },
+            )
+            with patch("scripts.run_acceptance._run", side_effect=failure) as invoked, self.assertRaises(
+                AcceptanceFailure,
+            ) as raised:
+                _run_second_phase(Path("cw"), ["run", "3"], root=root, environment={})
+        metadata = raised.exception.second_run
+        self.assertEqual(["cw", "run", "3"], invoked.call_args.args[0])
+        self.assertNotIn("--output=json", invoked.call_args.args[0])
+        self.assertEqual("readiness_not_consumed", metadata["second_run_failure_reason"])
+        self.assertTrue(metadata["readiness_before"])
+        self.assertTrue(metadata["readiness_after"])
+        self.assertFalse(metadata["gate_after"])
+        self.assertFalse(metadata["phase_changed"])
+        self.assertFalse(metadata["hook_postcondition_passed"])
+
+    def test_second_run_artifact_contains_only_typed_safe_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "artifacts/compatibility-report.json"
+            failure = self._failure(root)
+            failure.stage = "acceptance.operation.second_run"
+            failure.second_run = {
+                **_second_run_defaults(),
+                "second_run_envelope_kind": "error",
+                "second_run_error_code_present": True,
+                "second_run_error_code": "INTEGRITY_ERROR",
+                "second_run_failure_reason": "hook_error",
+            }
+            _write_diagnostic(output, failure, base=root, source_commit="unused")
+            diagnostic = json.loads(
+                output.with_name("compatibility-diagnostic.json").read_text(encoding="utf-8")
+            )
+        booleans = (
+            "second_run_exit_expected", "second_run_error_code_present",
+            "second_run_correlation_hash_present", "phase_changed",
+            "readiness_before", "readiness_after", "gate_before", "gate_after",
+            "hook_postcondition_passed",
+        )
+        self.assertTrue(all(type(diagnostic[key]) is bool for key in booleans))
+        self.assertEqual("hook_error", diagnostic["second_run_failure_reason"])
+        self.assertNotIn(self.canaries[0], json.dumps(diagnostic))
+        for reason in (
+            "process_exit", "envelope_missing", "envelope_invalid", "hook_error",
+            "state_not_advanced", "readiness_not_consumed", "gate_missing",
+            "phase_mismatch", "unexpected_terminal_state", "artifact_binding_failed", "none",
+        ):
+            diagnostic["second_run_failure_reason"] = reason
+            _validate_diagnostic(diagnostic)
+        diagnostic["second_run_failure_reason"] = "private-reason"
         with self.assertRaises(AcceptanceFailure):
             _validate_diagnostic(diagnostic)
 
