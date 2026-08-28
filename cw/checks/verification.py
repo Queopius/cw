@@ -208,6 +208,8 @@ def _project_snapshot(
 ) -> dict[str, tuple[str, int, str | None]]:
     excluded = {
         ".git",
+        ".cw/logs/runs",
+        ".cw/runtime/active-run.json",
         ".cw/runtime/operations",
         ".cw/runtime/verification",
         ".cw/validation",
@@ -217,7 +219,14 @@ def _project_snapshot(
     snapshot: dict[str, tuple[str, int, str | None]] = {}
     for path in sorted(root.rglob("*")):
         reference = path.relative_to(root).as_posix()
+        active_run_temporary = (
+            path.parent == root / ".cw/runtime"
+            and path.name.startswith(".active-run.json.")
+            and path.name.endswith(".tmp")
+        )
         if any(reference == item or reference.startswith(item + "/") for item in excluded):
+            continue
+        if active_run_temporary:
             continue
         metadata = path.lstat()
         kind = "symlink" if stat.S_ISLNK(metadata.st_mode) else "directory" if stat.S_ISDIR(metadata.st_mode) else "file" if stat.S_ISREG(metadata.st_mode) else "special"
