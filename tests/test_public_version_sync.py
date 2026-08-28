@@ -34,6 +34,7 @@ class PublicVersionSyncTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.root / ".github/workflows/release-check.yml").write_text(
+            "python -m pip install . tiktoken==0.14.0\n"
             "python scripts/build_release.py --output dist --channel stable --component core\n"
             "python scripts/validate_release_assets.py --directory dist --component core\n"
             "assets=(\n"
@@ -129,6 +130,16 @@ class PublicVersionSyncTests(unittest.TestCase):
         issues = " ".join(self.issues())
         self.assertIn("four Core assets", issues)
         self.assertIn("Core-only profile", issues)
+
+    def test_workflow_must_install_pinned_benchmark_tokenizer(self) -> None:
+        workflow = self.root / ".github/workflows/release-check.yml"
+        workflow.write_text(
+            workflow.read_text(encoding="utf-8").replace(
+                "python -m pip install . tiktoken==0.14.0\n", ""
+            ),
+            encoding="utf-8",
+        )
+        self.assertIn("pinned benchmark tokenizer", " ".join(self.issues()))
 
 
 if __name__ == "__main__":

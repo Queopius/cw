@@ -4,6 +4,12 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.18.1 — 2026-08-28
+
+- Install the pinned benchmark tokenizer in the immutable Release Check before
+  running the complete test suite, matching the dependency contract already
+  exercised by CI.
+
 ## 0.18.0 — 2026-08-28
 
 - Separate deterministic command execution into a private Verification
