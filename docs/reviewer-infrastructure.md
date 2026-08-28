@@ -12,6 +12,12 @@ It uses canonical argv without a shell, closed stdin, timeouts, the canonical
 repository root, and a fresh owner-only runtime. Temp and cache variables point
 inside that runtime. Preflight proves type, ownership, containment, absence of
 symlink/hardlink hazards, write, fsync, rename, and delete before execution.
+Laravel/Testbench cache variables (`APP_CONFIG_CACHE`, `APP_EVENTS_CACHE`,
+`APP_PACKAGES_CACHE`, `APP_ROUTES_CACHE`, and `APP_SERVICES_CACHE`) point to
+private runtime files. CW tolerates only safe outputs in the explicit PHPUnit,
+PHPStan, and Testbench cache paths needed for compatibility; it does not ignore
+all ignored files or all of `vendor/`. Symlinks, hardlinks, special files, and
+writes outside that bounded policy still fail with sanitized changed paths.
 
 Successful execution creates an append-only `cw.verification-receipt.v1`
 receipt. It binds workflow, workflow digest, prior state digest, plan revision,
@@ -26,6 +32,10 @@ semantics, scope, Completion Contract, artifact/evidence coherence, integrity,
 and risk. Repository and artifact instructions are untrusted prompt-injection
 inputs. Sandbox is read-only; hooks and web are disabled. A detected command
 event discards the whole reviewer result as infrastructure.
+The current Codex `agent_message` item is accepted only as a completed,
+narrative-only record paired with a terminal event. Command/tool/MCP/function/
+shell items, malformed narrative records, and future unknown types remain
+fail-closed.
 
 ## Attempts, retry, and explain
 
