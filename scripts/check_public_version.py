@@ -148,6 +148,8 @@ def _release_metadata_errors(root: Path) -> list[str]:
         or "cw-plugin-" in workflow
     ):
         errors.append("Release workflow must retain the exact Core-only profile.")
+    if "python -m pip install . tiktoken==0.14.0" not in workflow:
+        errors.append("Release workflow must install the pinned benchmark tokenizer.")
     return errors
 
 
