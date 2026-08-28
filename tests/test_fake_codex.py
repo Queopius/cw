@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from hashlib import sha256
 from pathlib import Path
 from unittest.mock import patch
 
@@ -308,6 +309,287 @@ class FakeCodexContractTests(unittest.TestCase):
                         )
                     self.assertEqual(fake_codex._HOOK_POSTCONDITION_FAILURE, result)
                     self.assertEqual(fake_codex._HOOK_POSTCONDITION_MESSAGE + "\n", stderr.getvalue())
+
+    def test_fixture_evidence_is_atomic_closed_and_invocation_bound(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cw/runtime").mkdir(parents=True)
+            invocation = "a" * 64
+            environment = {"CW_ACCEPTANCE_INVOCATION_ID": invocation}
+            with patch.dict(os.environ, environment, clear=False):
+                self.assertTrue(fake_codex._record_fixture_evidence(
+                    root, "hook_exit", "hook_exit_nonzero",
+                ))
+            path = root / ".cw/runtime/acceptance-fixture-evidence.json"
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual({
+                "schema_version", "invocation_sha256", "last_stage", "failure_reason",
+            }, set(payload))
+            self.assertEqual(sha256(invocation.encode("ascii")).hexdigest(), payload["invocation_sha256"])
+            self.assertEqual("hook_exit", payload["last_stage"])
+            self.assertEqual("hook_exit_nonzero", payload["failure_reason"])
+            self.assertNotIn(invocation, path.read_text(encoding="utf-8"))
+
+    def test_fixture_evidence_completes_partial_binary_writes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cw/runtime").mkdir(parents=True)
+            invocation = "b" * 64
+            real_write = os.write
+            real_open = os.open
+            write_sizes: list[int] = []
+            open_flags: list[int] = []
+            binary_flag = 1 << 29
+
+            def partial_write(descriptor: int, payload: bytes) -> int:
+                chunk = payload[: max(1, len(payload) // 2)]
+                written = real_write(descriptor, chunk)
+                write_sizes.append(written)
+                return written
+
+            def safe_open(path: object, flags: int, mode: int = 0o777) -> int:
+                open_flags.append(flags)
+                return real_open(path, flags & ~binary_flag, mode)
+
+            with patch.dict(os.environ, {"CW_ACCEPTANCE_INVOCATION_ID": invocation}, clear=False), patch.object(
+                fake_codex.os, "O_BINARY", binary_flag, create=True,
+            ), patch(
+                "tests.fixtures.fake_codex.fake_codex.os.open", side_effect=safe_open,
+            ), patch(
+                "tests.fixtures.fake_codex.fake_codex.os.write", side_effect=partial_write,
+            ):
+                self.assertTrue(fake_codex._record_fixture_evidence(
+                    root, "process_exit", "none",
+                ))
+            self.assertGreater(len(write_sizes), 1)
+            self.assertTrue(open_flags[0] & binary_flag)
+            payload = json.loads(
+                (root / ".cw/runtime/acceptance-fixture-evidence.json").read_text(
+                    encoding="utf-8",
+                )
+            )
+            self.assertEqual("process_exit", payload["last_stage"])
+
+    def test_fixture_evidence_writer_rejects_symlink_and_hardlink_destinations(self):
+        for link_kind in ("symlink", "hardlink"):
+            with self.subTest(link_kind=link_kind), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                runtime = root / ".cw/runtime"
+                runtime.mkdir(parents=True)
+                destination = runtime / "acceptance-fixture-evidence.json"
+                target = root / "target.json"
+                target.write_text("{}", encoding="utf-8")
+                if link_kind == "symlink":
+                    try:
+                        destination.symlink_to(target)
+                    except OSError:
+                        self.assertEqual("nt", os.name)
+                        continue
+                else:
+                    os.link(target, destination)
+                with patch.dict(
+                    os.environ, {"CW_ACCEPTANCE_INVOCATION_ID": "f" * 64}, clear=False,
+                ), self.assertRaises(OSError):
+                    fake_codex._record_fixture_evidence(root, "process_start", "none")
+
+    def test_hook_failures_persist_only_safe_first_failure_enums(self):
+        cases = (
+            (subprocess.CompletedProcess(["cw"], 7, "", "STDERR_PRIVATE_CANARY"), "hook_exit_nonzero"),
+            (subprocess.CompletedProcess(["cw"], 0, "", ""), "hook_envelope_missing"),
+            (subprocess.CompletedProcess(["cw"], 0, "{", ""), "hook_envelope_invalid"),
+            (subprocess.CompletedProcess(["cw"], 0, "{}", ""), "hook_contract_rejected"),
+        )
+        for completed, expected in cases:
+            with self.subTest(reason=expected), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                _executable, environment = self._runtime_identity(root)
+                self._implementer_project(root)
+                environment.update({
+                    "CW_ACCEPTANCE_INVOCATION_ID": "c" * 64,
+                    "CW_ACCEPTANCE_PROJECT_ROOT": str(root.resolve()),
+                })
+                with patch.dict(os.environ, environment, clear=False), patch(
+                    "tests.fixtures.fake_codex.fake_codex.subprocess.run",
+                    return_value=completed,
+                ), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertNotEqual(0, fake_codex._review_hook(
+                        root, os.environ.copy(), phase_id="01-acceptance-1", next_phase=None,
+                    ))
+                payload = json.loads(
+                    (root / ".cw/runtime/acceptance-fixture-evidence.json").read_text(
+                        encoding="utf-8",
+                    )
+                )
+                self.assertEqual(expected, payload["failure_reason"])
+                serialized = json.dumps(payload)
+                self.assertNotIn("STDERR_PRIVATE_CANARY", serialized)
+                self.assertNotIn(str(root), serialized)
+
+    def test_hook_spawn_handoff_and_completion_failures_are_distinct(self):
+        valid = json.dumps({"continue": False, "stopReason": "PRIVATE_REASON"})
+        cases = (
+            (OSError("PRIVATE_PATH"), {}, False, "hook_spawn_failed"),
+            (
+                subprocess.CompletedProcess(["cw"], 0, valid, ""),
+                {"CW_ACCEPTANCE_PARENT_REVIEW": "1"},
+                False,
+                "handoff_incompatible",
+            ),
+            (
+                subprocess.CompletedProcess(["cw"], 0, valid, ""),
+                {},
+                True,
+                "completion_not_written",
+            ),
+        )
+        for result, extra, create_gate, expected in cases:
+            with self.subTest(reason=expected), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                _executable, environment = self._runtime_identity(root)
+                self._implementer_project(root)
+                if create_gate:
+                    gate = root / ".cw/gates/01-acceptance-1.approved.json"
+                    gate.parent.mkdir(parents=True)
+                    gate.write_text("{}", encoding="utf-8")
+                environment.update({
+                    "CW_ACCEPTANCE_INVOCATION_ID": "1" * 64,
+                    "CW_ACCEPTANCE_PROJECT_ROOT": str(root.resolve()),
+                    **extra,
+                })
+                with patch.dict(os.environ, environment, clear=False), patch(
+                    "tests.fixtures.fake_codex.fake_codex.subprocess.run",
+                    side_effect=result if isinstance(result, OSError) else None,
+                    return_value=None if isinstance(result, OSError) else result,
+                ), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertNotEqual(0, fake_codex._review_hook(
+                        root, os.environ.copy(), phase_id="01-acceptance-1", next_phase=None,
+                    ))
+                evidence = json.loads(
+                    (root / ".cw/runtime/acceptance-fixture-evidence.json").read_text(
+                        encoding="utf-8",
+                    )
+                )
+                self.assertEqual(expected, evidence["failure_reason"])
+                self.assertNotIn("PRIVATE", json.dumps(evidence))
+
+    def test_fixture_rejects_external_project_and_records_repository_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "project"
+            root.mkdir()
+            _executable, environment = self._runtime_identity(root)
+            self._implementer_project(root)
+            other = Path(temporary) / "other"
+            other.mkdir()
+            environment.update({
+                "CW_ACCEPTANCE_INVOCATION_ID": "d" * 64,
+                "CW_ACCEPTANCE_PROJECT_ROOT": str(other.resolve()),
+            })
+            with patch.dict(os.environ, environment, clear=False), contextlib.redirect_stderr(
+                io.StringIO(),
+            ):
+                self.assertEqual(fake_codex._FIXTURE_FAILURE, fake_codex._implement(root, []))
+            payload = json.loads(
+                (root / ".cw/runtime/acceptance-fixture-evidence.json").read_text(
+                    encoding="utf-8",
+                )
+            )
+            self.assertEqual("repository_invalid", payload["failure_reason"])
+            self.assertEqual("runtime_verified", payload["last_stage"])
+
+    def test_fixture_records_runtime_and_readiness_failures_without_private_data(self):
+        for case in ("runtime", "readiness"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                _executable, environment = self._runtime_identity(root)
+                self._implementer_project(root)
+                environment.update({
+                    "CW_ACCEPTANCE_INVOCATION_ID": "2" * 64,
+                    "CW_ACCEPTANCE_PROJECT_ROOT": str(root.resolve()),
+                })
+                if case == "runtime":
+                    environment["CW_ACCEPTANCE_CW_EXECUTABLE"] = str(
+                        (root / "missing-cw").resolve(),
+                    )
+                    scenario = "success"
+                    expected = ("process_start", "runtime_invalid", fake_codex._FIXTURE_FAILURE)
+                else:
+                    scenario = "missing_readiness"
+                    expected = ("repository_verified", "readiness_missing", 0)
+                with patch.dict(os.environ, {
+                    **environment, "CW_FAKE_CODEX_SCENARIO": scenario,
+                }, clear=False), contextlib.redirect_stderr(io.StringIO()):
+                    result = fake_codex._implement(root, [])
+                evidence = json.loads(
+                    (root / ".cw/runtime/acceptance-fixture-evidence.json").read_text(
+                        encoding="utf-8",
+                    )
+                )
+                self.assertEqual(expected[2], result)
+                self.assertEqual(expected[0], evidence["last_stage"])
+                self.assertEqual(expected[1], evidence["failure_reason"])
+                self.assertNotIn(str(root), json.dumps(evidence))
+
+    def test_successful_implementer_records_process_exit_without_private_payload(self):
+        canary = "HOOK_PRIVATE_CANARY"
+        valid = json.dumps({"continue": False, "stopReason": canary})
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _executable, environment = self._runtime_identity(root)
+            self._implementer_project(root)
+            environment.update({
+                "CW_ACCEPTANCE_INVOCATION_ID": "e" * 64,
+                "CW_ACCEPTANCE_PROJECT_ROOT": str(root.resolve()),
+            })
+
+            def durable_hook(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+                gate = root / ".cw/gates/01-acceptance-1.approved.json"
+                gate.parent.mkdir(parents=True, exist_ok=True)
+                gate.write_text("{}", encoding="utf-8")
+                (root / ".cw/runtime/READY_FOR_REVIEW.json").unlink(missing_ok=True)
+                (root / ".cw/state.json").write_text(
+                    json.dumps({"status": "COMPLETED", "current_phase": None}),
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(["cw"], 0, valid, canary)
+
+            with patch.dict(os.environ, environment, clear=False), patch(
+                "tests.fixtures.fake_codex.fake_codex.subprocess.run",
+                side_effect=durable_hook,
+            ), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(0, fake_codex._implement(root, []))
+            evidence = (
+                root / ".cw/runtime/acceptance-fixture-evidence.json"
+            ).read_text(encoding="utf-8")
+        payload = json.loads(evidence)
+        self.assertEqual("process_exit", payload["last_stage"])
+        self.assertEqual("none", payload["failure_reason"])
+        self.assertNotIn(canary, evidence)
+
+    def test_unexpected_fixture_exception_is_closed_and_redacted(self):
+        canary = "GOAL_PRIVATE_CANARY"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _executable, environment = self._runtime_identity(root)
+            (root / ".cw/runtime").mkdir(parents=True, exist_ok=True)
+            (root / ".cw/state.json").write_text(canary, encoding="utf-8")
+            environment.update({
+                "CW_IMPLEMENTER_ACTIVE": "1",
+                "CW_ACCEPTANCE_INVOCATION_ID": "3" * 64,
+                "CW_ACCEPTANCE_PROJECT_ROOT": str(root.resolve()),
+            })
+            completed = subprocess.run(
+                [sys.executable, str(FAKE), "--cd", str(root)],
+                cwd=root, env={**os.environ, **environment}, text=True,
+                capture_output=True, check=False,
+            )
+            evidence = (
+                root / ".cw/runtime/acceptance-fixture-evidence.json"
+            ).read_text(encoding="utf-8")
+        self.assertEqual(fake_codex._FIXTURE_FAILURE, completed.returncode)
+        self.assertEqual("", completed.stdout)
+        self.assertEqual(fake_codex._FIXTURE_FAILURE_MESSAGE + "\n", completed.stderr)
+        self.assertEqual("unexpected_exception", json.loads(evidence)["failure_reason"])
+        self.assertNotIn(canary, completed.stdout + completed.stderr + evidence)
 
 
 if __name__ == "__main__":
