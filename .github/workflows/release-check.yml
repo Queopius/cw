@@ -32,7 +32,7 @@ jobs:
             --branch-ref origin/prod \
             --push-before "$PUSH_BEFORE"
       - name: Install runtime dependencies
-        run: python -m pip install .
+        run: python -m pip install . tiktoken==0.14.0
       - name: Test release
         run: make check
       - name: Build release distributions
