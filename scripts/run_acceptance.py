@@ -4,12 +4,14 @@ from __future__ import annotations
 import argparse
 import contextlib
 import contextvars
+import enum
 import hashlib
 import hmac
 import json
 import os
 import platform
 import re
+import secrets
 import signal
 import stat
 import subprocess
@@ -40,6 +42,11 @@ _OPERATION_STAGE: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 
 
+class _InvocationKind(enum.Enum):
+    FIRST_RUN = "first_run"
+    SECOND_RUN = "second_run"
+
+
 class AcceptanceFailure(RuntimeError):
     """A failed acceptance operation with safe metadata for the failure artifact."""
 
@@ -58,6 +65,8 @@ class AcceptanceFailure(RuntimeError):
         envelope_code: str | None = None,
         envelope_correlation: str | None = None,
         error_fingerprint: str | None = None,
+        invocation: _InvocationKind | None = None,
+        first_run: dict[str, Any] | None = None,
         second_run: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
@@ -72,6 +81,8 @@ class AcceptanceFailure(RuntimeError):
         self.envelope_code = envelope_code
         self.envelope_correlation = envelope_correlation
         self.error_fingerprint = error_fingerprint
+        self.invocation = invocation
+        self.first_run = first_run or {}
         self.second_run = second_run or {}
 
 
@@ -130,6 +141,50 @@ _SECOND_RUN_FAILURE_REASONS = {
     "process_exit", "envelope_missing", "envelope_invalid", "hook_error",
     "state_not_advanced", "readiness_not_consumed", "gate_missing",
     "phase_mismatch", "unexpected_terminal_state", "artifact_binding_failed", "none",
+}
+_FIRST_RUN_ENVELOPE_KINDS = {"success", "error", "invalid", "missing"}
+_FIRST_RUN_FIXTURE_STAGES = {
+    "process_start", "runtime_verified", "repository_verified", "readiness_observed",
+    "hook_start", "hook_exit", "hook_envelope_valid", "handoff_accepted",
+    "completion_written", "process_exit",
+}
+_FIRST_RUN_FIXTURE_REASONS = {
+    "runtime_invalid", "repository_invalid", "readiness_missing", "hook_spawn_failed",
+    "hook_exit_nonzero", "hook_envelope_missing", "hook_envelope_invalid",
+    "hook_contract_rejected", "handoff_incompatible", "completion_not_written",
+    "unexpected_exception", "none",
+}
+_FIRST_RUN_FAILURE_REASONS = {
+    "process_exit", "envelope_missing", "envelope_invalid", "cw_error",
+    "fixture_runtime", "fixture_repository", "fixture_readiness", "hook_spawn",
+    "hook_exit", "hook_envelope", "hook_contract", "handoff", "completion",
+    "state_transition", "diagnostic_binding", "unknown", "none",
+}
+_FIXTURE_EVIDENCE = Path(".cw/runtime/acceptance-fixture-evidence.json")
+_MAX_FIXTURE_EVIDENCE_BYTES = 4096
+_COMMON_DIAGNOSTIC_KEYS = {
+    "schema", "platform", "python_version", "architecture", "stage", "executable",
+    "command", "exit_code", "diagnostic_status", "diagnostic_source", "cw_error_code",
+    "correlation_id_sha256", "exception_type", "module", "function", "line", "message",
+    "traceback", "next_action", "redaction_status", "canonical_root_available",
+    "project_metadata_present", "envelope_code_present", "envelope_correlation_present",
+    "last_error_changed", "last_error_safe_regular", "record_found", "correlation_match",
+    "code_match", "traceback_frame_available", "binding_failure_reason",
+}
+_FIRST_RUN_DIAGNOSTIC_KEYS = {
+    "first_run_exit_expected", "first_run_envelope_kind",
+    "first_run_error_code_present", "first_run_error_code",
+    "first_run_correlation_hash_present", "first_run_fixture_evidence_present",
+    "first_run_fixture_last_stage", "first_run_failure_reason", "first_run_pre_status",
+    "first_run_post_status", "first_run_phase_changed", "first_run_readiness_present",
+    "first_run_gate_present",
+}
+_SECOND_RUN_DIAGNOSTIC_KEYS = {
+    "second_run_exit_expected", "second_run_envelope_kind",
+    "second_run_error_code_present", "second_run_error_code",
+    "second_run_correlation_hash_present", "pre_status", "post_status", "phase_changed",
+    "readiness_before", "readiness_after", "gate_before", "gate_after",
+    "hook_postcondition_passed", "second_run_failure_reason",
 }
 
 
@@ -218,6 +273,69 @@ def _failure_envelope(stdout: str) -> tuple[str | None, str | None]:
     code = payload.get("code")
     correlation = _correlation_id(payload)
     return (code if isinstance(code, str) and _SAFE_IDENTIFIER.fullmatch(code) else None, correlation)
+
+
+def _first_run_defaults() -> dict[str, Any]:
+    return {
+        "first_run_exit_expected": False,
+        "first_run_envelope_kind": "missing",
+        "first_run_error_code_present": False,
+        "first_run_error_code": None,
+        "first_run_correlation_hash_present": False,
+        "first_run_fixture_evidence_present": False,
+        "first_run_fixture_last_stage": None,
+        "first_run_failure_reason": "process_exit",
+        "first_run_pre_status": "UNKNOWN",
+        "first_run_post_status": "UNKNOWN",
+        "first_run_phase_changed": False,
+        "first_run_readiness_present": False,
+        "first_run_gate_present": False,
+    }
+
+
+def _first_run_envelope_metadata(stdout: str) -> dict[str, Any]:
+    """Classify one first-run envelope without retaining process output."""
+
+    result = _first_run_defaults()
+    if not stdout.strip():
+        result["first_run_failure_reason"] = "envelope_missing"
+        return result
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        result.update(
+            first_run_envelope_kind="invalid",
+            first_run_failure_reason="envelope_invalid",
+        )
+        return result
+    if not isinstance(payload, dict):
+        result.update(
+            first_run_envelope_kind="invalid",
+            first_run_failure_reason="envelope_invalid",
+        )
+        return result
+    error = payload.get("error")
+    if isinstance(error, dict):
+        code = error.get("code")
+        safe_code = code if isinstance(code, str) and code in _PUBLIC_ERROR_CODES else None
+        correlation = _correlation_id(error)
+        result.update(
+            first_run_envelope_kind="error",
+            first_run_error_code_present=safe_code is not None,
+            first_run_error_code=safe_code,
+            first_run_correlation_hash_present=correlation is not None,
+            first_run_failure_reason="cw_error" if safe_code is not None else "envelope_invalid",
+        )
+        if correlation is not None:
+            result["correlation_id_sha256"] = hashlib.sha256(
+                correlation.encode("utf-8"),
+            ).hexdigest()
+        return result
+    result.update(
+        first_run_envelope_kind="success",
+        first_run_failure_reason="process_exit",
+    )
+    return result
 
 
 def _json_payload(text: str) -> dict[str, Any] | None:
@@ -486,6 +604,7 @@ def _run(
     expected: set[int] = frozenset({0}), timeout: int = 180,
     diagnostic_stage: str | None = None, diagnostic_executable: str = "unknown",
     diagnostic_command: str = "unknown",
+    invocation: _InvocationKind | None = None,
 ) -> subprocess.CompletedProcess[str]:
     diagnostic_stage = diagnostic_stage or _OPERATION_STAGE.get()
     if not (_SAFE_STAGE.fullmatch(diagnostic_stage)
@@ -509,12 +628,20 @@ def _run(
             cwd=cwd,
             environment=environment,
             timed_out=True,
+            invocation=invocation,
         ) from exc
     if completed.returncode not in expected:
         code, correlation = _failure_envelope(completed.stdout) if diagnostic_executable == "cw" else (None, None)
+        if invocation is _InvocationKind.FIRST_RUN and code not in _PUBLIC_ERROR_CODES:
+            code = None
+        first_run = (
+            _first_run_envelope_metadata(completed.stdout)
+            if invocation is _InvocationKind.FIRST_RUN
+            else None
+        )
         second_run = (
             _second_run_envelope_metadata(completed.stdout)
-            if diagnostic_stage == "acceptance.operation.second_run"
+            if invocation is _InvocationKind.SECOND_RUN
             else None
         )
         raise AcceptanceFailure(
@@ -529,6 +656,8 @@ def _run(
             envelope_code=code,
             envelope_correlation=correlation,
             error_fingerprint=before_error,
+            invocation=invocation,
+            first_run=first_run,
             second_run=second_run,
         )
     return completed
@@ -778,6 +907,71 @@ def _safe_project_evidence_present(root: Path, relative: Path) -> bool | None:
     return True
 
 
+def _fixture_evidence(
+    root: Path,
+    invocation_sha256: str,
+    previous_fingerprint: str | None,
+) -> dict[str, str] | None:
+    """Load evidence produced by this invocation from one fixed safe file."""
+
+    if not re.fullmatch(r"[0-9a-f]{64}", invocation_sha256):
+        return None
+    canonical_root = _canonical_root(root)
+    path = canonical_root / _FIXTURE_EVIDENCE
+    try:
+        path.relative_to(canonical_root)
+        cursor = canonical_root
+        for component in _FIXTURE_EVIDENCE.parts[:-1]:
+            cursor /= component
+            metadata = cursor.lstat()
+            if not stat.S_ISDIR(metadata.st_mode) or cursor.is_symlink():
+                return None
+    except (OSError, ValueError):
+        return None
+    current_fingerprint = _safe_fingerprint(path)
+    if current_fingerprint is None or current_fingerprint == previous_fingerprint:
+        return None
+    text = _safe_regular_text(path, maximum=_MAX_FIXTURE_EVIDENCE_BYTES)
+    if text is None:
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    required = {
+        "schema_version", "invocation_sha256", "last_stage", "failure_reason",
+        "cw_error_code", "correlation_sha256",
+    }
+    if not isinstance(payload, dict) or set(payload) != required:
+        return None
+    last_stage = payload.get("last_stage")
+    failure_reason = payload.get("failure_reason")
+    stored_hash = payload.get("invocation_sha256")
+    error_code = payload.get("cw_error_code")
+    correlation_hash = payload.get("correlation_sha256")
+    if not (
+        payload.get("schema_version") == 1
+        and isinstance(stored_hash, str)
+        and re.fullmatch(r"[0-9a-f]{64}", stored_hash)
+        and hmac.compare_digest(stored_hash, invocation_sha256)
+        and last_stage in _FIRST_RUN_FIXTURE_STAGES
+        and failure_reason in _FIRST_RUN_FIXTURE_REASONS
+        and (error_code is None or error_code in _PUBLIC_ERROR_CODES)
+        and (
+            correlation_hash is None
+            or isinstance(correlation_hash, str)
+            and re.fullmatch(r"[0-9a-f]{64}", correlation_hash)
+        )
+    ):
+        return None
+    return {
+        "last_stage": last_stage,
+        "failure_reason": failure_reason,
+        "cw_error_code": error_code,
+        "correlation_sha256": correlation_hash,
+    }
+
+
 def _second_run_snapshot(root: Path, expected_phase: str | None) -> dict[str, Any]:
     state_safe = _safe_project_evidence_present(root, Path(".cw/state.json"))
     try:
@@ -807,6 +1001,91 @@ def _second_run_snapshot(root: Path, expected_phase: str | None) -> dict[str, An
     }
 
 
+def _first_run_failure_reason(
+    envelope_kind: str,
+    fixture_reason: str | None,
+) -> str:
+    fixture_mapping = {
+        "runtime_invalid": "fixture_runtime",
+        "repository_invalid": "fixture_repository",
+        "readiness_missing": "fixture_readiness",
+        "hook_spawn_failed": "hook_spawn",
+        "hook_exit_nonzero": "hook_exit",
+        "hook_envelope_missing": "hook_envelope",
+        "hook_envelope_invalid": "hook_envelope",
+        "hook_contract_rejected": "hook_contract",
+        "handoff_incompatible": "handoff",
+        "completion_not_written": "completion",
+        "unexpected_exception": "unknown",
+    }
+    if fixture_reason in fixture_mapping:
+        return fixture_mapping[fixture_reason]
+    if envelope_kind == "error":
+        return "cw_error"
+    if envelope_kind == "missing":
+        return "envelope_missing"
+    if envelope_kind == "invalid":
+        return "envelope_invalid"
+    return "process_exit"
+
+
+def _run_first_phase(
+    cw: Path,
+    *,
+    root: Path,
+    environment: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    pre = _second_run_snapshot(root, None)
+    expected_phase = pre["phase"]
+    pre = _second_run_snapshot(root, expected_phase)
+    invocation_secret = secrets.token_hex(32)
+    invocation_sha256 = hashlib.sha256(invocation_secret.encode("ascii")).hexdigest()
+    invocation_environment = {
+        **environment,
+        "CW_ACCEPTANCE_INVOCATION_ID": invocation_secret,
+        "CW_ACCEPTANCE_PROJECT_ROOT": str(_canonical_root(root)),
+    }
+    previous_evidence = _safe_fingerprint(root / _FIXTURE_EVIDENCE)
+    try:
+        return _run(
+            [str(cw)],
+            cwd=root,
+            environment=invocation_environment,
+            diagnostic_stage="acceptance.operation.first_run",
+            diagnostic_executable="cw",
+            diagnostic_command="start",
+            invocation=_InvocationKind.FIRST_RUN,
+        )
+    except AcceptanceFailure as error:
+        post = _second_run_snapshot(root, expected_phase)
+        evidence = _fixture_evidence(root, invocation_sha256, previous_evidence)
+        metadata = {**_first_run_defaults(), **error.first_run}
+        metadata.update({
+            "first_run_exit_expected": False,
+            "first_run_fixture_evidence_present": evidence is not None,
+            "first_run_fixture_last_stage": evidence["last_stage"] if evidence else None,
+            "first_run_pre_status": pre["status"],
+            "first_run_post_status": post["status"],
+            "first_run_phase_changed": bool(
+                expected_phase is not None and expected_phase != post["phase"]
+            ),
+            "first_run_readiness_present": post["readiness"] is True,
+            "first_run_gate_present": post["gate"] is True,
+        })
+        if evidence and metadata["first_run_error_code"] is None:
+            metadata["first_run_error_code"] = evidence["cw_error_code"]
+            metadata["first_run_error_code_present"] = evidence["cw_error_code"] is not None
+        if evidence and evidence["correlation_sha256"] is not None:
+            metadata["correlation_id_sha256"] = evidence["correlation_sha256"]
+            metadata["first_run_correlation_hash_present"] = True
+        metadata["first_run_failure_reason"] = _first_run_failure_reason(
+            metadata["first_run_envelope_kind"],
+            evidence["failure_reason"] if evidence else None,
+        )
+        error.first_run = metadata
+        raise
+
+
 def _run_second_phase(
     cw: Path,
     arguments: list[str],
@@ -826,6 +1105,7 @@ def _run_second_phase(
             diagnostic_stage="acceptance.operation.second_run",
             diagnostic_executable="cw",
             diagnostic_command="run",
+            invocation=_InvocationKind.SECOND_RUN,
         )
     except AcceptanceFailure as error:
         post = _second_run_snapshot(root, expected_phase)
@@ -976,7 +1256,7 @@ def _single_state_failure_stage(
 
 
 def _single_phase_cycles() -> tuple[int | None, ...]:
-    return (1, 2, 3) if os.name == "nt" else (None,)
+    return (1, 2, 3, 4, 5) if os.name == "nt" else (None,)
 
 
 def _single_phase(
@@ -986,7 +1266,7 @@ def _single_phase(
     *,
     cycle: int | None = None,
 ) -> tuple[Path, str]:
-    if cycle is not None and cycle not in {1, 2, 3}:
+    if cycle is not None and cycle not in {1, 2, 3, 4, 5}:
         raise ValueError("invalid single-phase acceptance cycle")
     phase_environment = environment.copy()
     name = "single phase" if cycle is None else f"single phase {cycle}"
@@ -996,8 +1276,7 @@ def _single_phase(
     initial_phase = initial_state.get("current_phase")
     expected_phase = initial_phase if isinstance(initial_phase, str) else None
     phase_environment["CW_FAKE_CODEX_SCENARIO"] = "success"
-    with _operation_stage("acceptance.operation.first_run"):
-        _run([str(cw)], cwd=root, environment=phase_environment)
+    _run_first_phase(cw, root=root, environment=phase_environment)
     with _operation_stage("acceptance.operation.single_state.other"):
         state = _state(root)
         if state.get("status") != "COMPLETED" or state.get("current_phase") is not None:
@@ -1269,7 +1548,13 @@ def _write_diagnostic(
         executable="unknown", command_name="unknown",
     )
     captured = _capture_cw_diagnostic(failure)
+    first_run = {**_first_run_defaults(), **failure.first_run}
     second_run = {**_second_run_defaults(), **failure.second_run}
+    invocation_hash = None
+    if failure.invocation is _InvocationKind.FIRST_RUN:
+        invocation_hash = first_run.get("correlation_id_sha256")
+    elif failure.invocation is _InvocationKind.SECOND_RUN:
+        invocation_hash = second_run.get("correlation_id_sha256")
     diagnostic = {
         "schema": "cw.acceptance-diagnostic.v1",
         "platform": platform.system(),
@@ -1284,7 +1569,7 @@ def _write_diagnostic(
         "cw_error_code": captured.get("cw_error_code"),
         "correlation_id_sha256": (
             captured.get("correlation_id_sha256")
-            or second_run.get("correlation_id_sha256")
+            or invocation_hash
         ),
         "exception_type": captured.get("exception_type") or type(exc).__name__,
         "module": captured.get("module"),
@@ -1300,15 +1585,11 @@ def _write_diagnostic(
             "record_found", "correlation_match", "code_match", "traceback_frame_available",
             "binding_failure_reason",
         )},
-        **{key: second_run[key] for key in (
-            "second_run_exit_expected", "second_run_envelope_kind",
-            "second_run_error_code_present", "second_run_error_code",
-            "second_run_correlation_hash_present", "pre_status", "post_status",
-            "phase_changed", "readiness_before", "readiness_after",
-            "gate_before", "gate_after", "hook_postcondition_passed",
-            "second_run_failure_reason",
-        )},
     }
+    if failure.invocation is _InvocationKind.FIRST_RUN:
+        diagnostic.update({key: first_run[key] for key in _FIRST_RUN_DIAGNOSTIC_KEYS})
+    elif failure.invocation is _InvocationKind.SECOND_RUN:
+        diagnostic.update({key: second_run[key] for key in _SECOND_RUN_DIAGNOSTIC_KEYS})
     serialized = json.dumps(diagnostic, ensure_ascii=False, indent=2) + "\n"
     _validate_diagnostic(diagnostic)
     destination = output.with_name("compatibility-diagnostic.json")
@@ -1319,21 +1600,15 @@ def _write_diagnostic(
 
 
 def _validate_diagnostic(diagnostic: dict[str, Any]) -> None:
-    required = {
-        "schema", "platform", "python_version", "architecture", "stage", "executable",
-        "command", "exit_code", "diagnostic_status", "diagnostic_source", "cw_error_code",
-        "correlation_id_sha256", "exception_type", "module", "function", "line", "message",
-        "traceback", "next_action", "redaction_status",
-        "canonical_root_available", "project_metadata_present", "envelope_code_present",
-        "envelope_correlation_present", "last_error_changed", "last_error_safe_regular",
-        "record_found", "correlation_match", "code_match", "traceback_frame_available",
-        "binding_failure_reason",
-        "second_run_exit_expected", "second_run_envelope_kind",
-        "second_run_error_code_present", "second_run_error_code",
-        "second_run_correlation_hash_present", "pre_status", "post_status",
-        "phase_changed", "readiness_before", "readiness_after", "gate_before",
-        "gate_after", "hook_postcondition_passed", "second_run_failure_reason",
-    }
+    first_run = bool(set(diagnostic) & _FIRST_RUN_DIAGNOSTIC_KEYS)
+    second_run = bool(set(diagnostic) & _SECOND_RUN_DIAGNOSTIC_KEYS)
+    if first_run and second_run:
+        raise AcceptanceFailure("acceptance diagnostic mixes invocation metadata")
+    required = set(_COMMON_DIAGNOSTIC_KEYS)
+    if first_run:
+        required.update(_FIRST_RUN_DIAGNOSTIC_KEYS)
+    elif second_run:
+        required.update(_SECOND_RUN_DIAGNOSTIC_KEYS)
     if set(diagnostic) != required or diagnostic["schema"] != "cw.acceptance-diagnostic.v1":
         raise AcceptanceFailure("acceptance diagnostic has an invalid contract")
     serialized = json.dumps(diagnostic, ensure_ascii=False).lower()
@@ -1347,15 +1622,38 @@ def _validate_diagnostic(diagnostic: dict[str, Any]) -> None:
     }
     if any(not isinstance(diagnostic[key], bool) for key in booleans):
         raise AcceptanceFailure("acceptance diagnostic has non-boolean binding metadata")
-    for key in (
-        "second_run_exit_expected", "phase_changed", "readiness_before",
-        "readiness_after", "gate_before", "gate_after", "hook_postcondition_passed",
-    ):
-        if not isinstance(diagnostic[key], bool):
-            raise AcceptanceFailure("acceptance diagnostic has non-boolean second-run metadata")
+    if first_run:
+        for key in (
+            "first_run_exit_expected", "first_run_error_code_present",
+            "first_run_correlation_hash_present", "first_run_fixture_evidence_present",
+            "first_run_phase_changed", "first_run_readiness_present", "first_run_gate_present",
+        ):
+            if not isinstance(diagnostic[key], bool):
+                raise AcceptanceFailure("acceptance diagnostic has non-boolean first-run metadata")
+    if second_run:
+        for key in (
+            "second_run_exit_expected", "phase_changed", "readiness_before",
+            "readiness_after", "gate_before", "gate_after", "hook_postcondition_passed",
+        ):
+            if not isinstance(diagnostic[key], bool):
+                raise AcceptanceFailure("acceptance diagnostic has non-boolean second-run metadata")
     if diagnostic["binding_failure_reason"] not in {"project_metadata_missing", "envelope_missing", "envelope_correlation_missing", "diagnostic_record_unchanged", "diagnostic_record_missing", "correlation_mismatch", "code_mismatch", "traceback_unavailable", "none"}:
         raise AcceptanceFailure("acceptance diagnostic has an invalid binding reason")
-    if (
+    if first_run and (
+        diagnostic["first_run_envelope_kind"] not in _FIRST_RUN_ENVELOPE_KINDS
+        or diagnostic["first_run_failure_reason"] not in _FIRST_RUN_FAILURE_REASONS
+        or diagnostic["first_run_pre_status"] not in _WORKFLOW_STATUSES
+        or diagnostic["first_run_post_status"] not in _WORKFLOW_STATUSES
+        or diagnostic["first_run_fixture_last_stage"] not in (
+            _FIRST_RUN_FIXTURE_STAGES | {None}
+        )
+        or (
+            diagnostic["first_run_error_code"] is not None
+            and diagnostic["first_run_error_code"] not in _PUBLIC_ERROR_CODES
+        )
+    ):
+        raise AcceptanceFailure("acceptance diagnostic has invalid first-run metadata")
+    if second_run and (
         diagnostic["second_run_envelope_kind"] not in _SECOND_RUN_ENVELOPE_KINDS
         or diagnostic["second_run_failure_reason"] not in _SECOND_RUN_FAILURE_REASONS
         or diagnostic["pre_status"] not in _WORKFLOW_STATUSES
