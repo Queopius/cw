@@ -2,6 +2,12 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.18.1",
+      "changes": [
+        "Aligned the immutable Release Check environment with CI by installing the pinned benchmark tokenizer before running the complete test suite."
+      ]
+    },
+    {
       "version": "0.18.0",
       "changes": [
         "Separated deterministic execution into a private Verification Executor with integrity-bound receipts while keeping the Semantic Reviewer unable to execute project commands.",
