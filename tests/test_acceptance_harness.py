@@ -20,9 +20,13 @@ from scripts.run_acceptance import (
     _managed_child_is_running,
     _operation_stage,
     _result,
+    _review_hook_failure_stage,
     _run,
+    _run_second_phase,
     _safe_fixed_file_present,
     _safe_regular_text,
+    _second_run_defaults,
+    _second_run_envelope_metadata,
     _single_phase,
     _single_phase_cycles,
     _single_state_failure_stage,
@@ -291,7 +295,11 @@ class AcceptanceHarnessTests(unittest.TestCase):
             ("completed_phase_present", {"status": "COMPLETED", "current_phase": "PRIVATE_PHASE_CANARY"}, None),
             ("planned_complete_gate_present", {"status": "PLANNED_COMPLETE", "current_phase": None}, "completion"),
             ("planned_complete_gate_absent", {"status": "PLANNED_COMPLETE", "current_phase": None}, None),
-            ("in_progress_readiness_present", {"status": "IN_PROGRESS", "current_phase": "PRIVATE_PHASE_CANARY"}, "readiness"),
+            (
+                "review_hook.no_review",
+                {"status": "IN_PROGRESS", "current_phase": "PRIVATE_PHASE_CANARY"},
+                "readiness",
+            ),
             ("in_progress_readiness_absent", {"status": "IN_PROGRESS", "current_phase": "PRIVATE_PHASE_CANARY"}, None),
             ("ready_for_review", {"status": "READY_FOR_REVIEW", "current_phase": "PRIVATE_PHASE_CANARY"}, None),
             ("reviewing", {"status": "REVIEWING", "current_phase": "PRIVATE_PHASE_CANARY"}, None),
@@ -303,7 +311,12 @@ class AcceptanceHarnessTests(unittest.TestCase):
                 failure = self._single_failure(state=state, evidence=evidence)
                 self.assertIsNotNone(failure)
                 assert failure is not None
-                self.assertEqual(f"acceptance.operation.single_state.{suffix}", failure.stage)
+                expected = (
+                    f"acceptance.operation.{suffix}"
+                    if suffix.startswith("review_hook.")
+                    else f"acceptance.operation.single_state.{suffix}"
+                )
+                self.assertEqual(expected, failure.stage)
                 self.assertNotIn("PRIVATE_PHASE_CANARY", str(failure))
 
     def test_single_state_evidence_rejects_symlinks_without_reading_them(self):
@@ -329,8 +342,12 @@ class AcceptanceHarnessTests(unittest.TestCase):
             path.write_text(self.canaries[0], encoding="utf-8")
             self.assertTrue(_safe_fixed_file_present(root, relative))
             self.assertEqual(
-                "acceptance.operation.single_state.in_progress_readiness_present",
-                _single_state_failure_stage(root, {"status": "IN_PROGRESS"}),
+                "acceptance.operation.review_hook.no_review",
+                _single_state_failure_stage(
+                    root,
+                    {"status": "IN_PROGRESS"},
+                    "phase",
+                ),
             )
             with self.assertRaises(ValueError):
                 _safe_fixed_file_present(root, Path("../PRIVATE_PHASE_CANARY"))
@@ -349,11 +366,113 @@ class AcceptanceHarnessTests(unittest.TestCase):
                 encoding="utf-8",
             )
         self.assertIn(
-            '"stage": "acceptance.operation.single_state.in_progress_readiness_present"',
+            '"stage": "acceptance.operation.review_hook.no_review"',
             artifact,
         )
         for private_value in (*self.canaries, "PRIVATE_PHASE_CANARY", "READY_FOR_REVIEW.json"):
             self.assertNotIn(private_value, artifact)
+
+    def test_review_hook_failure_evidence_has_closed_safe_classifications(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            phase = "01-phase-1"
+            state = {
+                "status": "IN_PROGRESS",
+                "current_phase": phase,
+                "last_review": None,
+                "history": [],
+            }
+            self.assertEqual(
+                "acceptance.operation.review_hook.no_review",
+                _review_hook_failure_stage(root, state, phase),
+            )
+
+            review = root / ".cw/reviews/review.json"
+            review.parent.mkdir(parents=True)
+            review.write_text("{}", encoding="utf-8")
+            state["last_review"] = ".cw/reviews/review.json"
+            self.assertEqual(
+                "acceptance.operation.review_hook.review_without_gate",
+                _review_hook_failure_stage(root, state, phase),
+            )
+
+            gate = root / f".cw/gates/{phase}.approved.json"
+            gate.parent.mkdir(parents=True)
+            gate.write_text("{}", encoding="utf-8")
+            self.assertEqual(
+                "acceptance.operation.review_hook.gate_without_advance",
+                _review_hook_failure_stage(root, state, phase),
+            )
+
+            state["history"] = [{"action": "approved", "phase": phase}]
+            self.assertEqual(
+                "acceptance.operation.review_hook.state_regressed",
+                _review_hook_failure_stage(root, state, phase),
+            )
+
+            completion = root / ".cw/completion/completion.satisfied.json"
+            completion.parent.mkdir(parents=True)
+            completion.write_text("{}", encoding="utf-8")
+            self.assertEqual(
+                "acceptance.operation.review_hook.completion_without_state",
+                _review_hook_failure_stage(root, state, phase),
+            )
+
+            self.assertEqual(
+                "acceptance.operation.review_hook.unknown",
+                _review_hook_failure_stage(root, state, None),
+            )
+
+    def test_review_hook_evidence_rejects_symlink_and_hardlink(self):
+        state = {
+            "status": "IN_PROGRESS",
+            "current_phase": "phase",
+            "last_review": ".cw/reviews/review.json",
+            "history": [],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target.json"
+            target.write_text("{}", encoding="utf-8")
+            review = root / ".cw/reviews/review.json"
+            review.parent.mkdir(parents=True)
+            try:
+                review.symlink_to(target)
+            except OSError:
+                self.assertEqual("nt", os.name)
+            else:
+                self.assertEqual(
+                    "acceptance.operation.review_hook.unknown",
+                    _review_hook_failure_stage(root, state, "phase"),
+                )
+                review.unlink()
+            os.link(target, review)
+            self.assertEqual(
+                "acceptance.operation.review_hook.unknown",
+                _review_hook_failure_stage(root, state, "phase"),
+            )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target.json"
+            target.write_text("{}", encoding="utf-8")
+            gate = root / ".cw/gates/phase.approved.json"
+            gate.parent.mkdir(parents=True)
+            try:
+                gate.symlink_to(target)
+            except OSError:
+                self.assertEqual("nt", os.name)
+            else:
+                state["last_review"] = None
+                self.assertEqual(
+                    "acceptance.operation.review_hook.unknown",
+                    _review_hook_failure_stage(root, state, "phase"),
+                )
+                gate.unlink()
+            os.link(target, gate)
+            self.assertEqual(
+                "acceptance.operation.review_hook.unknown",
+                _review_hook_failure_stage(root, state, "phase"),
+            )
 
     def test_single_phase_cycle_policy_and_roots_are_platform_specific(self):
         with patch("scripts.run_acceptance.os.name", "nt"):
@@ -432,6 +551,103 @@ class AcceptanceHarnessTests(unittest.TestCase):
         self.assertTrue(all(type(diagnostic[field]) is bool for field in fields))
         self.assertEqual("project_metadata_missing", diagnostic["binding_failure_reason"])
         diagnostic["binding_failure_reason"] = "not-an-enum"
+        with self.assertRaises(AcceptanceFailure):
+            _validate_diagnostic(diagnostic)
+
+    def test_second_run_envelope_classification_is_single_document_and_allowlisted(self):
+        correlation = "41e0163899520133"
+        error = _second_run_envelope_metadata(json.dumps({
+            "error": {"code": "INTEGRITY_ERROR", "correlation_id": correlation},
+        }))
+        self.assertEqual("error", error["second_run_envelope_kind"])
+        self.assertEqual("INTEGRITY_ERROR", error["second_run_error_code"])
+        self.assertTrue(error["second_run_error_code_present"])
+        self.assertTrue(error["second_run_correlation_hash_present"])
+        self.assertNotIn(correlation, json.dumps(error))
+        self.assertEqual(
+            "success",
+            _second_run_envelope_metadata(json.dumps({"ok": True, "data": {}}))[
+                "second_run_envelope_kind"
+            ],
+        )
+        self.assertEqual("missing", _second_run_envelope_metadata("")["second_run_envelope_kind"])
+        for value in ("{", "{}{}", "[]"):
+            self.assertEqual(
+                "invalid",
+                _second_run_envelope_metadata(value)["second_run_envelope_kind"],
+            )
+
+    def test_second_run_preserves_first_safe_failed_condition(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cw/runtime").mkdir(parents=True)
+            (root / ".cw/gates").mkdir()
+            state_path = root / ".cw/state.json"
+            state_path.write_text(
+                json.dumps({"status": "READY", "current_phase": "01-phase"}),
+                encoding="utf-8",
+            )
+            readiness = root / ".cw/runtime/READY_FOR_REVIEW.json"
+            readiness.write_text("{}", encoding="utf-8")
+            failure = AcceptanceFailure(
+                "private process output",
+                stage="acceptance.operation.second_run",
+                executable="cw",
+                command_name="run",
+                exit_code=1,
+                second_run={
+                    **_second_run_defaults(),
+                    "second_run_envelope_kind": "success",
+                },
+            )
+            with patch("scripts.run_acceptance._run", side_effect=failure) as invoked, self.assertRaises(
+                AcceptanceFailure,
+            ) as raised:
+                _run_second_phase(Path("cw"), ["run", "3"], root=root, environment={})
+        metadata = raised.exception.second_run
+        self.assertEqual(["cw", "run", "3"], invoked.call_args.args[0])
+        self.assertNotIn("--output=json", invoked.call_args.args[0])
+        self.assertEqual("readiness_not_consumed", metadata["second_run_failure_reason"])
+        self.assertTrue(metadata["readiness_before"])
+        self.assertTrue(metadata["readiness_after"])
+        self.assertFalse(metadata["gate_after"])
+        self.assertFalse(metadata["phase_changed"])
+        self.assertFalse(metadata["hook_postcondition_passed"])
+
+    def test_second_run_artifact_contains_only_typed_safe_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "artifacts/compatibility-report.json"
+            failure = self._failure(root)
+            failure.stage = "acceptance.operation.second_run"
+            failure.second_run = {
+                **_second_run_defaults(),
+                "second_run_envelope_kind": "error",
+                "second_run_error_code_present": True,
+                "second_run_error_code": "INTEGRITY_ERROR",
+                "second_run_failure_reason": "hook_error",
+            }
+            _write_diagnostic(output, failure, base=root, source_commit="unused")
+            diagnostic = json.loads(
+                output.with_name("compatibility-diagnostic.json").read_text(encoding="utf-8")
+            )
+        booleans = (
+            "second_run_exit_expected", "second_run_error_code_present",
+            "second_run_correlation_hash_present", "phase_changed",
+            "readiness_before", "readiness_after", "gate_before", "gate_after",
+            "hook_postcondition_passed",
+        )
+        self.assertTrue(all(type(diagnostic[key]) is bool for key in booleans))
+        self.assertEqual("hook_error", diagnostic["second_run_failure_reason"])
+        self.assertNotIn(self.canaries[0], json.dumps(diagnostic))
+        for reason in (
+            "process_exit", "envelope_missing", "envelope_invalid", "hook_error",
+            "state_not_advanced", "readiness_not_consumed", "gate_missing",
+            "phase_mismatch", "unexpected_terminal_state", "artifact_binding_failed", "none",
+        ):
+            diagnostic["second_run_failure_reason"] = reason
+            _validate_diagnostic(diagnostic)
+        diagnostic["second_run_failure_reason"] = "private-reason"
         with self.assertRaises(AcceptanceFailure):
             _validate_diagnostic(diagnostic)
 
