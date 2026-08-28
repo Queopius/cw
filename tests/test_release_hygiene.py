@@ -43,6 +43,9 @@ class ReleaseHygieneTests(unittest.TestCase):
         self.assertIn('git fetch origin prod --no-tags', workflow)
         self.assertIn('--branch-ref origin/prod', workflow)
         self.assertNotIn('git fetch origin release', workflow)
+        dependency_install = "python -m pip install . tiktoken==0.14.0"
+        self.assertIn(dependency_install, workflow)
+        self.assertLess(workflow.index(dependency_install), workflow.index("run: make check"))
         self.assertIn("python scripts/build_release.py --output dist --channel stable --component core", workflow)
         self.assertIn("python scripts/validate_release_assets.py --directory dist --component core", workflow)
         self.assertNotIn('build_plugin_candidate.py', workflow)
