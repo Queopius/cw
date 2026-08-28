@@ -208,6 +208,8 @@ def _project_snapshot(
 ) -> dict[str, tuple[str, int, str | None]]:
     excluded = {
         ".git",
+        ".cw/logs/runs",
+        ".cw/runtime/active-run.json",
         ".cw/runtime/operations",
         ".cw/runtime/verification",
         ".cw/validation",

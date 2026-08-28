@@ -9,6 +9,7 @@ import unittest
 from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, patch
 
 from cw.adapters.codex import CodexAdapter
@@ -249,6 +250,28 @@ class VerificationExecutorTests(unittest.TestCase):
         validation = VerificationExecutor().execute(self.repo.root, workflow, mutation)
         self.assertFalse(validation.passed)
         self.assertEqual(ErrorCode.VERIFICATION_COMMAND_FAILED.value, validation.error_code)
+
+    def test_concurrent_run_recorder_metadata_is_not_project_mutation(self) -> None:
+        phase = replace(
+            self.phase,
+            required_commands=(RequiredCommand("python3 -c 'print(42)'", 20),),
+        )
+        workflow = replace(self.workflow, phases=(phase, *self.workflow.phases[1:]))
+        real_popen = subprocess.Popen
+
+        def record_then_spawn(*args: Any, **kwargs: Any) -> subprocess.Popen[str]:
+            run_log = self.repo.root / ".cw/logs/runs/active.jsonl"
+            run_log.parent.mkdir(parents=True, exist_ok=True)
+            run_log.write_text("event\n", encoding="utf-8")
+            (self.repo.root / ".cw/runtime/active-run.json").write_text(
+                "{}", encoding="utf-8",
+            )
+            return real_popen(*args, **kwargs)
+
+        with patch("cw.checks.verification.subprocess.Popen", side_effect=record_then_spawn):
+            validation = VerificationExecutor().execute(self.repo.root, workflow, phase)
+
+        self.assertTrue(validation.passed, validation.errors)
 
     def test_git_metadata_snapshot_is_root_bound_not_cwd_or_environment(self) -> None:
         self.repo.artifact()
