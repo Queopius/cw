@@ -4,6 +4,18 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.18.2 — 2026-08-29
+
+- Isolate Laravel/Testbench cache files under the private Verification Executor
+  runtime and narrowly tolerate safe PHPUnit, PHPStan, and Testbench cache
+  outputs without weakening artifact, source, configuration, or Git integrity.
+- Accept Codex's current narrative-only `agent_message` reviewer event while
+  continuing to reject command, tool, MCP, function, shell, malformed, and
+  future unknown item types fail-closed.
+- Preserve valid 0.18.1 verification receipts and pending legacy retry
+  authorizations; infrastructure isolation failures remain retryable without
+  consuming semantic or revision attempts.
+
 ## 0.18.1 — 2026-08-28
 
 - Install the pinned benchmark tokenizer in the immutable Release Check before
