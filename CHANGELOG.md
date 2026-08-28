@@ -4,6 +4,22 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+- Separate deterministic command execution into a private Verification
+  Executor with preflighted temp/cache roots and integrity-bound append-only
+  receipts. The Semantic Reviewer consumes those receipts, treats repository
+  content as hostile input, and is prohibited from executing project commands.
+- Reject a reviewer result when managed Codex reports command execution, and
+  classify verification/reviewer infrastructure without consuming semantic or
+  revision attempts. `cw retry`, `cw explain`, and `cw doctor --reviewer` expose
+  the recoverable boundary without invoking implementation.
+- Add governed `cw review recover-infrastructure` preview/apply for historical
+  infrastructure-contaminated `REVISE` evidence. Exact review/workflow/state
+  CAS, multi-source proof, backup-first journaling, append-only supersession,
+  rollback, and idempotent replay are mandatory.
+- Recommend Core `0.18.0`. Plugin `0.1.0`, its 12 tools, `cw.remote.v1`,
+  `cw.output.v1`, project schema `1`, and governance evidence schema `2` remain
+  unchanged.
+
 - Add explicit `cw plan rebaseline recover` preview/apply flows for a proven
   `repair --reopen` state. Recovery requires the exact REVISE review digest,
   workflow/state CAS values and an audit reason; it restores only

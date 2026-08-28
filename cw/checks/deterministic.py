@@ -1,21 +1,15 @@
 from __future__ import annotations
 
-import os
 import re
-import subprocess
-import time
 from pathlib import Path
 from typing import Any
 
-from cw.core.commands import command_arguments
+from cw.checks.verification import VerificationExecutor
 from cw.core.errors import CwError, ErrorCode
-from cw.core.gates import artifact_hashes, validate_dependencies
 from cw.core.models import Phase, ValidationResult, Workflow
-from cw.core.session import load_session, readiness_path
 from cw.core.schema import schema_version
-from cw.core.utils import load_json, safe_project_path
-from cw.execution.context import current_event_sink
-from cw.execution.events import ExecutionEvent, ExecutionEventType
+from cw.core.session import load_session, readiness_path
+from cw.core.utils import atomic_json, load_json, safe_project_path
 
 
 def load_readiness(root: Path, phase: Phase) -> dict[str, Any]:
@@ -26,7 +20,7 @@ def load_readiness(root: Path, phase: Phase) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise CwError("Readiness manifest must be an object", ErrorCode.SCHEMA_VALIDATION_ERROR)
     schema_version(data, "Readiness manifest")
-    allowed = {"schema_version", "session_id", "phase", "status", "artifacts", "checks_executed"}
+    allowed = {"schema_version", "session_id", "phase", "status", "artifacts", "checks_executed", "verification_receipt"}
     if set(data) - allowed:
         raise CwError("Readiness manifest has unknown fields", ErrorCode.SCHEMA_VALIDATION_ERROR)
     if not isinstance(data.get("session_id"), str) or re.fullmatch(r"[0-9a-f]{32}", data["session_id"]) is None:
@@ -51,74 +45,19 @@ def load_readiness(root: Path, phase: Phase) -> dict[str, Any]:
             raise CwError("Readiness check exit code is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
     for artifact in artifacts:
         safe_project_path(root, artifact, must_exist=True)
+    receipt = data.get("verification_receipt")
+    if receipt is not None and (
+        not isinstance(receipt, dict)
+        or set(receipt) != {"reference", "sha256", "digest", "receipt_id"}
+        or not all(isinstance(value, str) and value for value in receipt.values())
+    ):
+        raise CwError("Readiness verification receipt reference is invalid", ErrorCode.SCHEMA_VALIDATION_ERROR)
     return data
-
-
-def _redacted_environment() -> dict[str, str]:
-    allowed = {
-        "PATH", "PATHEXT", "LANG", "LC_ALL", "TERM", "TMPDIR", "TMP", "TEMP", "CI", "HOME",
-        "USERPROFILE", "SYSTEMROOT", "WINDIR", "COMSPEC", "LOCALAPPDATA", "APPDATA",
-    }
-    return {key: value for key, value in os.environ.items() if key in allowed}
-
-
-def _validate_completed_work(root: Path, workflow: Workflow, phase: Phase, result: ValidationResult) -> None:
-    validate_dependencies(root, workflow, phase)
-    result.checks.append({"name": "Previous gates", "status": "passed"})
-    for artifact in phase.artifacts:
-        safe_project_path(root, artifact, must_exist=True)
-    result.checks.append({"name": "Artifacts", "status": "passed", "count": len(phase.artifacts)})
-    for command in phase.required_commands:
-        timeout = command.timeout_seconds or workflow.command_timeout
-        arguments = command_arguments(command.command)
-        sink = current_event_sink()
-        if sink is not None:
-            sink(ExecutionEvent(
-                ExecutionEventType.COMMAND_STARTED,
-                source_type="cw.validation.command",
-                command=command.command,
-                status="in_progress",
-            ))
-        command_started = time.monotonic()
-        completed = subprocess.run(
-            arguments, cwd=root, shell=False, text=True, encoding="utf-8", errors="replace",
-            capture_output=True, timeout=timeout, env=_redacted_environment(), check=False,
-            stdin=subprocess.DEVNULL,
-        )
-        if sink is not None:
-            sink(ExecutionEvent(
-                ExecutionEventType.COMMAND_COMPLETED,
-                source_type="cw.validation.command",
-                command=command.command,
-                exit_code=completed.returncode,
-                duration_ms=max(0, round((time.monotonic() - command_started) * 1000)),
-                status="completed" if completed.returncode == 0 else "failed",
-            ))
-        check = {"name": "Required command", "command": command.command, "exit_code": completed.returncode}
-        result.checks.append(check)
-        if completed.returncode:
-            raise CwError(f"Required command failed: {command.command}", details=(completed.stderr or completed.stdout)[-4000:])
-    validate_dependencies(root, workflow, phase)
-    result.artifact_hashes = artifact_hashes(root, phase.artifacts)
-    result.checks.append({"name": "SHA-256 integrity", "status": "passed"})
 
 
 def inspect_completed_work(root: Path, workflow: Workflow, phase: Phase) -> ValidationResult:
     """Validate implemented work without trusting or requiring a readiness manifest."""
-    result = ValidationResult(passed=False)
-    try:
-        _validate_completed_work(root, workflow, phase, result)
-        result.passed = True
-    except (CwError, OSError, subprocess.TimeoutExpired) as exc:
-        if isinstance(exc, subprocess.TimeoutExpired):
-            message = f"Required command timed out: {exc.cmd}"
-        elif isinstance(exc, OSError):
-            message = f"Required command could not start: {exc}"
-        else:
-            message = str(exc)
-        result.errors.append(message)
-        result.checks.append({"name": "Validation", "status": "failed", "detail": message})
-    return result
+    return VerificationExecutor().execute(root, workflow, phase)
 
 
 def validate_phase(root: Path, workflow: Workflow, phase: Phase) -> ValidationResult:
@@ -136,17 +75,24 @@ def validate_phase(root: Path, workflow: Workflow, phase: Phase) -> ValidationRe
         missing = required - declared
         if missing:
             raise CwError(f"Required artifacts are not declared: {', '.join(sorted(missing))}", ErrorCode.SCHEMA_VALIDATION_ERROR)
+        # Persisted receipts are evidence only. Regenerate verification unless
+        # an independent in-memory expectation is available.
         # Establish existence before commands, recheck dependency gates after
         # commands, and bind final file bytes into the semantic review.
-        _validate_completed_work(root, workflow, phase, result)
-        result.passed = True
-    except (CwError, OSError, subprocess.TimeoutExpired) as exc:
-        if isinstance(exc, subprocess.TimeoutExpired):
-            message = f"Required command timed out: {exc.cmd}"
-        elif isinstance(exc, OSError):
-            message = f"Required command could not start: {exc}"
-        else:
-            message = str(exc)
+        verified = VerificationExecutor().execute(root, workflow, phase)
+        result.checks.extend(verified.checks)
+        result.artifact_hashes = verified.artifact_hashes
+        result.error_code = verified.error_code
+        result.receipt = verified.receipt
+        result.receipt_payload = verified.receipt_payload
+        result.passed = verified.passed
+        if not verified.passed:
+            result.errors.extend(verified.errors)
+        elif verified.receipt is not None:
+            manifest["verification_receipt"] = verified.receipt
+            atomic_json(readiness_path(root), manifest)
+    except CwError as exc:
+        message = str(exc)
         result.errors.append(message)
         result.checks.append({"name": "Validation", "status": "failed", "detail": message})
     return result

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,7 +17,6 @@ from scripts.hero_demo import (
     sha256_tree,
     validate_artifact,
 )
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -128,7 +126,7 @@ class HeroSanitizationTests(unittest.TestCase):
 
 
 class HeroArtifactTests(unittest.TestCase):
-    def test_committed_real_recording_is_compatible_with_current_patch(self) -> None:
+    def test_committed_real_recording_is_compatible_with_current_minor(self) -> None:
         path = ROOT / "demo/hero/hero-demo.json"
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
         artifact = load_and_validate(path)
@@ -200,11 +198,12 @@ class HeroArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(HeroDemoError, "does not match VERSION"):
             validate_artifact(valid_artifact(), expected_version="99.0.0")
 
-    def test_real_recording_remains_valid_for_documentation_patch(self) -> None:
+    def test_real_recording_remains_valid_for_one_compatible_minor(self) -> None:
         self.assertTrue(recording_is_patch_compatible("0.5.0", "0.5.1"))
         self.assertTrue(recording_is_patch_compatible("0.5.1", "0.5.1"))
         self.assertFalse(recording_is_patch_compatible("0.5.1", "0.5.0"))
-        self.assertFalse(recording_is_patch_compatible("0.5.0", "0.6.0"))
+        self.assertTrue(recording_is_patch_compatible("0.5.0", "0.6.0"))
+        self.assertFalse(recording_is_patch_compatible("0.5.0", "0.7.0"))
         self.assertFalse(recording_is_patch_compatible("not-a-version", "0.5.1"))
 
     def test_private_posix_path_fails(self) -> None:

@@ -5,49 +5,55 @@ import copy
 import json
 import os
 import time
+from collections.abc import Callable
+from contextlib import nullcontext as _nullcontext
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from cw.checks.deterministic import inspect_completed_work, validate_phase
 from cw.core.diagnostics import state_error
 from cw.core.errors import CwError, ErrorCode
-from cw.core.gates import gate_path, validate_dependencies
-from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
+from cw.core.gates import gate_path, validate_dependencies, validate_gate
 from cw.core.initialize import backup_metadata
+from cw.core.integrity import snapshot_protected_paths, verify_protected_paths
 from cw.core.locking import operation_lock
 from cw.core.models import WorkflowState
+from cw.core.progress import derive_effective_workflow_state
 from cw.core.recovery import (
     mark_infrastructure_error,
+    migrate_legacy_reviewer_error,
     readiness_is_valid,
     regenerate_readiness,
     retryable_infrastructure_error,
-    migrate_legacy_reviewer_error,
 )
-from cw.core.progress import derive_effective_workflow_state
 from cw.core.session import create_session, finish_session, load_session, readiness_path
 from cw.core.state import advance_after_approval, load_state, save_state, transition
 from cw.core.utils import utc_now
-from cw.execution.session import active_batch
 from cw.execution.context import execution_event_sink
-from cw.execution.events import ExecutionEvent, ExecutionEventType, ExecutionState, StartupProfile
+from cw.execution.events import (
+    ExecutionEvent,
+    ExecutionEventType,
+    ExecutionState,
+    StartupProfile,
+)
 from cw.execution.processes import ProcessInspector
 from cw.execution.runs import RunRecorder, load_active_run, new_run_id
+from cw.execution.session import active_batch
 from cw.integrations.config import project_requirements
 from cw.integrations.manager import IntegrationManager
 from cw.ui.console import Console, emit_json
 from cw.ui.live import LiveExecutionObserver
 from cw.ui.renderers import (
-    render_completed_start,
     render_completed_action,
+    render_completed_start,
     render_review_result,
     render_review_start,
     render_start,
     render_transition,
-    render_validation,
     render_update_notice,
+    render_validation,
 )
 from cw.update.service import automatic_update_notice
-
 
 RootResolver = Callable[[], Path]
 ContextLoader = Callable[[Path], tuple[Any, dict[str, Any], Any]]
@@ -67,6 +73,55 @@ def current_phase(workflow: Any, state: dict[str, Any]) -> Any:
         return workflow.phase(phase_id)
     except KeyError as exc:
         raise CwError("Current phase is not in the plan", ErrorCode.INVALID_STATE) from exc
+
+
+def _require_review_hook_postcondition(
+    root: Path,
+    workflow: Any,
+    phase: Any,
+    report: dict[str, Any],
+) -> None:
+    """Refuse a successful hook response until its durable transition is proven."""
+
+    state = load_state(root)
+    readiness = readiness_path(root)
+    readiness_present = readiness.exists() or readiness.is_symlink()
+    decision = report.get("decision")
+    valid = False
+    if decision == "APPROVE" and not report.get("human"):
+        try:
+            validate_gate(root, workflow, phase.id)
+        except CwError:
+            valid = False
+        else:
+            status = state.get("status")
+            current = state.get("current_phase")
+            valid = not readiness_present and (
+                status == WorkflowState.IN_PROGRESS.value
+                and isinstance(current, str)
+                and current != phase.id
+                or status in {
+                    WorkflowState.PLANNED_COMPLETE.value,
+                    WorkflowState.COMPLETED.value,
+                }
+                and current is None
+            )
+    elif decision == "REVISE":
+        valid = (
+            not readiness_present
+            and state.get("status") == WorkflowState.REVISION_REQUIRED.value
+        )
+    elif decision == "HUMAN_REVIEW_REQUIRED":
+        valid = (
+            not readiness_present
+            and state.get("status") == WorkflowState.HUMAN_REVIEW_REQUIRED.value
+        )
+    if not valid:
+        raise CwError(
+            "Review hook durable postcondition failed",
+            ErrorCode.INTEGRITY_ERROR,
+            "Run: cw status",
+        )
 
 
 def command_start(
@@ -433,6 +488,82 @@ def command_review(
     completion_reviewer: Callable[[Path, Any, dict[str, Any]], dict[str, Any]] | None = None,
 ) -> int:
     root = root_resolver()
+    if getattr(args, "action", None) == "authorize-retry":
+        from cw.core.review_infrastructure_recovery import authorize_legacy_retry
+
+        required = (
+            args.phase,
+            args.review_ref,
+            args.expected_review_sha256,
+            args.expected_workflow_sha256,
+            args.expected_state_sha256,
+            args.reason,
+        )
+        if (
+            not all(required)
+            or bool(args.dry_run) == bool(args.apply)
+            or not args.acknowledge_unverifiable_legacy
+        ):
+            raise CwError(
+                "Legacy retry authorization requires all CAS values, reason, acknowledgement, and exactly one of --dry-run or --apply",
+                ErrorCode.USAGE_ERROR,
+                exit_code=2,
+            )
+        with operation_lock(root, "review-authorize-retry") if args.apply else _nullcontext():
+            report = authorize_legacy_retry(
+                root,
+                *required,
+                args.acknowledge_unverifiable_legacy,
+                apply=args.apply,
+            )
+        if args.json:
+            emit_json(report)
+        else:
+            console.header("Legacy review retry authorization")
+            console.field("Classification", report["classification"])
+            console.field("Changed", str(report["changed"]).lower())
+            console.action(report["next_action"], "Run a fresh deterministic verification")
+        return 0
+    if getattr(args, "action", None) == "recover-infrastructure":
+        from cw.core.review_infrastructure_recovery import (
+            apply_review_infrastructure_recovery,
+            preview_review_infrastructure_recovery,
+            recover_review_infrastructure_transaction,
+        )
+
+        required = (
+            args.phase, args.review_ref, args.expected_review_sha256,
+            args.expected_workflow_sha256, args.expected_state_sha256, args.reason,
+        )
+        if not all(required) or bool(args.dry_run) == bool(args.apply):
+            raise CwError(
+                "Review infrastructure recovery requires phase, review, three CAS values, reason, and exactly one of --dry-run or --apply",
+                ErrorCode.USAGE_ERROR, exit_code=2,
+            )
+        if args.hook or args.human_approve:
+            raise CwError("Review recovery cannot be combined with hook or human approval", ErrorCode.USAGE_ERROR, exit_code=2)
+        if args.dry_run:
+            report = preview_review_infrastructure_recovery(root, *required)
+        else:
+            with operation_lock(root, "review-recover-infrastructure"):
+                recover_review_infrastructure_transaction(root)
+                report = apply_review_infrastructure_recovery(root, *required)
+        if args.json:
+            emit_json(report)
+        else:
+            console.header("Review infrastructure recovery")
+            console.field("Result", report["result"])
+            console.field("Phase", report["phase"])
+            console.field("Review", report["review_reference"])
+            console.field("Classification", report["classification"])
+            console.field("Changed", str(report["changed"]).lower())
+            console.field("Attempts restored", report["attempts_restored"])
+            if report.get("backup"):
+                console.field("Backup", report["backup"])
+            console.action("cw retry --json", "Retry review as a separate governed operation")
+        return 0
+    if getattr(args, "action", None) is not None:
+        raise CwError("Unknown review operation", ErrorCode.USAGE_ERROR, exit_code=2)
     _, state, workflow = context(root)
     phase = current_resolver(workflow, state)
     ready = readiness_path(root)
@@ -480,7 +611,23 @@ def command_review(
                 raise
     if review_observer is not None:
         review_observer.finish(success=True)
+    retry_context = getattr(args, "retry_context", None)
+    if isinstance(retry_context, dict):
+        report = {
+            **report,
+            "result": "REVIEW_RETRIED",
+            "changed": True,
+            "mutation": "semantic-review+state" + ("+gate" if report.get("gate") else ""),
+            "retryable": False,
+            "classification": retry_context.get("error_code"),
+            "retry_operation": retry_context.get("operation"),
+            "review_reference": load_state(root).get("last_review"),
+            "readiness_available": readiness_path(root).is_file(),
+            "idempotent_replay": False,
+            "next_action": "cw status" if report.get("decision") == "APPROVE" else "Revise the implementation",
+        }
     if args.hook:
+        _require_review_hook_postcondition(root, workflow, phase, report)
         if report.get("decision") == "REVISE":
             reason = "CW independent review requires revision. Run: cw history"
         else:
@@ -522,6 +669,10 @@ def command_retry(
 ) -> int:
     root = root_resolver()
     _, state, workflow = context(root)
+    from cw.core.review_infrastructure_recovery import pending_legacy_authorization
+
+    legacy_auth = pending_legacy_authorization(root, state)
+    metadata: dict[str, Any] | None
     if workflow.phases and derive_effective_workflow_state(root, workflow, state).is_complete:
         payload = {
             "status": "COMPLETED",
@@ -540,7 +691,18 @@ def command_retry(
                 detail="No retry is required. No implementation session was started.",
             )
         return 0
-    if not isinstance(state.get("infrastructure_error"), dict):
+    if legacy_auth is not None:
+        metadata = {
+            "error_code": ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR.value,
+            "retryable": True,
+            "operation": "review",
+            "phase": legacy_auth.get("phase_id"),
+            "occurred_at": utc_now(),
+            "legacy": True,
+        }
+        state["legacy_retry_authorization_id"] = legacy_auth.get("authorization_id")
+        save_state(root, state)
+    elif not isinstance(state.get("infrastructure_error"), dict):
         # A direct retry of prototype-era state performs the same safe,
         # backed-up normalization as `cw repair` before taking recovery action.
         with operation_lock(root, "retry-migration"):
@@ -549,12 +711,12 @@ def command_retry(
             if migrated is not None:
                 state["last_error"] = None
                 save_state(root, state)
-    metadata = retryable_infrastructure_error(state)
+    metadata = metadata if legacy_auth is not None else retryable_infrastructure_error(state)
     status = WorkflowState(state["status"])
     if metadata is None or status not in {
         WorkflowState.ERROR,
         WorkflowState.READY_FOR_REVIEW,
-        WorkflowState.COMPLETION_BLOCKED,
+        WorkflowState.COMPLETION_BLOCKED, WorkflowState.REVISION_REQUIRED,
     }:
         raise CwError("There is no retryable infrastructure error", ErrorCode.INVALID_STATE)
     phase_id = state.get("current_phase")
@@ -586,7 +748,7 @@ def command_retry(
         args.action = "review"
         return completion_command(args, console)
 
-    if operation == "review":
+    if operation in {"review", "verification"}:
         phase = current_resolver(workflow, state)
         with operation_lock(root, "retry-review"):
             if readiness_is_valid(root, workflow, phase):
@@ -619,6 +781,7 @@ def command_retry(
                 transition(root, state, WorkflowState.READY_FOR_REVIEW)
         args.hook = False
         args.human_approve = False
+        args.retry_context = metadata
         return review_command(args, console)
     if operation == "implementation":
         if status is not WorkflowState.ERROR:

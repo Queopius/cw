@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import hashlib
 import io
 import json
 import os
@@ -12,11 +11,8 @@ import traceback
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from cw.core.diagnostics import correlation_id, safe_exception_frames
 from cw.core.errors import CwError, ErrorCode
-from cw.ui.console import Console, emit_json, error_summary
-from cw.ui.renderers import render_help
-from cw.ui.renderers import render_update_notice
-from cw.update.service import automatic_update_notice
 from cw.output_protocol import (
     OutputMode,
     OutputStatus,
@@ -30,13 +26,19 @@ from cw.output_protocol import (
     sanitize_output,
     validate_machine_options,
 )
-
+from cw.ui.console import Console, emit_json, error_summary, json_output_stream
+from cw.ui.renderers import render_help, render_update_notice
+from cw.update.service import automatic_update_notice
 
 Command = Callable[[argparse.Namespace, Console], int]
 ErrorRecorder = Callable[..., None]
 
 
 _RETRYABLE_ERRORS = frozenset({
+    ErrorCode.VERIFICATION_INFRASTRUCTURE_ERROR,
+    ErrorCode.VERIFICATION_TIMEOUT,
+    ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR,
+    ErrorCode.REVIEWER_INVALID_OUTPUT,
     ErrorCode.REVIEWER_NETWORK_ERROR,
     ErrorCode.REVIEWER_PROCESS_ERROR,
     ErrorCode.PLANNER_NETWORK_ERROR,
@@ -48,10 +50,6 @@ _RETRYABLE_ERRORS = frozenset({
 })
 
 
-def _correlation_id(command: str, code: str, message: str) -> str:
-    return hashlib.sha256(f"{command}\0{code}\0{message}".encode()).hexdigest()[:16]
-
-
 def _compact_error_text(value: str | None, *, maximum: int = 240) -> str | None:
     if value is None:
         return None
@@ -60,13 +58,13 @@ def _compact_error_text(value: str | None, *, maximum: int = 240) -> str | None:
     return compact if len(compact) <= maximum else compact[: maximum - 1].rstrip() + "…"
 
 
-def _structured_error(command: str, error: CwError) -> dict[str, object]:
+def _structured_error(error: CwError, *, correlation: str) -> dict[str, object]:
     return {
         "code": error.code.value,
         "message": _compact_error_text(error.message) or error.code.value,
         "retryable": error.code in _RETRYABLE_ERRORS,
         "hint": _compact_error_text(error.hint.removeprefix("Run: ")) if error.hint else None,
-        "correlation_id": _correlation_id(command, error.code.value, error.message),
+        "correlation_id": correlation,
     }
 
 
@@ -104,7 +102,8 @@ def _render_cw_error(
     command: str,
     record_error: ErrorRecorder,
 ) -> int:
-    record_error(error, source=command)
+    correlation = correlation_id(command, error.code.value, error.message)
+    record_error(error, source=command, correlation_id=correlation, safe_traceback=safe_exception_frames(error))
     if getattr(args, "hook", False):
         reason = f"{error.message}. {error.hint or 'Run: cw error'}"
         print(json.dumps({"continue": False, "stopReason": reason, "systemMessage": reason}))
@@ -115,6 +114,7 @@ def _render_cw_error(
                 "code": error.code.value,
                 "message": error.message,
                 "hint": error.hint,
+                "correlation_id": correlation,
                 "details": error.details,
             },
         })
@@ -152,13 +152,18 @@ def _render_internal_error(
         "Run: cw error",
         details=f"{type(error).__name__}: {error}",
     )
-    record_error(internal, source=command, traceback_text=traceback.format_exc())
+    correlation = correlation_id(command, internal.code.value, internal.message)
+    record_error(
+        internal, source=command, traceback_text=traceback.format_exc(), correlation_id=correlation,
+        safe_traceback=safe_exception_frames(error),
+    )
     if args.json:
         emit_json({
             "error": {
                 "code": internal.code.value,
                 "message": internal.message,
                 "hint": internal.hint,
+                "correlation_id": correlation,
             },
         })
     elif not args.quiet:
@@ -194,10 +199,12 @@ def run(
             or os.environ.get("CW_OUTPUT_MODE") in {"json", "jsonl", "llm"}
         )
         if requested_machine:
+            correlation = correlation_id(identifier, error.code.value, error.message)
+            record_error(error, source=identifier, correlation_id=correlation)
             _emit_protocol(envelope(
                 identifier, status=OutputStatus.ERROR, changed=False,
                 error=sanitize_output(
-                    _structured_error(identifier, error), private_roots=(Path.cwd(), Path.home()),
+                    _structured_error(error, correlation=correlation), private_roots=(Path.cwd(), Path.home()),
                 ), gate=_structured_gate(error),
             ))
         else:
@@ -257,9 +264,13 @@ def _run_machine(
     args.quiet = False
     captured = io.StringIO()
     diagnostics = io.StringIO()
-    console = Console(stream=captured, no_color=True, quiet=False)
+    console = Console(stream=diagnostics, no_color=True, quiet=False)
     try:
-        with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(diagnostics):
+        with (
+            json_output_stream(captured),
+            contextlib.redirect_stdout(diagnostics),
+            contextlib.redirect_stderr(diagnostics),
+        ):
             if command == "help":
                 result = 0
                 emit_json({"commands": [*commands, "help"]})
@@ -306,7 +317,8 @@ def _run_machine(
             )
         return result
     except CwError as error:
-        record_error(error, source=command)
+        correlation = correlation_id(identifier, error.code.value, error.message)
+        record_error(error, source=identifier, correlation_id=correlation, safe_traceback=safe_exception_frames(error))
         _emit_protocol(envelope(
             identifier,
             status=(
@@ -317,7 +329,7 @@ def _run_machine(
             ),
             changed=False,
             error=sanitize_output(
-                _structured_error(identifier, error), private_roots=(Path.cwd(), Path.home()),
+                _structured_error(error, correlation=correlation), private_roots=(Path.cwd(), Path.home()),
             ),
             gate=sanitize_output(
                 _structured_gate(error), private_roots=(Path.cwd(), Path.home()),
@@ -333,7 +345,7 @@ def _run_machine(
             changed=False,
             error={
                 "code": "CANCELLED", "message": "Operation cancelled", "retryable": False,
-                "hint": None, "correlation_id": _correlation_id(identifier, "CANCELLED", "Operation cancelled"),
+                "hint": None, "correlation_id": correlation_id(identifier, "CANCELLED", "Operation cancelled"),
             },
         ))
         return 130
@@ -342,12 +354,16 @@ def _run_machine(
             "Unexpected internal failure", ErrorCode.INTERNAL_ERROR, "Run: cw error",
             details=f"{type(error).__name__}: {error}",
         )
-        record_error(internal, source=command, traceback_text=traceback.format_exc())
+        correlation = correlation_id(identifier, internal.code.value, internal.message)
+        record_error(
+            internal, source=identifier, traceback_text=traceback.format_exc(), correlation_id=correlation,
+            safe_traceback=safe_exception_frames(error),
+        )
         _emit_protocol(envelope(
             identifier,
             status=OutputStatus.ERROR,
             changed=False,
-            error=_structured_error(identifier, internal),
+            error=_structured_error(internal, correlation=correlation),
         ))
         if getattr(args, "debug", False):
             _debug(internal, roots=(Path.cwd(), Path.home()))
