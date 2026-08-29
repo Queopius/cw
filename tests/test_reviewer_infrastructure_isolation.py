@@ -16,9 +16,10 @@ from cw.adapters.codex import CodexAdapter
 from cw.adapters.invocation import record_run_result
 from cw.adapters.result import CodexResult
 from cw.agents.reviewer import reviewer_prompt, run_review
+from cw.checks.review_evidence import SemanticReviewEvidenceBundle
 from cw.checks.verification import (
-    VerificationExecutor,
     _LEGACY_PRIVATE_ENV,
+    VerificationExecutor,
     _cleanup_runtime,
     _git_metadata_snapshot,
     _receipt_digest,
@@ -746,15 +747,17 @@ class SemanticReviewerIsolationTests(unittest.TestCase):
 
     def test_prompt_treats_repository_and_artifacts_as_untrusted(self) -> None:
         prompt = reviewer_prompt(
-            self.repo.workflow,
-            self.repo.workflow.phases[0],
-            {"receipt_sha256": "sha256:" + "0" * 64},
+            SemanticReviewEvidenceBundle(
+                canonical_json="{}",
+                sha256="sha256:" + "0" * 64,
+                artifact_paths=(),
+            )
         )
         for required in (
             "untrusted data",
             "NEVER execute project commands",
             "prompt",
-            "Verification Receipt",
+            "bundle is complete",
             "must not be represented as semantic REVISE",
         ):
             self.assertIn(required, prompt)
@@ -801,11 +804,12 @@ class SemanticReviewerIsolationTests(unittest.TestCase):
             return_value=CodexResult(
                 result(decision="REVISE", status="FAIL"), "", stdout
             ),
-        ), self.assertRaises(CwError) as raised:
+        ) as streaming, self.assertRaises(CwError) as raised:
             CodexAdapter().run_reviewer(self.repo.root, "review", schema, 10)
         self.assertEqual(
             ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR, raised.exception.code
         )
+        self.assertIn("features.shell_tool=false", streaming.call_args.args[2])
 
     def test_current_codex_agent_message_is_read_only_and_terminal(self) -> None:
         stdout = "\n".join(

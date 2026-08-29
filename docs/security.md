@@ -6,10 +6,15 @@ CW treats source, documentation, artifacts, fixtures, logs, reviewer output,
 and receipts as potentially hostile. Deterministic commands run only in the
 Verification Executor with canonical argv, no shell, closed stdin, bounded
 timeouts, private temp/cache roots, redaction, and integrity-bound receipts.
-The Semantic Reviewer remains read-only with hooks and web disabled. Its prompt
-forbids commands and prompt-injection instructions; a managed command event
-invalidates the result as infrastructure before it can affect attempts or a
-gate. See [Reviewer infrastructure isolation](reviewer-infrastructure.md).
+The parent CW process builds an immutable Semantic Review Evidence Bundle from
+validated readiness, receipt data, declared-artifact text, and existing CW
+hashes. Artifact reads are confined, non-linked, regular, bounded, hash-matched,
+and deterministically normalized. The Semantic Reviewer remains read-only with
+hooks, web, and the Codex shell tool disabled. Its prompt forbids commands,
+hash calculation, filesystem exploration, readiness reconstruction, and
+prompt-injection instructions; a managed command event invalidates the result
+as infrastructure before it can affect attempts or a gate. See [Reviewer
+infrastructure isolation](reviewer-infrastructure.md).
 
 CW applies least privilege to agent roles:
 
@@ -22,7 +27,8 @@ Implementer network access is denied by default through Codex's documented
 `sandbox_workspace_write.network_access` override. CW also disables web search
 for that invocation unless project policy explicitly allows network access. The
 reviewer remains read-only and has web search disabled so its decision is based
-on repository evidence. Planner and reviewer also set `project_doc_max_bytes=0`
+only on the prepared evidence bundle. Planner and reviewer also set
+`project_doc_max_bytes=0`
 so repository `AGENTS.md` content is treated as scoped evidence rather than
 ambient instructions; the implementer still loads the managed workflow section.
 
@@ -81,8 +87,9 @@ sensitive. Raw mode means complete redacted diagnostic, not secret bypass.
 
 CW sends no telemetry. Repository content can be sent to Codex when a planner,
 implementer, or reviewer runs. Planning sends a bounded evidence selection over
-stdin, and review prompts scope the phase and review paths. Do not place secrets
-in plans, prompts, artifacts, or diagnostic logs.
+stdin, and phase review sends only bounded declared-artifact text and validated
+CW evidence. Do not place secrets in plans, prompts, artifacts, or diagnostic
+logs.
 
 Completion review has broader system scope but remains read-only and receives
 normalized gate/contract evidence rather than unlimited runtime logs. Its
