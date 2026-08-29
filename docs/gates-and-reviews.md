@@ -56,7 +56,8 @@ The order is fixed:
 6. dependency gate revalidation;
 7. final SHA-256 artifact capture and append-only Verification Receipt;
 8. receipt integrity validation;
-9. independent semantic review.
+9. bounded Semantic Review Evidence Bundle construction;
+10. independent semantic review.
 
 Commands run before authoritative hashes are captured. CW then revalidates
 dependencies, preventing a test or formatter from silently changing current
@@ -78,14 +79,23 @@ The reviewer uses a separate ephemeral `codex exec` process with:
 | Sandbox | `read-only` |
 | Approval policy | `never` |
 | Hooks | disabled |
+| Shell tool | disabled when the provider supports per-session tool control |
 | Output | validated structured schema |
-| Scope | current-phase artifacts and configured review paths |
+| Scope | declared current-phase artifacts included in the evidence bundle |
 | Commands | prohibited; any observed command event discards the result |
-| Deterministic evidence | validated Verification Receipt |
+| Deterministic evidence | structured results from the validated Verification Receipt |
 
-It evaluates every acceptance criterion and every blocking criterion exactly
-once. Each evidence entry must begin with an existing repository-relative file
-inside the allowed review scope.
+CW reads each declared artifact before reviewer launch using project-root
+containment, traversal and symlink rejection, regular-file checks, per-file and
+global size limits, exact receipt-hash matching, strict UTF-8 decoding, and
+deterministic LF normalization. Undeclared files are never included. If that
+evidence cannot be prepared, `REVIEW_EVIDENCE_UNAVAILABLE` stops the operation
+before the reviewer starts.
+
+The reviewer evaluates every acceptance criterion and every blocking criterion
+exactly once. Each evidence entry must begin with a bundled artifact path. It
+must not calculate hashes, explore the filesystem, reconstruct readiness, or
+request commands; it returns only the existing structured semantic result.
 
 Approval fails closed for missing, duplicated, or invented criteria; unknown or
 ambiguous evidence; failed blocking criteria; or unresolved blocking issues. An
@@ -109,8 +119,8 @@ Infrastructure failures preserve valid session-bound readiness so retry can run
 only the reviewer. If the implementer exits after writing readiness but before
 the Stop hook completes, retry also proceeds directly to review.
 
-Repository content is hostile input to the reviewer. Instructions in Markdown,
-artifacts, fixtures, logs, or source cannot alter its mandate. The reviewer
+Bundled repository content is hostile input to the reviewer. Instructions in
+artifact text cannot alter its mandate. The reviewer
 evaluates acceptance semantics, scope, Completion Contract, artifacts,
 coherence, integrity, and risk; it neither reruns deterministic checks nor
 approves merely because they passed.

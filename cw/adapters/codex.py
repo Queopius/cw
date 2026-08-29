@@ -345,10 +345,14 @@ class CodexAdapter:
             command = [
                 self._executable(), "--strict-config", "--config", 'web_search="disabled"',
                 "--config", "project_doc_max_bytes=0",
+            ]
+            if role == "reviewer":
+                command.extend(["--config", "features.shell_tool=false"])
+            command.extend([
                 "--ask-for-approval", "never", "exec", "--ephemeral",
                 "--disable", "hooks", "--sandbox", "read-only",
                 "--ignore-rules", "--color", "never",
-            ]
+            ])
             if current_event_sink() is not None or role.endswith("reviewer"):
                 command.append("--json")
             command.extend([
@@ -364,7 +368,10 @@ class CodexAdapter:
                 is_reviewer = role.endswith("reviewer")
                 code = ErrorCode.REVIEW_TIMEOUT if is_reviewer else ErrorCode.PLAN_TIMEOUT
                 label = "Independent reviewer" if is_reviewer else "Codex planner"
-                raise CwError(f"{label} timed out", code, "Run: cw retry", details=str(exc)) from exc
+                details = f"timeout_seconds={timeout}" if is_reviewer else str(exc)
+                raise CwError(
+                    f"{label} timed out", code, "Run: cw retry", details=details
+                ) from exc
             if result.exit_code:
                 code = result.terminal_error or self.classify_process_error(
                     result.stderr, result.stdout, role=role,
@@ -373,7 +380,11 @@ class CodexAdapter:
                 hint = "Run: cw error" if code in {
                     ErrorCode.PLANNER_SCHEMA_ERROR, ErrorCode.CODEX_CONFIG_ERROR,
                 } else "Run: cw retry"
-                diagnostic = self._diagnostic(result.stdout, result.stderr)
+                diagnostic = (
+                    "Private reviewer process diagnostics were withheld"
+                    if role.endswith("reviewer")
+                    else self._diagnostic(result.stdout, result.stderr)
+                )
                 raise CwError(
                     f"{label} unavailable", code, hint,
                     details=f"{diagnostic}\n\n{invocation_details(invocation or {})}",
@@ -444,15 +455,16 @@ class CodexAdapter:
                         f"Reviewer event stream contains an unknown item type: {label}",
                         ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR,
                     )
-                if item_type == "agent_message":
-                    if set(item) - {"id", "type", "text"} or (
+                if item_type == "agent_message" and (
+                    set(item) - {"id", "type", "text"} or (
                         event_type == "item.completed"
                         and not isinstance(item.get("text"), str)
-                    ):
-                        raise CwError(
-                            "Reviewer event stream contains an invalid agent_message",
-                            ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR,
-                        )
+                    )
+                ):
+                    raise CwError(
+                        "Reviewer event stream contains an invalid agent_message",
+                        ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR,
+                    )
                 if (
                     event_type in {"item.completed", "message.completed"}
                     and item_type in {"message", "output_text", "agent_message"}
