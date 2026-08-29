@@ -4,6 +4,21 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+## 0.18.3 — 2026-08-29
+
+- Build a canonical, immutable Semantic Review Evidence Bundle from validated
+  readiness and Verification Receipt evidence before starting the reviewer.
+- Safely incorporate only declared, bounded, regular UTF-8 artifacts after
+  project-root confinement and exact parent-process hash verification.
+- Give the Semantic Reviewer criteria, Completion Contract data, deterministic
+  command results, hashes, receipt identity, and authorized artifact text while
+  disabling its shell and forbidding filesystem exploration or hash calculation.
+- Classify unavailable or unsafe review evidence as
+  `REVIEW_EVIDENCE_UNAVAILABLE` before reviewer startup.
+- Preserve schema 1 compatibility, normal semantic results, valid readiness and
+  receipts, attempts, and pending legacy retry authorization when reviewer
+  infrastructure fails; command execution remains fail-closed infrastructure.
+
 ## 0.18.2 — 2026-08-29
 
 - Isolate Laravel/Testbench cache files under the private Verification Executor
