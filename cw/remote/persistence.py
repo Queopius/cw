@@ -402,6 +402,34 @@ class RemoteStore:
             (issuer, token_id),
         ).fetchone() is not None
 
+    def migrate_legacy_principal(
+        self, *, workspace_id: str, legacy_principal_id: str, principal_id: str,
+    ) -> bool:
+        """Atomically replace a pre-normalization authorization key in one workspace."""
+
+        if legacy_principal_id == principal_id:
+            return False
+        with self.transaction() as connection:
+            present = any(
+                connection.execute(
+                    f"SELECT 1 FROM {table} WHERE workspace_id = ? AND principal_id = ? LIMIT 1",
+                    (workspace_id, legacy_principal_id),
+                ).fetchone() is not None
+                for table in ("pairing_challenges", "devices", "project_grants", "routed_requests", "audit_events")
+            )
+            if not present:
+                return False
+            for table in ("pairing_challenges", "devices", "project_grants", "routed_requests", "audit_events"):
+                connection.execute(
+                    f"UPDATE {table} SET principal_id = ? WHERE workspace_id = ? AND principal_id = ?",
+                    (principal_id, workspace_id, legacy_principal_id),
+                )
+            connection.execute(
+                "UPDATE audit_events SET actor = ? WHERE workspace_id = ? AND actor = ?",
+                (principal_id, workspace_id, legacy_principal_id),
+            )
+        return True
+
     def audit(self, event_type: str, *, outcome: str, detail: dict[str, Any] | None = None, **fields: Any) -> None:
         permitted = {
             "request_id", "operation_id", "principal_id", "workspace_id",

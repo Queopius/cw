@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import hashlib
 import json
 import time
 from dataclasses import dataclass
@@ -10,12 +11,59 @@ from urllib.parse import urlparse, urlunparse
 
 from .errors import RemoteError, RemoteErrorCode
 from .persistence import RemoteStore
-from .protocol import RemoteIdentity, all_remote_scopes
+from .protocol import RemoteIdentity, all_remote_scopes, is_safe_internal_id
 
 
 _identity_context: contextvars.ContextVar[RemoteIdentity | None] = contextvars.ContextVar(
     "cw_remote_identity", default=None,
 )
+
+MAX_EXTERNAL_SUBJECT_CHARACTERS = 512
+MAX_EXTERNAL_SUBJECT_BYTES = 2048
+_PRINCIPAL_DIGEST_DOMAIN = b"cw.oauth.principal.v1\x00"
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalSubject:
+    """Validated opaque identity-provider subject; never an authorization key."""
+
+    value: str
+
+    @classmethod
+    def parse(cls, value: object) -> "ExternalSubject":
+        if not isinstance(value, str) or not value or len(value) > MAX_EXTERNAL_SUBJECT_CHARACTERS:
+            raise RemoteError(
+                RemoteErrorCode.TOKEN_INVALID,
+                "OAuth subject identity is invalid",
+                http_status=401,
+            )
+        try:
+            encoded = value.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise RemoteError(
+                RemoteErrorCode.TOKEN_INVALID,
+                "OAuth subject identity is invalid",
+                http_status=401,
+            ) from exc
+        if len(encoded) > MAX_EXTERNAL_SUBJECT_BYTES or any(not character.isprintable() for character in value):
+            raise RemoteError(
+                RemoteErrorCode.TOKEN_INVALID,
+                "OAuth subject identity is invalid",
+                http_status=401,
+            )
+        return cls(value)
+
+
+def derive_principal_id(issuer: str, subject: ExternalSubject) -> str:
+    """Derive one stable CW-safe identity from an issuer-bound opaque subject."""
+
+    digest = hashlib.sha256()
+    digest.update(_PRINCIPAL_DIGEST_DOMAIN)
+    for value in (issuer, subject.value):
+        encoded = value.encode("utf-8")
+        digest.update(len(encoded).to_bytes(4, "big"))
+        digest.update(encoded)
+    return "cwid_" + digest.hexdigest()
 
 
 def current_identity() -> RemoteIdentity:
@@ -129,24 +177,37 @@ class OAuthTokenVerifier:
             message = "Bearer token has expired" if code is RemoteErrorCode.TOKEN_EXPIRED else "Bearer token validation failed"
             self.store.audit("oauth_rejected", outcome=code.value)
             raise RemoteError(code, message, http_status=401) from exc
-        subject = claims.get("sub")
+        subject = ExternalSubject.parse(claims.get("sub"))
         workspace = claims.get(self.config.workspace_claim)
         client_id = claims.get("client_id") or claims.get("azp") or "oauth-client"
         token_id = claims.get("jti")
         scope_value = claims.get("scope", "")
-        if not all(isinstance(value, str) for value in (subject, workspace, client_id, scope_value)):
+        if not all(isinstance(value, str) for value in (workspace, client_id, scope_value)):
             raise RemoteError(RemoteErrorCode.TOKEN_INVALID, "Bearer token identity claims are invalid", http_status=401)
         if token_id is not None and not isinstance(token_id, str):
             raise RemoteError(RemoteErrorCode.TOKEN_INVALID, "Bearer token identifier is invalid", http_status=401)
         if token_id and self.store.token_revoked(self.config.issuer, token_id):
             raise RemoteError(RemoteErrorCode.TOKEN_INVALID, "Bearer token has been revoked", http_status=401)
+        principal_id = derive_principal_id(self.config.issuer, subject)
         identity = RemoteIdentity(
-            principal_id=subject,
+            principal_id=principal_id,
             workspace_id=workspace,
             client_id=client_id,
             scopes=frozenset(item for item in scope_value.split() if item),
             token_id=token_id,
         )
+        if is_safe_internal_id(subject.value) and subject.value != principal_id:
+            if self.store.migrate_legacy_principal(
+                workspace_id=identity.workspace_id,
+                legacy_principal_id=subject.value,
+                principal_id=identity.principal_id,
+            ):
+                self.store.audit(
+                    "oauth_principal_migrated",
+                    outcome="MIGRATED",
+                    principal_id=identity.principal_id,
+                    workspace_id=identity.workspace_id,
+                )
         self.store.audit(
             "oauth_authenticated", outcome="ALLOWED",
             principal_id=identity.principal_id, workspace_id=identity.workspace_id,

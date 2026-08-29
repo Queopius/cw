@@ -13,6 +13,7 @@ The principal threats and controls are:
 | device impersonation | Ed25519 signatures, nonce, timestamp, public-key binding |
 | project guessing/path escape | opaque tenant-bound grant plus local canonical-root check |
 | cross-tenant confused deputy | principal/workspace/device constraints on every lookup |
+| provider subject confusion | bounded opaque subject normalized to an issuer-bound cryptographic principal ID |
 | duplicate mutation | durable request digest plus local application operation idempotency |
 | repository prompt injection | closed registry and server-side policy independent of repository text |
 | malicious reviewer output | existing schema validation and independent supervisor remain authoritative |
@@ -27,4 +28,5 @@ or natural-language “approve it” is not human gate approval.
 
 The gateway returns typed errors and never exposes stack traces as MCP results.
 Audit events contain IDs, decisions, capability, actor, and origin—but not
-tokens, keys, source, environment, raw logs, or hidden reasoning.
+tokens, keys, raw provider subjects, source, environment, raw logs, or hidden
+reasoning.
