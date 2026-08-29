@@ -2,6 +2,14 @@
   "schema_version": 1,
   "releases": [
     {
+      "version": "0.18.3",
+      "changes": [
+        "Built a canonical immutable Semantic Review Evidence Bundle from validated readiness, declared artifact text, deterministic results, hashes, and Verification Receipt identity before reviewer startup.",
+        "Confined and bounded parent-process artifact reads, rejected traversal, links, special files, invalid text, and hash mismatches, and classified unavailable evidence as REVIEW_EVIDENCE_UNAVAILABLE.",
+        "Disabled the Semantic Reviewer shell while retaining fail-closed command-event detection and preserving attempts, legacy retry authorization, semantic results, schema 1, and existing project evidence."
+      ]
+    },
+    {
       "version": "0.18.2",
       "changes": [
         "Redirected Laravel and Testbench cache files into the private Verification Executor runtime and bounded tolerated cache output to explicit safe PHPUnit, PHPStan, and Testbench paths.",

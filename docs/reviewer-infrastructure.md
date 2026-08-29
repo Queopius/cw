@@ -26,12 +26,20 @@ ordered argv, duration, exit status, redacted stream digests, and runtime
 preflight. Its canonical digest and file digest are both checked. The receipt
 does not replace artifact validation and cannot be reused across identities.
 
+Before reviewer startup, CW creates a canonical Semantic Review Evidence Bundle
+from validated readiness and receipt evidence. It contains workflow/phase
+identity, criteria, relevant Completion Contract data, declared-artifact text,
+existing hashes, structured deterministic results, and receipt identity. Safe
+artifact reads reject traversal, symlinks, special files, excess size, invalid
+UTF-8, and hash mismatches; undeclared files are excluded.
+
 The Semantic Reviewer never runs required commands, test tools, package
-managers, or installers. It receives a validated receipt and reviews acceptance
-semantics, scope, Completion Contract, artifact/evidence coherence, integrity,
-and risk. Repository and artifact instructions are untrusted prompt-injection
-inputs. Sandbox is read-only; hooks and web are disabled. A detected command
-event discards the whole reviewer result as infrastructure.
+managers, or installers. It reviews only the bundle's acceptance semantics,
+scope, Completion Contract, artifact/evidence coherence, integrity, and risk.
+Artifact instructions are untrusted prompt-injection inputs. Sandbox is
+read-only; hooks, web, and the supported Codex shell tool are disabled. A
+detected command event still discards the whole reviewer result as
+infrastructure.
 The current Codex `agent_message` item is accepted only as a completed,
 narrative-only record paired with a terminal event. Command/tool/MCP/function/
 shell items, malformed narrative records, and future unknown types remain
