@@ -1281,7 +1281,7 @@ class PublicReviewerInfrastructureContractTests(unittest.TestCase):
 
     def test_public_reviewer_infrastructure_contracts(self) -> None:
         requirements = [
-        ("core-version", "VERSION", "0.18.2"),
+        ("core-version", "VERSION", "0.18.3"),
         ("plugin-version", "plugins/cw/VERSION", "0.1.0"),
         ("remote-protocol", "cw/remote/protocol.py", "cw.remote.v1"),
         ("output-schema", "cw/output_protocol.py", "cw.output.v1"),
