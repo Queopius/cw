@@ -25,8 +25,11 @@ Deterministic verification and semantic review are distinct trust domains. The
 Verification Executor owns authorized command execution, private temp/cache
 preflight, redaction, artifact binding, and append-only receipts. The Semantic
 Reviewer owns acceptance meaning, Completion Contract, scope, coherence,
-integrity, and risk. It receives a validated receipt and cannot execute project
-commands; managed command events invalidate its result before state accounting.
+integrity, and risk. Before launch, the parent CW process creates a canonical,
+immutable evidence bundle containing the validated receipt, deterministic
+results, declared-artifact text, and existing CW hashes. The reviewer cannot
+execute project commands or inspect the filesystem; managed command events
+invalidate its result before state accounting.
 
 ```text
 cw.cli      argument parsing and thin command orchestration

@@ -30,6 +30,14 @@ performs a staged smoke test, and atomically changes `current`. Failure leaves
 the running installation selected. The previous healthy version remains for
 rollback and retention is bounded.
 
+Core 0.18.3 preserves project schema 1, existing readiness and Verification
+Receipts, historical semantic reviews, and pending legacy retry authorization.
+Its parent process now constructs a bounded Semantic Review Evidence Bundle
+from declared artifacts and already validated hashes and receipts before the
+read-only reviewer starts. Unsafe or unavailable evidence fails closed without
+consuming attempts, while reviewer command execution remains an infrastructure
+failure rather than a semantic result.
+
 Core 0.18.2 preserves project schema 1 and reads 0.18.1 verification receipts,
 legacy readiness/reviewer infrastructure records, and pending human-authorized
 legacy retries. Its Verification Executor isolates narrowly recognized

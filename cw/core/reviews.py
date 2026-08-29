@@ -10,16 +10,23 @@ from .models import Phase, ReviewDecision
 from .severity import CriterionSeverity
 from .utils import safe_project_path
 
-
 _EVIDENCE_REFERENCE = re.compile(r"^(?P<path>.+?)(?::(?P<line>[1-9][0-9]*(?:-[1-9][0-9]*)?))?$")
 
 
-def _evidence_path(root: Path, phase: Phase, value: str) -> bool:
+def _evidence_path(
+    root: Path,
+    phase: Phase,
+    value: str,
+    *,
+    evidence_paths: frozenset[str] | None = None,
+) -> bool:
     token = value.strip().split(maxsplit=1)[0]
     match = _EVIDENCE_REFERENCE.fullmatch(token)
     if match is None:
         return False
     relative = match.group("path").replace("\\", "/").removeprefix("./")
+    if evidence_paths is not None and relative not in evidence_paths:
+        return False
     try:
         path = safe_project_path(root, relative, must_exist=True)
     except CwError:
@@ -45,6 +52,7 @@ def validate_reviewer_result(
     require_blocking_criteria: bool = False,
     strict: bool = False,
     root: Path | None = None,
+    evidence_paths: tuple[str, ...] | None = None,
 ) -> tuple[ReviewDecision, list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     allowed = {"decision", "summary", "blocking_issues", "criteria", "blocking_criteria"}
     if strict and set(payload) != allowed:
@@ -94,6 +102,14 @@ def validate_reviewer_result(
             consistency.append(f"Missing criterion: {criterion_id}")
     valid_status = {"PASS", "FAIL", "UNKNOWN"}
     validate_paths = strict or "blocking_criteria" in payload
+    bundled_paths = (
+        frozenset(
+            path.replace("\\", "/").removeprefix("./")
+            for path in evidence_paths
+        )
+        if evidence_paths is not None
+        else None
+    )
     for criterion_id, result in received.items():
         evidence = result.get("evidence")
         if (
@@ -103,7 +119,15 @@ def validate_reviewer_result(
             or not all(isinstance(item, str) and item.strip() for item in evidence)
         ):
             consistency.append(f"Insufficient result evidence: {criterion_id}")
-        elif validate_paths and (root is None or not all(_evidence_path(root, phase, item) for item in evidence)):
+        elif validate_paths and (
+            root is None
+            or not all(
+                _evidence_path(
+                    root, phase, item, evidence_paths=bundled_paths
+                )
+                for item in evidence
+            )
+        ):
             consistency.append(f"Evidence is outside review scope: {criterion_id}")
 
     blocking_results = payload.get("blocking_criteria")
@@ -141,7 +165,15 @@ def validate_reviewer_result(
             or not all(isinstance(item, str) and item.strip() for item in evidence)
         ):
             consistency.append(f"Insufficient blocking evidence: {description}")
-        elif validate_paths and (root is None or not all(_evidence_path(root, phase, item) for item in evidence)):
+        elif validate_paths and (
+            root is None
+            or not all(
+                _evidence_path(
+                    root, phase, item, evidence_paths=bundled_paths
+                )
+                for item in evidence
+            )
+        ):
             consistency.append(f"Blocking evidence is outside review scope: {description}")
     blocking_failed = [
         criterion_id for criterion_id, criterion in expected.items()
