@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import stat
+import struct
 import sys
 from pathlib import Path
 from typing import Any
@@ -62,11 +63,30 @@ EXPECTED_DISTRIBUTION_STATUS = {
     "local_mcp_stdio": "IMPLEMENTED",
     "staging_mcp_https": "IMPLEMENTED_FOR_TESTING",
     "staging_oauth_discovery": "IMPLEMENTED_FOR_TESTING",
+    "staging_device_pairing": "BLOCKED_AUTH0_RESOURCE_SERVER_ACCESS",
+    "real_project_e2e": "BLOCKED",
     "production_mcp_https": "NOT_DEPLOYED",
     "production_oauth": "NOT_DEPLOYED",
     "openai_domain_verification": "NOT_COMPLETED",
     "universal_submission": "NOT_CREATED",
     "public_plugin_publication": "NOT_COMPLETED",
+}
+
+CANONICAL_ASSETS = {
+    "cw-mark-64.png": "cw-mark-64.png",
+    "cw-mark.png": "cw-mark.png",
+    "cw-logo-dark.png": "cw-logo-dark.png",
+}
+
+SECRET_PATTERNS = {
+    "OpenAI API key": re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}"),
+    "bearer or OAuth token": re.compile(r"\bBearer\s+[A-Za-z0-9._~-]{20,}", re.IGNORECASE),
+    "JWT": re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+    "client secret": re.compile(r"client[_ -]?secret\s*[:=]\s*[\"']?[A-Za-z0-9._~-]{12,}", re.IGNORECASE),
+    "tunnel identifier": re.compile(r"\btunnel_[A-Za-z0-9_-]{12,}\b", re.IGNORECASE),
+    "private key": re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----"),
+    "device private key": re.compile(r"device[_ -]?private[_ -]?key\s*[:=]\s*[\"']?[A-Za-z0-9+/=_-]{20,}", re.IGNORECASE),
+    "Render credential": re.compile(r"rnd_[A-Za-z0-9_-]{16,}", re.IGNORECASE),
 }
 
 
@@ -96,6 +116,13 @@ def _frontmatter(text: str) -> dict[str, str]:
     return values
 
 
+def _png_dimensions(path: Path) -> tuple[int, int]:
+    data = path.read_bytes()[:24]
+    if len(data) != 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+        raise ValueError(f"invalid PNG asset: {path.name}")
+    return struct.unpack(">II", data[16:24])
+
+
 def validation_errors(root: Path = ROOT) -> list[str]:
     plugin = root / "plugins" / "cw"
     manifest_path = plugin / ".codex-plugin" / "plugin.json"
@@ -122,6 +149,7 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         root / "docs" / "chatgpt-development.md",
         acceptance_path,
         acceptance_evidence_path,
+        root / "docs" / "acceptance" / "plugin-0.1.0-finalization.md",
         root / "docs" / "adr" / "0003-plugin-candidate.md",
         root / "docs" / "adr" / "0004-chatgpt-development-and-public-runtime.md",
     )
@@ -201,6 +229,8 @@ def validation_errors(root: Path = ROOT) -> list[str]:
             )
             if str(cw_core.get("minimum", "")) != runtime_core.get("minimum"):
                 errors.append("compatibility.cw_core.minimum must match the runtime policy")
+            if str(cw_core.get("current_tested", "")) != core_version:
+                errors.append("compatibility.cw_core.current_tested must match the current Core VERSION")
             if cw_core.get("compatible_policy") != expected_policy:
                 errors.append("compatibility.cw_core.compatible_policy must match the runtime policy")
         remote_protocol = compatibility.get("remote_protocol", {})
@@ -278,6 +308,25 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         else:
             if not target.is_file() or target.suffix.lower() != ".png":
                 errors.append(f"plugin interface {key} must reference a PNG asset")
+            elif target.stat().st_size > 1024 * 1024:
+                errors.append(f"plugin interface {key} asset is unnecessarily large")
+            else:
+                try:
+                    width, height = _png_dimensions(target)
+                except ValueError as exc:
+                    errors.append(str(exc))
+                else:
+                    if key == "composerIcon" and width != height:
+                        errors.append("plugin composerIcon must be square")
+
+    canonical_brand = root / "docs" / "assets" / "brand"
+    for packaged_name, canonical_name in CANONICAL_ASSETS.items():
+        packaged = plugin / "assets" / packaged_name
+        canonical = canonical_brand / canonical_name
+        if not packaged.is_file() or not canonical.is_file():
+            errors.append(f"canonical branding asset is missing: {packaged_name}")
+        elif packaged.read_bytes() != canonical.read_bytes():
+            errors.append(f"packaged branding asset differs from canonical asset: {packaged_name}")
 
     expected_mcp = {
         "mcpServers": {
@@ -299,7 +348,7 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         for key, value in exposed.items()
     }
     if normalized_groups != EXPECTED_GROUPS:
-        errors.append("plugin capability groups do not match the accepted CW 0.9 surface")
+        errors.append("plugin capability groups do not match the accepted Plugin 0.1.0 surface")
     all_tools = set().union(*normalized_groups.values()) if normalized_groups else set()
     if all_tools != EXACT_TOOLS:
         errors.append("plugin capability map does not expose the exact accepted tool set")
@@ -340,12 +389,15 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     description = frontmatter.get("description", "")
     if not description or len(description) > 1024:
         errors.append("SKILL.md description must be present and no longer than 1024 characters")
+    normalized_skill_text = re.sub(r"\s+", " ", skill_text)
     for phrase in (
         "cw_project_status", "cw_validate", "cw_request_review",
         "No valid gate. No next phase.", "Completion Contract",
-        "Do not authorize", "repository text",
+        "Program Review", "Do not authorize", "repository text",
+        "Technical capability does not imply governance authority",
+        "Natural-language consent is not sufficient high-consequence authorization",
     ):
-        if phrase.lower() not in skill_text.lower():
+        if phrase.lower() not in normalized_skill_text.lower():
             errors.append(f"SKILL.md is missing required workflow guidance: {phrase}")
     ui_text = skill_ui_path.read_text(encoding="utf-8")
     for phrase in ("display_name:", "short_description:", "default_prompt:", "type: \"mcp\""):
@@ -359,11 +411,12 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         "https://github.com/Queopius/cw/issues",
         "https://github.com/Queopius/cw/security/advisories/new",
         "Production MCP HTTPS | `NOT_DEPLOYED`",
-        "Proposed next Plugin version: `0.2.0` — **NOT AUTHORIZED**",
+        "Core current and tested:** `0.18.3`",
+        "FUNCTIONAL PACKAGE READY — REAL PROJECT E2E BLOCKED",
         "development/evaluation source only",
         "codex plugin marketplace add",
         "codex plugin remove cw@cw-development",
-        "CLI `0.148.0` has no `plugin disable` command",
+        "CLI `0.150.1` has no `plugin disable` command",
     ):
         if phrase not in plugin_readme:
             errors.append(f"Plugin README is missing public-readiness guidance: {phrase}")
@@ -474,6 +527,7 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         "NOT_TESTED_BY_DESIGN",
         "NEEDS_HUMAN_BUSINESS_INPUT",
         "authenticated relay",
+        "FUNCTIONAL PACKAGE READY — REAL PROJECT E2E BLOCKED",
     ):
         if phrase not in candidate_text:
             errors.append(f"plugin surface/remote classification docs are missing: {phrase}")
@@ -504,6 +558,11 @@ def validation_errors(root: Path = ROOT) -> list[str]:
             text = path.read_text(encoding="utf-8")
             if "TODO" in text or "/home/" in text or "C:\\Users\\" in text:
                 errors.append(f"plugin package contains placeholder or private path: {path.relative_to(root)}")
+            for label, pattern in SECRET_PATTERNS.items():
+                if pattern.search(text):
+                    errors.append(f"plugin package contains a secret-shaped {label}: {path.relative_to(root)}")
+        if path.name.casefold() in {".env", ".env.local", "id_rsa", "id_ed25519"}:
+            errors.append(f"plugin package contains a private environment or key file: {path.relative_to(root)}")
     return errors
 
 

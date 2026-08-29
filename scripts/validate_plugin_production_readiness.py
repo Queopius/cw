@@ -40,8 +40,8 @@ REQUIRED_CONTRACT_IDS = {
 }
 EXPECTED_SCOPES = {
     "project.read", "gate.read", "history.read", "completion.read",
-    "operation.read", "validation.run", "review.run", "phase.start",
-    "retry.run", "operation.cancel",
+    "operation.read", "validation.execute", "review.execute", "phase.start",
+    "retry.execute", "operation.cancel",
 }
 HIGH_CONSEQUENCE_BINDINGS = {
     "concrete_action_binding", "project_binding", "proposal_or_evidence_digest",

@@ -4,9 +4,10 @@ For the supported development/evaluation marketplace, immutable Git source,
 safe ZIP staging, removal, and rollback flows, see
 [Plugin packaging and installation](plugin-installation.md).
 
-CW Core `0.15.2` and the immutable public CW Plugin `0.1.0` retain the proven local plugin package
-and bounded ChatGPT Developer Mode connection profile. The Plugin remains a
-local, reviewable OpenAI plugin candidate. It is text/tool-first: one production
+CW Core `0.18.3` and independently versioned CW Plugin `0.1.0` retain the
+proven local package and bounded ChatGPT Developer Mode connection profile.
+The Plugin remains an unpublished, reviewable OpenAI plugin candidate. It is
+text/tool-first: one production
 skill, one bundled stdio MCP server, official CW assets, a package README, and a
 repo-local development marketplace entry. A staging HTTPS MCP gateway and OAuth
 discovery exist for testing. They are not production services, are not wired
@@ -27,7 +28,7 @@ a New Mexico limited liability company.
 
 ## Official model reviewed
 
-This current-state wording was rechecked on 2026-08-21 against official OpenAI
+This current-state wording was rechecked on 2026-08-29 against official OpenAI
 documentation:
 
 - [Package your plugin](https://developers.openai.com/plugins/build/plugins)
@@ -143,8 +144,8 @@ with a different payload fails with `OPERATION_CONFLICT`.
 | --- | --- |
 | Codex CLI / IDE local host | `READY` |
 | ChatGPT desktop on the local Codex host | `READY` |
-| ChatGPT web developer-mode app | `READ_ONLY_ACCEPTED`; real ChatGPT Pro + Secure MCP Tunnel evidence |
-| Staging HTTPS MCP/OAuth | `IMPLEMENTED_FOR_TESTING`; not a production or submitted service |
+| ChatGPT web developer-mode app | historical tunnel read-only acceptance; current public connection E2E blocked |
+| Staging HTTPS MCP/OAuth | gateway/discovery live on Core `0.18.3`; device pairing blocked by Auth0 audience assignment |
 | Public Plugins Directory | `REQUIRES_REMOTE_APP_MILESTONE` |
 
 ### Codex local: candidate ready
@@ -176,6 +177,7 @@ remote architecture and public HTTPS. See
 - Local installable/reviewable package: `READY`.
 - ChatGPT web Developer Mode read-only connection: `ACCEPTED`.
 - Staging HTTPS MCP and OAuth discovery: `IMPLEMENTED_FOR_TESTING`.
+- Staging device pairing and real project E2E: `BLOCKED`.
 - Production ChatGPT connection: `NEEDS_PRODUCTION_DEPLOYMENT`.
 - Production user-to-project connection lifecycle: `NEEDS_PRODUCTION_AUTH`.
 - Final privacy/terms/support publication: `NEEDS_PUBLIC_DOCS`.
@@ -220,9 +222,9 @@ are documented in [plugin production readiness](plugin-production-readiness.md).
 No production public gateway, production OAuth deployment, marketplace
 submission, or universal ChatGPT availability is claimed by Plugin 0.1.0.
 
-The proposed next Plugin version is `0.2.0` because the published `0.1.0`
-artifact is immutable and hardening tightened public contracts. That version is
-**NOT AUTHORIZED** and no version file changes in this readiness wave.
+The 2026-08-29 staging probe and exact external blocker are recorded in
+[Plugin 0.1.0 finalization acceptance](acceptance/plugin-0.1.0-finalization.md).
+No future Plugin version, tag, publication, or submission is authorized here.
 
 ## Remove or roll back locally
 

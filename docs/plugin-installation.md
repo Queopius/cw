@@ -2,13 +2,13 @@
 
 **Development/evaluation distribution only.** These flows expose the CW Plugin
 through a local or repository marketplace. They are not a workspace
-publication and not a universal public publication. Plugin `0.2.0` is not yet
-authorized.
+publication and not a universal public publication. Plugin publication is not
+authorized by this guide.
 
 This page follows the current OpenAI documentation for
 [Plugin packaging](https://developers.openai.com/plugins/build/plugins) and
 [connecting and testing a Plugin](https://developers.openai.com/plugins/deploy/connect-chatgpt).
-The commands below were verified with `codex-cli 0.148.0` on 2026-08-21.
+The commands below were verified with `codex-cli 0.150.1` on 2026-08-29.
 
 ## Prerequisites
 
@@ -16,8 +16,8 @@ The commands below were verified with `codex-cli 0.148.0` on 2026-08-21.
   desktop build for the manual Plugins Directory flow;
 - Python 3.10 or later;
 - CW Core installed with the MCP extra, within `>=0.14.0,<1.0.0`;
-- CW Core `0.16.0` for the current tested combination; the immutable public
-  Plugin `0.1.0` remains compatible under its `>=0.14.0,<1.0.0` policy;
+- CW Core `0.18.3` for the current tested combination; Plugin `0.1.0` remains
+  compatible under its tested `>=0.14.0,<1.0.0` policy;
 - a Git repository already initialized with `cw init` before MCP use;
 - permission only for the repository root explicitly selected for the MCP
   process.
@@ -99,9 +99,9 @@ codex plugin marketplace upgrade cw-development
 ```
 
 An unchanged SHA must produce the same Plugin bytes. A source change at the
-same Plugin version is not a safe public update: the published `0.1.0` bytes
-remain immutable. Any future public update from the hardened source requires
-Plugin `0.2.0`, which is not authorized in this wave.
+same Plugin version is not a safe public update after publication. This
+candidate is not published; any future update or release still requires an
+independent Plugin release decision.
 
 The installed CLI does not expose an in-place `--ref` edit. Evaluate a new SHA
 in an isolated Codex home first. Only after it passes, remove the installed CW
@@ -117,7 +117,7 @@ These operations are distinct:
 | --- | --- |
 | Remove installed CW Plugin | `codex plugin remove cw@cw-development` |
 | Remove marketplace source | `codex plugin marketplace remove cw-development` |
-| Disable without removal | No `codex plugin disable` command in CLI `0.148.0` |
+| Disable without removal | No `codex plugin disable` command in CLI `0.150.1` |
 | Roll back | Re-add the prior immutable SHA and reinstall CW |
 
 Remove the Plugin before removing its marketplace source:
@@ -130,15 +130,15 @@ codex plugin marketplace remove cw-development
 Removal affects only the selected Plugin/source registration and cache. It
 must not remove the project, `.cw`, governance evidence, Git state, other
 plugins, credentials, sockets, or running user processes. Repeating Plugin
-removal is idempotent in CLI `0.148.0`; repeating removal of an absent
+removal is idempotent in CLI `0.150.1`; repeating removal of an absent
 marketplace source fails explicitly without changing other configuration.
 
 ## Current boundaries
 
-- Core is `0.16.0`; its release does not republish the Plugin.
+- Core is `0.18.3`; its release does not republish or rename the Plugin.
 - Plugin remains `0.1.0`.
 - Remote protocol remains `cw.remote.v1`.
-- The public `cw-plugin-0.1.0.zip` asset remains immutable.
+- The candidate artifact name is `cw-plugin-0.1.0.zip`.
 - Local/repository marketplaces are development and evaluation channels.
 - No production MCP/OAuth, workspace publication, universal publication, tag,
   release, or OpenAI submission is created by these procedures.

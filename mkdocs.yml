@@ -129,6 +129,7 @@ nav:
           - ADR 0009 — Remote Persistence: adr/0009-remote-persistence.md
           - ADR 0010 — Render Staging Hosting: adr/0010-render-staging-hosting.md
       - Acceptance Evidence:
+          - Plugin 0.1.0 Finalization: acceptance/plugin-0.1.0-finalization.md
           - ChatGPT Development 0.11: acceptance/chatgpt-development-0.11.md
           - ChatGPT Plugin 0.12: acceptance/chatgpt-plugin-0.12.md
           - Remote Gateway 0.13: acceptance/remote-gateway-0.13.md

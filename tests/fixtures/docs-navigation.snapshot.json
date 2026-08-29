@@ -14,6 +14,7 @@
   "documents": [
     "acceptance/chatgpt-development-0.11.md",
     "acceptance/chatgpt-plugin-0.12.md",
+    "acceptance/plugin-0.1.0-finalization.md",
     "acceptance/remote-gateway-0.13.md",
     "acceptance/staging-bootstrap-0.14.md",
     "adr/0001-multi-adapter-engine.md",
@@ -103,6 +104,7 @@
   "navigation_paths": [
     "acceptance/chatgpt-development-0.11.md",
     "acceptance/chatgpt-plugin-0.12.md",
+    "acceptance/plugin-0.1.0-finalization.md",
     "acceptance/remote-gateway-0.13.md",
     "acceptance/staging-bootstrap-0.14.md",
     "adr/0001-multi-adapter-engine.md",
@@ -486,6 +488,9 @@
         },
         {
           "Acceptance Evidence": [
+            {
+              "Plugin 0.1.0 Finalization": "acceptance/plugin-0.1.0-finalization.md"
+            },
             {
               "ChatGPT Development 0.11": "acceptance/chatgpt-development-0.11.md"
             },

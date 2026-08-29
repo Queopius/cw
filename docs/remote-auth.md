@@ -2,7 +2,7 @@
 
 The current `cw.remote.v1` gateway is an OAuth 2.1 protected-resource
 implementation, not an identity provider. The design was introduced in Core
-0.13 and remains the Core 0.16.0 contract. Production deployments must use an
+0.13 and remains the Core 0.18.3 contract. Production deployments must use an
 established standards-compliant authorization server through the narrow
 discovery/JWKS adapter.
 

@@ -1,9 +1,10 @@
 # Plugin production readiness
 
-CW Plugin 0.1.0 retains the production-candidate contract introduced by the
-Core 0.12 milestone. Local MCP stdio is implemented. A staging HTTPS MCP
-gateway and OAuth discovery are implemented for testing at the current dev
-baseline. Production MCP/OAuth are not deployed, OpenAI domain verification is
+CW Plugin 0.1.0 is tested with Core `0.18.3` and retains the established
+production-candidate contract. Local MCP stdio is implemented. The staging
+HTTPS MCP gateway and OAuth discovery are live for testing at the current dev
+baseline, but device pairing is blocked by the Auth0 browser client's missing
+resource-server access. Production MCP/OAuth are not deployed, OpenAI domain verification is
 not complete, and no universal submission or public Plugin publication exists.
 
 ## Technical publisher identity
@@ -20,7 +21,7 @@ a New Mexico limited liability company.
 
 ## Official model verified
 
-Current-state wording rechecked **2026-08-21** against official OpenAI
+Current-state wording rechecked **2026-08-29** against official OpenAI
 documentation:
 
 - [Package your plugin](https://developers.openai.com/plugins/build/plugins)
@@ -92,6 +93,8 @@ normal OAuth scope and is not exposed in this candidate.
 | Local MCP stdio | IMPLEMENTED |
 | Staging MCP HTTPS | IMPLEMENTED FOR TESTING |
 | Staging OAuth/discovery | IMPLEMENTED FOR TESTING |
+| Staging device pairing | BLOCKED — Auth0 resource-server access |
+| Real project E2E | BLOCKED |
 | Production MCP HTTPS | NOT DEPLOYED |
 | Production OAuth | NOT DEPLOYED |
 | OpenAI domain verification | NOT COMPLETED |
@@ -105,7 +108,7 @@ implementation can proceed without revisiting CW Core.
 
 ## Canonical URL status
 
-Checked on 2026-08-21. This table records current behavior; it does not deploy
+Checked on 2026-08-29. This table records current behavior; it does not deploy
 or reserve any external URL.
 
 | Purpose | URL | Classification |
@@ -147,12 +150,8 @@ No final legal policy is published or linked by Plugin 0.1.0.
 
 ## Version boundary
 
-- Core: `0.15.1`
+- Core current/tested: `0.18.3`
 - Plugin: `0.1.0`
 - Remote protocol: `cw.remote.v1`
-- Proposed next Plugin version: `0.2.0`
-- Proposed version status: **NOT AUTHORIZED**
-
-The proposal reflects the immutable published `0.1.0` bytes, tightened schemas,
-and the future change in remote composition. This document does not modify a
-version file or authorize a release.
+- Candidate artifact: `cw-plugin-0.1.0.zip`
+- Publication status: **NOT AUTHORIZED / NOT PUBLISHED**
