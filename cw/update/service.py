@@ -62,7 +62,9 @@ class UpdateService:
     def info(self, *, force: bool = False) -> UpdateInfo:
         return self.check(force=force)
 
-    def install(self, *, requested_version: str | None = None) -> tuple[UpdateInfo, InstallResult | None]:
+    def install(
+        self, *, requested_version: str | None = None, with_remote: bool = False,
+    ) -> tuple[UpdateInfo, InstallResult | None]:
         if not self.installation.managed:
             raise CwError(
                 "Development installation detected",
@@ -77,7 +79,7 @@ class UpdateService:
             info = UpdateInfo(self.installed, manifest.version, manifest.channel, manifest)
         else:
             info = self.check(force=True)
-        if not info.available and requested_version is None:
+        if not info.available and requested_version is None and not with_remote:
             return info, None
         artifact = info.manifest.artifact_for_current_platform()
         self.installation.paths.share.mkdir(parents=True, exist_ok=True)
@@ -94,6 +96,10 @@ class UpdateService:
                     info.manifest, artifact, archive,
                     allow_downgrade=requested_version is not None,
                     already_locked=True,
+                    runtime_features_requested=(
+                        {*self.installation.active_features(), "remote"}
+                        if with_remote else None
+                    ),
                 )
             finally:
                 from pathlib import Path

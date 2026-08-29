@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cw.cli.commands.update import command_update
+from cw.cli.parser import parse_args
 from cw.core.errors import CwError, ErrorCode
 from cw.ui.console import Console
 from cw.update.cache import UpdateCache
@@ -42,6 +43,7 @@ def make_release_tree(root: Path, version: str, *, smoke_ok: bool = True) -> Pat
     (tree / "VERSION").write_text(version + "\n", encoding="utf-8")
     (tree / "LICENSE").write_text("Apache-2.0\n", encoding="utf-8")
     (tree / "NOTICE").write_text("Copyright 2026 Fantomid LLC\n", encoding="utf-8")
+    (tree / "pyproject.toml").write_text("[project]\nname='codex-workflow'\nversion='" + version + "'\n", encoding="utf-8")
     if smoke_ok:
         script = f'import json\nprint(json.dumps({{"version": "{version}"}}))\n'
     else:
@@ -107,7 +109,18 @@ class UpdateFixture:
         old.rename(old_install)
         self.paths.share.mkdir(parents=True, exist_ok=True)
         module_path = old_install / "cw/update/installation.py"
-        self.installation = ManagedInstallation(self.paths, module_path=module_path)
+        self.remote_installs: list[Path] = []
+
+        def install_remote(directory: Path) -> None:
+            self.remote_installs.append(directory)
+            target = directory / "python"
+            target.mkdir()
+            for module in ("httpx", "jwt", "cryptography", "mcp", "uvicorn"):
+                (target / f"{module}.py").write_text("# managed runtime test dependency\n", encoding="utf-8")
+
+        self.installation = ManagedInstallation(
+            self.paths, module_path=module_path, remote_installer=install_remote,
+        )
         self.installation.pointer.activate(current)
         self.archive = archive_tree(base, make_release_tree(base, target, smoke_ok=smoke_ok), target)
         self.manifest_path = base / "manifest.json"
@@ -121,6 +134,12 @@ class UpdateFixture:
 
 
 class UpdateModelTests(unittest.TestCase):
+    def test_update_remote_feature_flag_is_install_only(self):
+        args = parse_args(["update", "--version", "0.18.3", "--with-remote"])
+        self.assertTrue(args.with_remote)
+        with self.assertRaises(SystemExit):
+            parse_args(["update", "--check", "--with-remote"])
+
     def test_local_file_url_paths_are_native_and_percent_decoded(self):
         self.assertEqual(
             r"C:\Users\Ada Lovelace\release.tar.gz",
@@ -222,6 +241,26 @@ class UpdateServiceTests(unittest.TestCase):
         self.assertTrue((self.fixture.paths.versions / "0.1.5").is_dir())
         state = json.loads(self.fixture.paths.state.read_text())
         self.assertEqual("0.1.5", state["previous_version"])
+
+    def test_remote_feature_is_provisioned_before_activation_and_preserved(self):
+        _, result = self.fixture.service.install(with_remote=True)
+        self.assertIsNotNone(result)
+        runtime = self.fixture.paths.versions / "0.2.0"
+        self.assertEqual(1, len(self.fixture.remote_installs))
+        self.assertTrue((runtime / "python/httpx.py").is_file())
+        features = json.loads((runtime / "runtime-features.json").read_text(encoding="utf-8"))
+        self.assertEqual(["remote"], features["features"])
+        self.assertEqual("0.2.0", self.fixture.installation.active_version())
+
+    def test_remote_provisioning_failure_preserves_current_and_rollback(self):
+        def fail_remote(_directory: Path) -> None:
+            raise RuntimeError("dependency fixture failed")
+
+        self.fixture.installation.remote_installer = fail_remote
+        with self.assertRaises(CwError):
+            self.fixture.service.install(with_remote=True)
+        self.assertEqual("0.1.5", self.fixture.installation.active_version())
+        self.assertTrue((self.fixture.paths.versions / "0.1.5").is_dir())
 
     def test_0141_to_0151_rollback_and_reupdate_preserve_project_evidence(self):
         fixture = UpdateFixture(

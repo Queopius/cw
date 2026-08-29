@@ -4,6 +4,10 @@ All notable changes to CW are documented here.
 
 ## Unreleased
 
+- Add rollback-safe `--with-remote` managed-runtime provisioning. Remote
+  dependencies are installed and import-verified inside the staged version
+  before its atomic activation, and later updates preserve the feature.
+
 ## 0.18.3 — 2026-08-29
 
 - Build a canonical, immutable Semantic Review Evidence Bundle from validated

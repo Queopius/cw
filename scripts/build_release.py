@@ -75,7 +75,7 @@ def build_core(output: Path, channel: str) -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix="cw-core-release-") as name:
         stage = Path(name)
         shutil.copytree(ROOT / "cw", stage / "cw", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        for item in ("VERSION", "LICENSE", "NOTICE", "CHANGELOG.md"):
+        for item in ("VERSION", "LICENSE", "NOTICE", "CHANGELOG.md", "pyproject.toml"):
             shutil.copy2(ROOT / item, stage / item)
         (stage / "BUILD.json").write_text(
             json.dumps({"schema_version": 1, "commit": commit, "source": "release-artifact"}, indent=2) + "\n",
