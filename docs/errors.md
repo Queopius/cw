@@ -59,6 +59,7 @@ stored diagnostic proves that retry is safe.
 
 | Code | Meaning | Retryable? | Normal recovery |
 | --- | --- | --- | --- |
+| `REVIEW_EVIDENCE_UNAVAILABLE` | A declared artifact could not be safely incorporated into the bounded semantic evidence bundle | No automatic retry | Correct the artifact path, type, size, text encoding, or integrity mismatch; then review again |
 | `REVIEW_TIMEOUT` | Independent review exceeded its timeout | Yes, when recorded | `cw retry` without rerunning valid implementation |
 | `REVIEWER_NETWORK_ERROR` | Reviewer network request failed | Yes, when recorded | `cw retry` |
 | `REVIEWER_PROCESS_ERROR` | Reviewer exited or returned invalid structured output | Context | Inspect diagnostics; retry if CW preserved valid readiness |
