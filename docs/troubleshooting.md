@@ -259,6 +259,14 @@ CW preserves a pending goal after retryable planner infrastructure failure and
 writes no partial plan. Improve repository documentation or provide `--goal` for
 an unclear objective.
 
+Prompts are transported over stdin rather than argv and may contain up to 4 MiB
+of UTF-8 content. `PLANNER_TRANSPORT_ERROR` reports the safe stage, provider,
+transport mode, and retry classification without including prompt content. If a
+host interruption leaves `PLANNING` with `NOT_CREATED`, a pending goal, and no
+plan hash, phase, review, or gate, `cw retry` performs the narrow supported
+recovery and retries after restart. It refuses partial or ambiguous plan state;
+never edit `.cw/state.json` manually.
+
 ## Workflow already complete
 
 **Symptom:** `cw`, `cw retry`, or `cw run` reports no pending phase.

@@ -530,6 +530,24 @@ def command_plan(
         )
         try:
             payload = planner.propose_plan(root, project.project_id, args.goal)
+        except KeyboardInterrupt:
+            interrupted = CwError(
+                "Planning was interrupted before a plan was persisted",
+                ErrorCode.PLANNER_TRANSPORT_ERROR,
+                "Run: cw retry",
+                details="stage=planner_process provider=codex mode=stdin retry_safe=true interrupted=true",
+            )
+            state["last_error"] = state_error(interrupted)
+            mark_infrastructure_error(
+                state, interrupted, operation="planning", phase=None,
+            )
+            state.setdefault("history", []).append({
+                "timestamp": utc_now(), "phase": None,
+                "action": "planning_failed", "operation": "planning",
+                "error_code": interrupted.code.value,
+            })
+            transition(root, state, WorkflowState.ERROR, force_error=True)
+            raise
         except CwError as exc:
             if exc.code in {
                 ErrorCode.CODEX_NOT_FOUND,
@@ -542,6 +560,11 @@ def command_plan(
                 mark_infrastructure_error(
                     state, exc, operation="planning", phase=None,
                 )
+                state.setdefault("history", []).append({
+                    "timestamp": utc_now(), "phase": None,
+                    "action": "planning_failed", "operation": "planning",
+                    "error_code": exc.code.value,
+                })
                 transition(root, state, WorkflowState.ERROR, force_error=True)
             else:
                 state["pending_goal"] = None

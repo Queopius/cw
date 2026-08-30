@@ -17,6 +17,7 @@ from cw.adapters.invocation import (
     record_run_result,
 )
 from cw.adapters.result import CodexResult, CodexRunResult
+from cw.adapters.prompt_transport import PromptTransport
 from cw.adapters.structured_output import validate_codex_output_schema
 from cw.checks.verification import private_runtime_directory
 from cw.core.errors import CwError, ErrorCode
@@ -100,26 +101,32 @@ class CodexAdapter:
         environment: dict[str, str],
         *,
         timeout: int | None,
+        prompt: PromptTransport | None = None,
     ) -> CodexRunResult:
         """Run Codex JSONL without blocking stdout behind process completion."""
 
         sink = current_event_sink()
         if sink is None:
-            return self._run_captured(root, role, command, environment, timeout=timeout)
+            return self._run_captured(
+                root, role, command, environment, timeout=timeout, prompt=prompt,
+            )
         started = time.monotonic()
-        process = subprocess.Popen(
-            command,
-            cwd=root,
-            env=environment,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            bufsize=1,
-            **popen_process_group_kwargs(),
-        )
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=root,
+                env=environment,
+                text=prompt is None,
+                encoding="utf-8" if prompt is None else None,
+                errors="replace" if prompt is None else None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.PIPE if prompt is not None else subprocess.DEVNULL,
+                bufsize=1 if prompt is None else 0,
+                **popen_process_group_kwargs(),
+            )
+        except OSError as exc:
+            raise self._prompt_launch_error(role, exc) from exc
         spawned = time.monotonic()
         profile = StartupProfile(spawn_ms=max(0, round((spawned - started) * 1000)))
         profile_sink = getattr(sink, "set_profile", None)
@@ -141,14 +148,31 @@ class CodexAdapter:
         def read_stream(name: str, stream: object) -> None:
             try:
                 for line in stream:  # type: ignore[union-attr]
+                    if isinstance(line, bytes):
+                        line = line.decode("utf-8", errors="replace")
                     output_queue.put((name, line))
             finally:
                 output_queue.put((name, None))
+
+        def write_prompt() -> None:
+            try:
+                assert prompt is not None and process.stdin is not None
+                process.stdin.write(prompt.payload)
+                process.stdin.flush()
+            except (BrokenPipeError, OSError) as exc:
+                output_queue.put(("prompt_error", f"{type(exc).__name__}: {exc}"))
+            finally:
+                if process.stdin is not None:
+                    process.stdin.close()
 
         stdout_thread = threading.Thread(target=read_stream, args=("stdout", process.stdout), daemon=True)
         stderr_thread = threading.Thread(target=read_stream, args=("stderr", process.stderr), daemon=True)
         stdout_thread.start()
         stderr_thread.start()
+        prompt_thread = None
+        if prompt is not None:
+            prompt_thread = threading.Thread(target=write_prompt, daemon=True)
+            prompt_thread.start()
         stdout: list[str] = []
         stderr: list[str] = []
         closed: set[str] = set()
@@ -171,6 +195,17 @@ class CodexAdapter:
                 if line is None:
                     closed.add(stream_name)
                     continue
+                if stream_name == "prompt_error":
+                    stop_process_group(process)
+                    raise CwError(
+                        "Codex prompt transport failed",
+                        self._role_transport_code(role),
+                        "Run: cw retry" if role.endswith("planner") or role.endswith("reviewer") else "Run: cw error",
+                        details=(
+                            "stage=prompt_write provider=codex mode=stdin "
+                            f"retry_safe=true cause={line}"
+                        ),
+                    )
                 if stream_name == "stderr":
                     stderr.append(line)
                     continue
@@ -197,6 +232,8 @@ class CodexAdapter:
             stop_process_group(process)
             raise
         finally:
+            if prompt_thread is not None:
+                prompt_thread.join(timeout=1)
             stdout_thread.join(timeout=1)
             stderr_thread.join(timeout=1)
         completed_event = ExecutionEvent(
@@ -227,21 +264,55 @@ class CodexAdapter:
         environment: dict[str, str],
         *,
         timeout: int | None,
+        prompt: PromptTransport | None = None,
     ) -> CodexRunResult:
-        completed = subprocess.run(
-            command,
-            cwd=root,
-            env=environment,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            stdin=subprocess.DEVNULL,
-            timeout=timeout,
-            check=False,
+        kwargs = {
+            "cwd": root,
+            "env": environment,
+            "capture_output": True,
+            "timeout": timeout,
+            "check": False,
             **popen_process_group_kwargs(),
-        )
+        }
+        if prompt is None:
+            kwargs.update({
+                "text": True, "encoding": "utf-8", "errors": "replace",
+                "stdin": subprocess.DEVNULL,
+            })
+        else:
+            kwargs["input"] = prompt.payload
+        try:
+            completed = subprocess.run(command, **kwargs)
+        except OSError as exc:
+            raise self._prompt_launch_error(role, exc) from exc
+        if isinstance(completed.stdout, bytes) or isinstance(completed.stderr, bytes):
+            completed = subprocess.CompletedProcess(
+                completed.args,
+                completed.returncode,
+                completed.stdout.decode("utf-8", errors="replace") if isinstance(completed.stdout, bytes) else completed.stdout,
+                completed.stderr.decode("utf-8", errors="replace") if isinstance(completed.stderr, bytes) else completed.stderr,
+            )
         return self._result(root, role, completed)
+
+    @staticmethod
+    def _role_transport_code(role: str) -> ErrorCode:
+        if role.endswith("planner"):
+            return ErrorCode.PLANNER_TRANSPORT_ERROR
+        if role.endswith("reviewer"):
+            return ErrorCode.REVIEWER_INFRASTRUCTURE_ERROR
+        return ErrorCode.IMPLEMENTER_PROCESS_ERROR
+
+    @classmethod
+    def _prompt_launch_error(cls, role: str, error: OSError) -> CwError:
+        return CwError(
+            "Codex subprocess prompt transport failed",
+            cls._role_transport_code(role),
+            "Run: cw retry" if role.endswith("planner") or role.endswith("reviewer") else "Run: cw error",
+            details=(
+                "stage=subprocess_launch provider=codex mode=stdin "
+                f"retry_safe=true cause={type(error).__name__} errno={error.errno}"
+            ),
+        )
 
     def _validate_implementer_configuration(
         self,
@@ -295,11 +366,13 @@ class CodexAdapter:
         ])
         if current_event_sink() is not None:
             command.append("--json")
-        command.append(prompt)
+        transport = PromptTransport.create(prompt, role="implementer")
+        command.append("-")
         invocation = record_invocation(root, "implementer", command, environment, prompt=prompt)
         try:
             result = self._run_streaming(
                 root, "implementer", command, environment, timeout=timeout,
+                prompt=transport,
             )
         except subprocess.TimeoutExpired as exc:
             raise CwError(
@@ -357,12 +430,14 @@ class CodexAdapter:
                 command.append("--json")
             command.extend([
                 "--output-schema", str(schema),
-                "--output-last-message", str(output), "--cd", str(root), prompt,
+                "--output-last-message", str(output), "--cd", str(root), "-",
             ])
+            transport = PromptTransport.create(prompt, role=role)
             invocation = record_invocation(root, role, command, environment, prompt=prompt) if self.persist else None
             try:
                 result = self._run_streaming(
                     root, role, command, environment, timeout=timeout,
+                    prompt=transport,
                 )
             except subprocess.TimeoutExpired as exc:
                 is_reviewer = role.endswith("reviewer")
