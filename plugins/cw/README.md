@@ -29,8 +29,8 @@ is the current tested runtime. No compatibility beyond `<1.0.0` is claimed.
 
 ## Install for Codex evaluation
 
-This repository marketplace is a development/evaluation source only. It is not
-a workspace or universal public publication.
+This repository marketplace is a controlled source-install path. It is not a
+workspace or universal public publication.
 
 ```text
 codex plugin marketplace add <CW_REPOSITORY_ROOT>
@@ -71,18 +71,16 @@ is committed, no tunnel ID is committed, and no OAuth client secret is needed
 or embedded. Therefore installing these package files does not create or update
 an existing manual ChatGPT connection.
 
-As verified on 2026-08-29, staging health, readiness, protected-resource
-metadata, Auth0 discovery, and PKCE `S256` are live on Core `0.18.3`. The human
-pairing entry point `/remote/pair` starts OAuth but Auth0 currently rejects the
-pairing browser client for the staging MCP audience. Until that external Auth0
-resource-server assignment is corrected and acceptance is rerun, classification
-is **FUNCTIONAL PACKAGE READY — REAL PROJECT E2E BLOCKED**.
+Staging health, readiness, protected-resource metadata, Auth0 discovery, PKCE
+`S256`, browser device pairing, project grant, outbound agent, and real project
+read acceptance are live on Core `0.18.3`. Classification is **FUNCTIONAL PACKAGE READY — STAGING REAL PROJECT E2E PASS**. Production infrastructure is
+prepared separately but is not deployed or published by this package.
 
 | Distribution surface | Status |
 | --- | --- |
 | Local MCP stdio | `IMPLEMENTED` |
 | Staging MCP HTTPS/OAuth discovery | `IMPLEMENTED_FOR_TESTING` |
-| Staging device pairing / real project E2E | `BLOCKED` |
+| Staging device pairing / real project E2E | `IMPLEMENTED_FOR_TESTING` |
 | Production MCP HTTPS | `NOT_DEPLOYED` |
 | Production OAuth | `NOT_DEPLOYED` |
 | Universal Plugin publication | `NOT_COMPLETED` |

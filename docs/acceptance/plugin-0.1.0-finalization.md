@@ -1,6 +1,6 @@
 # CW Plugin 0.1.0 finalization acceptance
 
-Date: 2026-08-29
+Date: 2026-08-30
 
 This is the current acceptance record for the independently versioned Plugin
 candidate. It does not publish, tag, submit, deploy, or authorize a release.
@@ -42,8 +42,8 @@ not by themselves update an existing manual connection. If its UI does not
 offer icon editing, the connection may need to be recreated and the icon
 selected/uploaded through that UI.
 
-The final deterministic archive contains 12 files and has SHA-256
-`4bf79c98d2bcadcacf335731b8c4ba1f9e69a73e147ed30dfedf26bf886bd68b`.
+The current deterministic archive contains 12 files and has SHA-256
+`62cc98683028f4143377cf4e5b795891ad15e5ac85b8997d2e6a93f61d8ed7e0`.
 Two independent builds were byte-identical.
 
 ## Authoritative registry
@@ -75,7 +75,8 @@ The following unauthenticated probes were run against
 | `/mcp` GET/initialize without token | `401 AUTHENTICATION_REQUIRED` with protected-resource challenge |
 | `/remote/pair` | `303` to `/remote/pair/login` |
 | `/remote/pair/login` | starts OAuth with PKCE `S256`, resource/audience bound to staging MCP |
-| OAuth continuation | `401`; Auth0 reports that the pairing browser client is not authorized for the staging MCP resource server |
+| OAuth continuation | `PASS`; Authorization Code + PKCE completes and the issuer-bound opaque subject constructs a CW principal |
+| Pairing, grant, agent, read | `PASS`; one explicitly granted project is reachable through its opaque handle |
 
 Auth0 advertises DCR through `registration_endpoint`. Its live discovery does
 not advertise CIMD. No DCR client was created during this read-only audit.
@@ -88,27 +89,27 @@ explicit one-project grants, outbound agent routing, opaque handles, real
 resistance, and absence of shell/filesystem/gate-approval tools.
 
 Historical real ChatGPT + Secure MCP Tunnel read-only acceptance remains valid
-for the private development path. Current public-staging ChatGPT acceptance
-cannot reach a real project because browser pairing fails before device
-approval. Therefore current public results are:
+for the private development path. Public-staging pairing, one-project grant,
+outbound agent connection, and a real-project read now pass. Therefore current
+public results are:
 
-- required reads: `BLOCKED` for a real project;
+- required reads: `PASS` for the accepted staging project;
 - unauthenticated/unknown access: `PASS` (fails closed);
 - human gate approval, shell, arbitrary filesystem: `PASS` by registry absence
   and local negative acceptance; not presented as available tools;
-- unauthorized/cross-project: `PASS` locally; live real-project rerun blocked;
+- unauthorized/cross-project: `PASS`;
 - controlled actions: `NOT TESTED` on the current public ChatGPT surface;
-- real project: `BLOCKED`.
+- real project: `PASS` in staging.
 
 ## Decision
 
-**FUNCTIONAL PACKAGE READY — REAL PROJECT E2E BLOCKED**
+**FUNCTIONAL PACKAGE READY — STAGING REAL PROJECT E2E PASS**
 
-**PLUGIN 0.1.0 FUNCTIONAL CANDIDATE = BLOCKED**
+Production is not deployed and public publication is not authorized. The
+Production EAP also remains operationally blocked until supported device and
+individual grant revocation are available.
 
-The exact external blocker is the Auth0 pairing browser client's missing
-authorization for audience `https://staging-mcp.cwcli.dev/mcp`. After a human
-operator corrects that Auth0 application/API assignment, rerun pairing, grant
-one disposable initialized project, start the outbound agent, verify an opaque
-handle reaches `CWApplication`, and execute the real ChatGPT read/negative
-matrix. Do not publish before that passes.
+Do not infer production acceptance from staging. Promote the exact candidate
+through governance, deploy the separate production service, and repeat the
+pairing/grant/agent/read and negative matrix against production before opening
+the EAP.

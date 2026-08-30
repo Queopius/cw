@@ -103,9 +103,16 @@ names, sizes, and SHA-256 digests already match; assets are never replaced with
 
 Plugin validation remains a separate CI job. Its outputs are unpublished
 candidates outside the Core release directory. Core releases do not build or
-attach the public Plugin; `cw-plugin-0.1.0.zip` remains immutable and canonical at
-SHA-256 `b59275bb7e7a32e58c1d48202c9cf489874a6d21ce15fad3ef4cd6f202512021`.
-Publishing the current Plugin requires a separately authorized Plugin ceremony.
+attach the public Plugin. The historical Plugin archive
+downloaded from Core tag `v0.14.1` is an immutable compatibility fixture with
+SHA-256 `b59275bb7e7a32e58c1d48202c9cf489874a6d21ce15fad3ef4cd6f202512021`;
+it is not the current Production EAP promotion input. The current deterministic
+source candidate is `cw-plugin-0.1.0.zip` with SHA-256
+`62cc98683028f4143377cf4e5b795891ad15e5ac85b8997d2e6a93f61d8ed7e0`.
+Legacy local `cw-plugin-0.14.0.zip` and `cw-plugin-0.10.0.zip` files are ignored
+build residue and are outside every release allowlist. Publishing the current
+Plugin requires a separately authorized Plugin ceremony; never overwrite the
+historical fixture.
 
 ## Platform release gate
 

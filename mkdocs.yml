@@ -71,6 +71,7 @@ nav:
           - Incident Response: operations/incident-response.md
           - Backup and Restore: operations/backup-restore.md
           - Key Rotation: operations/key-rotation.md
+          - Production EAP: operations/production-eap.md
   - Platform:
       - Platform: platform/index.md
       - MCP:

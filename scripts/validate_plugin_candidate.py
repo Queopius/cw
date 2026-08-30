@@ -63,8 +63,8 @@ EXPECTED_DISTRIBUTION_STATUS = {
     "local_mcp_stdio": "IMPLEMENTED",
     "staging_mcp_https": "IMPLEMENTED_FOR_TESTING",
     "staging_oauth_discovery": "IMPLEMENTED_FOR_TESTING",
-    "staging_device_pairing": "BLOCKED_AUTH0_RESOURCE_SERVER_ACCESS",
-    "real_project_e2e": "BLOCKED",
+    "staging_device_pairing": "IMPLEMENTED_FOR_TESTING",
+    "real_project_e2e": "IMPLEMENTED_IN_STAGING",
     "production_mcp_https": "NOT_DEPLOYED",
     "production_oauth": "NOT_DEPLOYED",
     "openai_domain_verification": "NOT_COMPLETED",
@@ -412,8 +412,8 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         "https://github.com/Queopius/cw/security/advisories/new",
         "Production MCP HTTPS | `NOT_DEPLOYED`",
         "Core current and tested:** `0.18.3`",
-        "FUNCTIONAL PACKAGE READY — REAL PROJECT E2E BLOCKED",
-        "development/evaluation source only",
+        "FUNCTIONAL PACKAGE READY — STAGING REAL PROJECT E2E PASS",
+        "controlled source-install path",
         "codex plugin marketplace add",
         "codex plugin remove cw@cw-development",
         "CLI `0.150.1` has no `plugin disable` command",
@@ -527,7 +527,7 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         "NOT_TESTED_BY_DESIGN",
         "NEEDS_HUMAN_BUSINESS_INPUT",
         "authenticated relay",
-        "FUNCTIONAL PACKAGE READY — REAL PROJECT E2E BLOCKED",
+        "FUNCTIONAL PACKAGE READY — STAGING REAL PROJECT E2E PASS",
     ):
         if phrase not in candidate_text:
             errors.append(f"plugin surface/remote classification docs are missing: {phrase}")

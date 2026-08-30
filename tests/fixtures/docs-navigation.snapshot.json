@@ -57,6 +57,7 @@
     "operations/key-rotation.md",
     "operations/oauth-runbook.md",
     "operations/plan-rebaseline-recovery.md",
+    "operations/production-eap.md",
     "operations/staging-deploy.md",
     "plan-revisions.md",
     "planning.md",
@@ -147,6 +148,7 @@
     "operations/key-rotation.md",
     "operations/oauth-runbook.md",
     "operations/plan-rebaseline-recovery.md",
+    "operations/production-eap.md",
     "operations/staging-deploy.md",
     "plan-revisions.md",
     "planning.md",
@@ -300,6 +302,9 @@
             },
             {
               "Key Rotation": "operations/key-rotation.md"
+            },
+            {
+              "Production EAP": "operations/production-eap.md"
             }
           ]
         }

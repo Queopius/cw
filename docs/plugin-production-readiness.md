@@ -2,9 +2,10 @@
 
 CW Plugin 0.1.0 is tested with Core `0.18.3` and retains the established
 production-candidate contract. Local MCP stdio is implemented. The staging
-HTTPS MCP gateway and OAuth discovery are live for testing at the current dev
-baseline, but device pairing is blocked by the Auth0 browser client's missing
-resource-server access. Production MCP/OAuth are not deployed, OpenAI domain verification is
+HTTPS MCP gateway, OAuth, browser pairing, project grant, outbound agent, and
+real-project read path are live for testing. The separate production
+infrastructure contract is prepared but Production MCP/OAuth are not deployed,
+OpenAI domain verification is
 not complete, and no universal submission or public Plugin publication exists.
 
 ## Technical publisher identity
@@ -90,17 +91,24 @@ normal OAuth scope and is not exposed in this candidate.
 | Current plugin package and skill | READY |
 | Deterministic local package/registry validation | READY |
 | Production topology and trust boundary | DEFINED |
+| Production Render/environment contract | PREPARED — NOT DEPLOYED |
 | Local MCP stdio | IMPLEMENTED |
 | Staging MCP HTTPS | IMPLEMENTED FOR TESTING |
 | Staging OAuth/discovery | IMPLEMENTED FOR TESTING |
-| Staging device pairing | BLOCKED — Auth0 resource-server access |
-| Real project E2E | BLOCKED |
+| Staging device pairing | IMPLEMENTED FOR TESTING |
+| Real project E2E | IMPLEMENTED IN STAGING |
 | Production MCP HTTPS | NOT DEPLOYED |
 | Production OAuth | NOT DEPLOYED |
 | OpenAI domain verification | NOT COMPLETED |
 | Legal/business publication inputs | HUMAN INPUT REQUIRED |
 | Universal submission | NOT CREATED |
 | Public Plugin publication | NOT COMPLETED |
+
+The bounded single-instance Production EAP cannot open until a supported,
+authenticated operator primitive can revoke one device or one project grant.
+The service layer implements those state transitions, but Core `0.18.3` has no
+public `cw remote revoke` command or operator endpoint; direct database edits
+and ad-hoc internal API calls are not supported procedures.
 
 Therefore **production readiness is NOT READY** and **plugin submission is
 BLOCKED**. The milestone is useful because the blockers are now explicit and
