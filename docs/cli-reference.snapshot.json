@@ -477,7 +477,8 @@
         "--output",
         "--quiet",
         "--verbose",
-        "--version"
+        "--version",
+        "--with-remote"
       ],
       "positionals": [
         {

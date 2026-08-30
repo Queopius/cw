@@ -76,7 +76,10 @@ def command_update(
         else:
             render_update_check(console, payload)
         return 0
-    info, result = service.install(requested_version=args.version)
+    info, result = service.install(
+        requested_version=args.version,
+        with_remote=bool(getattr(args, "with_remote", False)),
+    )
     payload = _payload(info)
     payload.update({
         "installed_now": result is not None,

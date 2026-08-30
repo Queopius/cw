@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "environment": "production",
+  "environment_tag": "Production",
+  "provider": "Render",
+  "identity_provider": "Auth0",
+  "auth0_region": "US",
+  "service": "cw-mcp",
+  "deployment_branch": "prod",
+  "workspace_claim": "https://cwcli.dev/claims/workspace",
+  "initial_workspace": "cw-production",
+  "pairing_application": "CW Pairing",
+  "pairing_oauth": {
+    "client_type": "public",
+    "pkce_method": "S256",
+    "client_secret": false,
+    "delegated_scope": "project.read"
+  },
+  "persistence": {
+    "topology": "single-instance",
+    "high_availability": false,
+    "schema_version": 1,
+    "disk": "cw-production-data",
+    "mount": "/var/lib/cw",
+    "database": "/var/lib/cw/gateway.sqlite3"
+  },
+  "variables": {
+    "CW_DEPLOYMENT_ENV": "production",
+    "CW_PLUGIN_VERSION": "0.1.0",
+    "CW_GATEWAY_RESOURCE_URL": "https://mcp.cwcli.dev/mcp",
+    "CW_GATEWAY_DATABASE": "/var/lib/cw/gateway.sqlite3",
+    "CW_GATEWAY_HOST": "0.0.0.0",
+    "CW_GATEWAY_DOCUMENTATION_URL": "https://docs.cwcli.dev/en/stable/remote-auth/",
+    "CW_OAUTH_ISSUER_URL": "https://auth.cwcli.dev/",
+    "CW_OAUTH_JWKS_URL": "https://auth.cwcli.dev/.well-known/jwks.json",
+    "CW_OAUTH_WORKSPACE_CLAIM": "https://cwcli.dev/claims/workspace",
+    "CW_OAUTH_ALGORITHMS": "RS256",
+    "CW_PAIRING_WEB_REDIRECT_URI": "https://mcp.cwcli.dev/remote/pair/callback",
+    "CW_LIMIT_REQUESTS_PER_MINUTE": "120",
+    "CW_LIMIT_DEVICE_REQUESTS_PER_MINUTE": "240",
+    "CW_LIMIT_PAIRING_REQUESTS_PER_MINUTE": "20",
+    "CW_LIMIT_CONCURRENT_PER_DEVICE": "4",
+    "CW_LIMIT_REQUEST_BYTES": "65536",
+    "CW_LIMIT_AGENT_MESSAGE_BYTES": "524288",
+    "CW_LIMIT_OPERATION_TIMEOUT_SECONDS": "30",
+    "CW_LIMIT_AGENT_IDLE_SECONDS": "45",
+    "CW_LIMIT_COMPLETED_CACHE": "1024"
+  },
+  "externally_managed": [
+    "RENDER_GIT_COMMIT",
+    "PORT",
+    "CW_GATEWAY_ALLOWED_HOSTS",
+    "CW_PAIRING_WEB_CLIENT_ID",
+    "CW_PAIRING_SESSION_SECRET"
+  ],
+  "secrets": [
+    "CW_PAIRING_SESSION_SECRET"
+  ],
+  "allowed_hosts_contract": {
+    "required": [
+      "mcp.cwcli.dev",
+      "<exact-production-render-hostname>"
+    ],
+    "render_hostname_is_set_after_service_creation": true
+  }
+}
