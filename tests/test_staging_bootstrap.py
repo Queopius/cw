@@ -93,12 +93,19 @@ class StagingConfigurationTests(unittest.TestCase):
     def test_machine_readable_environment_contract_contains_no_gateway_secret(self) -> None:
         root = Path(__file__).resolve().parents[1]
         payload = json.loads((root / "config/staging-environment.json").read_text(encoding="utf-8"))
+        self.assertEqual("staging", payload["deployment_branch"])
         self.assertEqual(["CW_PAIRING_SESSION_SECRET"], payload["gateway_secrets"])
         secrets = {item["name"] for item in payload["variables"] if item["secret"]}
         self.assertEqual({"CW_PAIRING_SESSION_SECRET"}, secrets)
 
     def test_static_staging_contract_validator_passes(self) -> None:
         self.assertEqual([], validation_errors())
+
+    def test_blueprint_tracks_governed_staging_branch(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        blueprint = (root / "render.yaml").read_text(encoding="utf-8")
+        self.assertIn("    branch: staging\n", blueprint)
+        self.assertNotIn("    branch: dev\n", blueprint)
 
 
 @unittest.skipUnless(HAS_REMOTE, "remote dependencies unavailable")

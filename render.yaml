@@ -3,7 +3,7 @@ services:
     name: cw-staging-mcp
     runtime: docker
     dockerfilePath: ./Dockerfile
-    branch: dev
+    branch: staging
     region: frankfurt
     plan: starter
     numInstances: 1

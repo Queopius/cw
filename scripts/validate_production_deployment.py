@@ -137,7 +137,7 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         errors.append("production pairing OAuth contract is invalid")
 
     staging_service = staging.get("services", [{}])[0]
-    if staging_service.get("name") != "cw-staging-mcp" or staging_service.get("branch") != "dev":
+    if staging_service.get("name") != "cw-staging-mcp" or staging_service.get("branch") != "staging":
         errors.append("staging service identity changed")
     if staging_service.get("disk", {}).get("name") != "cw-staging-data":
         errors.append("staging disk identity changed")
