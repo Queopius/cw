@@ -1,10 +1,11 @@
 # Staging deployment procedure
 
-This runbook is prepared but **NOT EXERCISED**. It deploys the portable CW
-gateway to the authorized Render staging service; it does not launch a
-production service.
+This runbook has been exercised for the portable CW gateway on the authorized
+Render staging service. As of 2026-08-29, health/readiness report Core `0.18.3`,
+Plugin `0.1.0`, `cw.remote.v1`, and dev SHA
+`64830ae85b1df4c751d62dc0c4b24b2e1f1a3fc0`. This is not production.
 
-1. Confirm `dev` is clean, pushed, CI-green, version 0.14.0, and record the
+1. Confirm `dev` is clean, pushed, CI-green, at the intended Core version, and record the
    exact SHA.
 2. In Render, create a Blueprint from `render.yaml` and the Queopius CW
    repository. Review the paid Starter instance and 1 GB disk before approval.

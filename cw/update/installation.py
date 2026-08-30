@@ -13,7 +13,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterator
+from typing import Any, Callable, Iterable, Iterator
 
 from cw import __version__
 from cw.core.errors import CwError, ErrorCode
@@ -32,6 +32,123 @@ from .models import ReleaseArtifact, ReleaseManifest, Version
 MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 MAX_MEMBER_BYTES = 64 * 1024 * 1024
 RETAIN_VERSIONS = 3
+RUNTIME_FEATURES_FILE = "runtime-features.json"
+REMOTE_RUNTIME_FEATURE = "remote"
+REMOTE_RUNTIME_IMPORTS = ("httpx", "jwt", "cryptography", "mcp", "uvicorn")
+
+
+def runtime_features(directory: Path) -> frozenset[str]:
+    path = directory / RUNTIME_FEATURES_FILE
+    if not path.is_file():
+        return frozenset()
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return frozenset()
+    features = value.get("features") if isinstance(value, dict) else None
+    if not isinstance(features, list) or not all(isinstance(item, str) for item in features):
+        return frozenset()
+    return frozenset(features)
+
+
+def write_runtime_features(directory: Path, features: Iterable[str]) -> None:
+    selected = sorted(set(features))
+    unknown = set(selected) - {REMOTE_RUNTIME_FEATURE}
+    if unknown:
+        raise CwError("Managed runtime feature is unsupported", ErrorCode.UPDATE_INSTALL_ERROR)
+    atomic_json(directory / RUNTIME_FEATURES_FILE, {
+        "schema_version": 1,
+        "features": selected,
+    })
+
+
+def runtime_environment(directory: Path) -> dict[str, str]:
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    dependency_path = directory / "python"
+    paths = [str(directory)]
+    if dependency_path.is_dir():
+        paths.append(str(dependency_path))
+    environment["PYTHONPATH"] = os.pathsep.join(paths)
+    environment["CW_NO_UPDATE_CHECK"] = "1"
+    return environment
+
+
+def provision_remote_runtime(directory: Path) -> None:
+    """Install the authoritative remote extra into one staged managed runtime."""
+
+    if not (directory / "pyproject.toml").is_file():
+        raise CwError(
+            "CW release cannot provision the remote managed runtime",
+            ErrorCode.UPDATE_INSTALL_ERROR,
+            details="The staged release does not contain pyproject.toml.",
+        )
+    target = directory / "python"
+    if target.exists():
+        raise CwError("Managed runtime dependency path already exists", ErrorCode.UPDATE_INSTALL_ERROR)
+    requirement = f"{directory.resolve()}[remote]"
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+            "--no-input", "--no-compile", "--target", str(target), requirement,
+        ],
+        cwd=directory,
+        env=runtime_environment(directory),
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=300,
+        check=False,
+    )
+    if result.returncode != 0:
+        if target.exists():
+            shutil.rmtree(target)
+        raise CwError(
+            "CW Remote dependencies could not be installed",
+            ErrorCode.UPDATE_INSTALL_ERROR,
+            details=(result.stderr or result.stdout)[-4000:],
+        )
+    verify_remote_runtime(directory)
+
+
+def verify_remote_runtime(directory: Path) -> None:
+    target = (directory / "python").resolve()
+    imports = ",".join(REMOTE_RUNTIME_IMPORTS)
+    script = (
+        f"import {imports}\n"
+        "import json\n"
+        f"names={REMOTE_RUNTIME_IMPORTS!r}\n"
+        "mods={name:__import__(name) for name in names}\n"
+        "print(json.dumps({name:(getattr(module,'__file__',None) or next(iter(module.__path__))) "
+        "for name,module in mods.items()}))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=directory,
+        env=runtime_environment(directory),
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise CwError(
+            "CW Remote dependency smoke test failed",
+            ErrorCode.UPDATE_SMOKE_TEST_ERROR,
+            details=result.stderr[-4000:],
+        )
+    try:
+        origins = json.loads(result.stdout)
+        for name in REMOTE_RUNTIME_IMPORTS:
+            Path(origins[name]).resolve().relative_to(target)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise CwError(
+            "CW Remote dependencies are not isolated inside the managed runtime",
+            ErrorCode.UPDATE_SMOKE_TEST_ERROR,
+        ) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,11 +242,13 @@ class ManagedInstallation:
     def __init__(
         self, paths: InstallPaths | None = None, *, module_path: Path | None = None,
         platform: str | None = None,
+        remote_installer: Callable[[Path], None] = provision_remote_runtime,
     ) -> None:
         self.platform = platform_name(platform)
         self.paths = paths or InstallPaths.user(platform=self.platform)
         self.pointer = RuntimePointer(self.paths, self.platform)
         self.module_path = (module_path or Path(__file__)).resolve()
+        self.remote_installer = remote_installer
 
     @property
     def managed(self) -> bool:
@@ -149,6 +268,12 @@ class ManagedInstallation:
     def active_version(self) -> str:
         return self.pointer.active_version() or __version__
 
+    def active_features(self) -> frozenset[str]:
+        active = self.pointer.active_version()
+        if active is None:
+            return frozenset()
+        return runtime_features(self.paths.versions / active)
+
     def install_release(
         self,
         manifest: ReleaseManifest,
@@ -157,6 +282,7 @@ class ManagedInstallation:
         *,
         allow_downgrade: bool = False,
         already_locked: bool = False,
+        runtime_features_requested: Iterable[str] | None = None,
     ) -> InstallResult:
         if not self.managed:
             raise CwError(
@@ -186,19 +312,45 @@ class ManagedInstallation:
         with lock:
             self.cleanup_staging()
             previous = self.active_version()
+            selected_features = set(
+                self.active_features()
+                if runtime_features_requested is None
+                else runtime_features_requested
+            )
             stage = self.paths.versions / f".staging-{manifest.version}-{uuid.uuid4().hex}"
             self._write_state(previous, str(manifest.version), stage.name, "staging")
             try:
                 stage.mkdir(mode=0o700)
                 safe_extract_release(archive, stage)
-                self._validate_staged(stage, str(manifest.version))
+                self._validate_staged(stage, str(manifest.version), selected_features)
+                if REMOTE_RUNTIME_FEATURE in selected_features:
+                    self.remote_installer(stage)
+                write_runtime_features(stage, selected_features)
                 self.smoke_test(stage, str(manifest.version))
                 final = self.paths.versions / str(manifest.version)
                 if final.is_symlink():
                     raise CwError("Version installation path cannot be a symlink", ErrorCode.UPDATE_INSTALL_ERROR)
                 if final.exists():
-                    self.smoke_test(final, str(manifest.version))
-                    shutil.rmtree(stage)
+                    if runtime_features(final) == frozenset(selected_features):
+                        self.smoke_test(final, str(manifest.version))
+                        shutil.rmtree(stage)
+                    else:
+                        replaced = self.paths.versions / f".replaced-{manifest.version}-{uuid.uuid4().hex}"
+                        active_final = self.pointer.active_version() == str(manifest.version)
+                        if active_final:
+                            self.pointer.activate(stage.name)
+                        try:
+                            os.replace(final, replaced)
+                            os.replace(stage, final)
+                            if active_final:
+                                self.pointer.activate(str(manifest.version))
+                        except Exception:
+                            if not final.exists() and replaced.exists():
+                                os.replace(replaced, final)
+                            if active_final:
+                                self.pointer.activate(str(manifest.version))
+                            raise
+                        shutil.rmtree(replaced)
                 else:
                     os.replace(stage, final)
                 self._switch(str(manifest.version))
@@ -253,12 +405,9 @@ class ManagedInstallation:
         entrypoint = directory / "entrypoint.py"
         if not entrypoint.is_file():
             raise CwError("Staged release has no entrypoint", ErrorCode.UPDATE_SMOKE_TEST_ERROR)
-        environment = os.environ.copy()
-        environment.pop("PYTHONPATH", None)
-        environment["CW_NO_UPDATE_CHECK"] = "1"
         result = subprocess.run(
             [sys.executable, str(entrypoint), "version", "--json"],
-            cwd=directory, env=environment, text=True, encoding="utf-8", errors="replace", capture_output=True,
+            cwd=directory, env=runtime_environment(directory), text=True, encoding="utf-8", errors="replace", capture_output=True,
             timeout=20, check=False,
         )
         if result.returncode != 0:
@@ -277,6 +426,8 @@ class ManagedInstallation:
                 ErrorCode.UPDATE_SMOKE_TEST_ERROR,
                 details=f"Expected {expected_version}; received {payload.get('version')}",
             )
+        if REMOTE_RUNTIME_FEATURE in runtime_features(directory):
+            verify_remote_runtime(directory)
 
     def cleanup_staging(self) -> None:
         if not self.paths.versions.is_dir():
@@ -322,12 +473,17 @@ class ManagedInstallation:
     def _switch(self, version: str) -> None:
         self.pointer.activate(version)
 
-    def _validate_staged(self, stage: Path, version: str) -> None:
+    def _validate_staged(self, stage: Path, version: str, features: set[str]) -> None:
         required = (stage / "cw", stage / "entrypoint.py", stage / "VERSION", stage / "LICENSE", stage / "NOTICE")
         if not all(path.exists() for path in required):
             raise CwError("Release package is incomplete", ErrorCode.UPDATE_INSTALL_ERROR)
         if (stage / "VERSION").read_text(encoding="utf-8").strip() != version:
             raise CwError("Release VERSION does not match its manifest", ErrorCode.UPDATE_INSTALL_ERROR)
+        if REMOTE_RUNTIME_FEATURE in features and not (stage / "pyproject.toml").is_file():
+            raise CwError(
+                "CW release cannot provision the remote managed runtime",
+                ErrorCode.UPDATE_INSTALL_ERROR,
+            )
 
     def _write_state(self, current: str | None, previous: str | None, staging: str | None, status: str) -> None:
         atomic_json(self.paths.state, {

@@ -8,6 +8,7 @@ from pathlib import Path
 from cw.adapters.mcp.runtime import TOOLS
 from cw.application.capabilities import CAPABILITIES, CapabilityClass
 from cw.core.models import CompletionContract
+from cw.remote.protocol import CAPABILITY_SCOPES
 from scripts.build_plugin_candidate import build
 from scripts.validate_plugin_production_readiness import (
     CONTRACT,
@@ -63,7 +64,10 @@ class PluginProductionReadinessTests(unittest.TestCase):
             "project.repair", "extension.authorize", "plan.rebaseline",
         }
         self.assertEqual(EXPECTED_SCOPES, scopes)
-        self.assertEqual(runtime_allowed, scopes)
+        self.assertEqual(
+            {CAPABILITY_SCOPES[capability] for capability in runtime_allowed},
+            scopes,
+        )
         self.assertNotIn("workflow.admin", scopes)
         tokens = self.production["token_policy"]
         self.assertEqual("S256", tokens["pkce_method"])
@@ -112,6 +116,8 @@ class PluginProductionReadinessTests(unittest.TestCase):
                 "local_mcp_stdio": "IMPLEMENTED",
                 "staging_mcp_https": "IMPLEMENTED_FOR_TESTING",
                 "staging_oauth_discovery": "IMPLEMENTED_FOR_TESTING",
+                "staging_device_pairing": "IMPLEMENTED_FOR_TESTING",
+                "real_project_e2e": "IMPLEMENTED_IN_STAGING",
                 "production_mcp_https": "NOT_DEPLOYED",
                 "production_oauth": "NOT_DEPLOYED",
                 "openai_domain_verification": "NOT_COMPLETED",

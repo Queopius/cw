@@ -8,11 +8,43 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.install import copy_runtime
+from scripts.install import _launcher_script, copy_runtime, install
+from cw.update.installation import InstallPaths
 from cw.core.build import git_build
 
 
 class InstallerTests(unittest.TestCase):
+    def test_launcher_prefers_active_runtime_and_its_dependency_directory(self):
+        script = _launcher_script(Path("/managed/cw"))
+        self.assertIn('dependencies = runtime / "python"', script)
+        self.assertLess(
+            script.index('sys.path.insert(0, str(dependencies))'),
+            script.index('sys.path.insert(0, str(runtime))'),
+        )
+
+    def test_source_installer_can_provision_remote_without_mutating_previous_runtime(self):
+        project = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory(prefix="cw-remote-installer-") as temporary:
+            base = Path(temporary)
+            paths = InstallPaths(base / "share/cw", base / "bin")
+            previous = paths.versions / "0.18.2"
+            previous.mkdir(parents=True)
+            (previous / "entrypoint.py").write_text("print('{}')\n", encoding="utf-8")
+            paths.share.mkdir(parents=True, exist_ok=True)
+            from cw.update.installation import RuntimePointer
+            RuntimePointer(paths).activate("0.18.2")
+
+            def fake_remote(directory: Path) -> None:
+                target = directory / "python"
+                target.mkdir()
+                for module in ("httpx", "jwt", "cryptography", "mcp", "uvicorn"):
+                    (target / f"{module}.py").write_text("# fixture\n", encoding="utf-8")
+
+            install(project, paths=paths, with_remote=True, remote_installer=fake_remote)
+            current = paths.current.resolve()
+            self.assertEqual("0.18.3", current.name)
+            self.assertTrue((current / "python/httpx.py").is_file())
+            self.assertTrue(previous.is_dir())
     def test_runtime_contains_source_build_fingerprint(self):
         project = Path(__file__).resolve().parents[1]
         expected = git_build(project)

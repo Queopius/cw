@@ -15,9 +15,12 @@ from cw.remote.agent import InProcessAgent, LocalAgentRuntime
 from cw.remote.agent import HTTPAgentClient
 from cw.remote.auth import (
     AuthorizationServerMetadata,
+    ExternalSubject,
+    MAX_EXTERNAL_SUBJECT_CHARACTERS,
     OAuthResourceConfig,
     OAuthTokenVerifier,
     StaticJWKProvider,
+    derive_principal_id,
 )
 from cw.remote.device import DeviceCredential, PairingService, signed_headers, verify_device_signature
 from cw.remote.errors import RemoteError, RemoteErrorCode
@@ -549,9 +552,88 @@ class OAuthResourceServerTests(unittest.TestCase):
 
     def test_valid_token_binds_principal_workspace_audience_and_scopes(self) -> None:
         identity = self.verifier.verify(self.token())
-        self.assertEqual("principal-a", identity.principal_id)
+        self.assertEqual(
+            derive_principal_id(self.config.issuer, ExternalSubject.parse("principal-a")),
+            identity.principal_id,
+        )
         self.assertEqual("workspace-a", identity.workspace_id)
         self.assertIn("project.read", identity.scopes)
+
+    def test_provider_subjects_are_opaque_and_not_exposed(self) -> None:
+        subjects = (
+            "auth0|abc123",
+            "google-oauth2|123456",
+            "github|abc",
+            "urn:example:user:123",
+            "user@example.com",
+        )
+        for index, subject in enumerate(subjects):
+            with self.subTest(subject=subject):
+                identity = self.verifier.verify(self.token(sub=subject, jti=f"opaque-{index}"))
+                self.assertEqual(
+                    derive_principal_id(self.config.issuer, ExternalSubject.parse(subject)),
+                    identity.principal_id,
+                )
+                self.assertRegex(identity.principal_id, r"^cwid_[0-9a-f]{64}$")
+                self.assertNotEqual(subject, identity.principal_id)
+                self.assertNotIn(subject, json.dumps(self.store.audit_events()))
+
+    def test_principal_derivation_is_deterministic_and_issuer_bound(self) -> None:
+        subject = ExternalSubject.parse("auth0|same-provider-subject")
+        first = derive_principal_id("https://issuer-a.example.test/", subject)
+        repeated = derive_principal_id("https://issuer-a.example.test/", subject)
+        other_issuer = derive_principal_id("https://issuer-b.example.test/", subject)
+        self.assertEqual(first, repeated)
+        self.assertNotEqual(first, other_issuer)
+
+    def test_external_subject_safety_contract_rejects_controls_and_excess_length(self) -> None:
+        invalid = (
+            "",
+            "subject\x00suffix",
+            "subject\nsuffix",
+            "subject\rsuffix",
+            "subject\tsuffix",
+            "subject\x1fsuffix",
+            "x" * (MAX_EXTERNAL_SUBJECT_CHARACTERS + 1),
+        )
+        for index, subject in enumerate(invalid):
+            with self.subTest(subject=repr(subject)):
+                with self.assertRaises(RemoteError) as failure:
+                    self.verifier.verify(self.token(sub=subject, jti=f"invalid-subject-{index}"))
+                self.assertEqual(RemoteErrorCode.TOKEN_INVALID, failure.exception.code)
+                self.assertEqual("OAuth subject identity is invalid", failure.exception.message)
+
+        maximum = "x" * MAX_EXTERNAL_SUBJECT_CHARACTERS
+        identity = self.verifier.verify(self.token(sub=maximum, jti="maximum-subject"))
+        self.assertRegex(identity.principal_id, r"^cwid_[0-9a-f]{64}$")
+
+    def test_workspace_remains_on_the_cw_safe_identifier_contract(self) -> None:
+        with self.assertRaises(RemoteError) as failure:
+            self.verifier.verify(self.token(sub="auth0|abc123", cw_workspace="workspace|unsafe"))
+        self.assertEqual(RemoteErrorCode.TOKEN_INVALID, failure.exception.code)
+        self.assertEqual("OAuth workspace identity is invalid", failure.exception.message)
+
+    def test_legacy_safe_principal_is_migrated_without_orphaning_grants(self) -> None:
+        credential = DeviceCredential.generate()
+        pairing = PairingService(self.store).request(credential, "Legacy device")
+        device = PairingService(self.store).confirm(
+            challenge_id=pairing.challenge_id,
+            user_code=pairing.user_code,
+            principal_id="principal-a",
+            workspace_id="workspace-a",
+        )
+        service = GatewayService(self.store, self.verifier)
+        grant = service.create_project_grant(device_id=device.device_id, display_name="Legacy project")
+
+        identity = self.verifier.verify(self.token())
+        migrated_device = self.store.device(device.device_id)
+        migrated_grant = self.store.project_grant(grant.project_handle)
+        self.assertEqual(identity.principal_id, migrated_device.principal_id)
+        self.assertEqual(identity.principal_id, migrated_grant.principal_id)
+        self.assertEqual("workspace-a", migrated_device.workspace_id)
+        self.assertEqual("workspace-a", migrated_grant.workspace_id)
+        self.assertNotIn("principal-a", json.dumps(self.store.audit_events()))
+        self.assertEqual(identity.principal_id, self.verifier.verify(self.token()).principal_id)
 
     def test_authorization_server_contract_requires_pkce_and_cimd_or_dcr(self) -> None:
         base = {
@@ -930,6 +1012,76 @@ class OAuthResourceServerTests(unittest.TestCase):
         self.assertEqual(401, response.status_code)
         self.assertIn("OAuth authorization code is missing", response.text)
         self.assertNotIn("Bearer ", response.text)
+
+    @unittest.skipUnless(HAS_REMOTE_CRYPTO and HAS_REMOTE_HTTP, "remote HTTP dependencies unavailable")
+    def test_browser_pairing_callback_accepts_auth0_subject_and_binds_internal_identity(self) -> None:
+        from unittest.mock import patch
+
+        from starlette.testclient import TestClient
+
+        from cw.remote.server import PairingWebConfig, _sign_cookie, _unsign_cookie, create_gateway_app
+
+        async def discover(*_args, **_kwargs) -> AuthorizationServerMetadata:
+            return AuthorizationServerMetadata(
+                issuer=self.config.issuer,
+                authorization_endpoint=self.config.issuer + "/authorize",
+                token_endpoint=self.config.issuer + "/token",
+                jwks_uri=self.config.jwks_uri,
+                code_challenge_methods_supported=("S256",),
+                client_id_metadata_document_supported=True,
+                registration_endpoint=None,
+                token_endpoint_auth_methods_supported=("none",),
+            )
+
+        access_token = self.token(sub="auth0|abc123", jti="auth0-pairing")
+
+        async def exchange(**_kwargs):
+            return {"access_token": access_token, "token_type": "Bearer"}
+
+        service = GatewayService(self.store, self.verifier)
+        web = PairingWebConfig(
+            client_id="pairing-client",
+            redirect_uri="https://cw.example.test/remote/pair/callback",
+            session_secret="s" * 32,
+        )
+        credential = DeviceCredential.generate()
+        challenge = service.pairing.request(credential, "Auth0 laptop")
+        state = "auth0-callback-state"
+        oauth_cookie = _sign_cookie({
+            "state": state,
+            "verifier": "pkce-verifier",
+            "code": challenge.user_code,
+            "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp()),
+        }, web.session_secret)
+        app = create_gateway_app(service, self.config, pairing_web=web)
+        with (
+            patch("cw.remote.server.discover_authorization_server", new=discover),
+            patch("cw.remote.server._exchange_oauth_code", new=exchange),
+            TestClient(app, base_url="http://127.0.0.1") as client,
+        ):
+            client.cookies.set(web.oauth_cookie_name, oauth_cookie, path="/")
+            callback = client.get(
+                f"/remote/pair/callback?state={state}&code=authorization-code",
+                follow_redirects=False,
+            )
+            self.assertEqual(303, callback.status_code, callback.text)
+            shown = client.get(callback.headers["location"])
+            self.assertEqual(200, shown.status_code, shown.text)
+            csrf_cookie = client.cookies.get(web.cookie_name)
+            session = _unsign_cookie(csrf_cookie, web.session_secret)
+            self.assertIsNotNone(session)
+            approved = client.post("/remote/pair", data={
+                "csrf": session["csrf"],
+                "code": challenge.user_code,
+                "decision": "approve",
+            })
+            self.assertEqual(200, approved.status_code, approved.text)
+
+        device = self.store.device(credential.device_id)
+        expected = derive_principal_id(self.config.issuer, ExternalSubject.parse("auth0|abc123"))
+        self.assertEqual(expected, device.principal_id)
+        self.assertEqual("workspace-a", device.workspace_id)
+        self.assertNotIn("auth0|abc123", json.dumps(self.store.audit_events()))
 
     @unittest.skipUnless(HAS_REMOTE_CRYPTO and HAS_REMOTE_HTTP, "remote HTTP dependencies unavailable")
     def test_browser_pairing_login_starts_authorization_flow(self) -> None:

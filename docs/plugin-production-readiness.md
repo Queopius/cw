@@ -1,9 +1,11 @@
 # Plugin production readiness
 
-CW Plugin 0.1.0 retains the production-candidate contract introduced by the
-Core 0.12 milestone. Local MCP stdio is implemented. A staging HTTPS MCP
-gateway and OAuth discovery are implemented for testing at the current dev
-baseline. Production MCP/OAuth are not deployed, OpenAI domain verification is
+CW Plugin 0.1.0 is tested with Core `0.18.3` and retains the established
+production-candidate contract. Local MCP stdio is implemented. The staging
+HTTPS MCP gateway, OAuth, browser pairing, project grant, outbound agent, and
+real-project read path are live for testing. The separate production
+infrastructure contract is prepared but Production MCP/OAuth are not deployed,
+OpenAI domain verification is
 not complete, and no universal submission or public Plugin publication exists.
 
 ## Technical publisher identity
@@ -20,7 +22,7 @@ a New Mexico limited liability company.
 
 ## Official model verified
 
-Current-state wording rechecked **2026-08-21** against official OpenAI
+Current-state wording rechecked **2026-08-29** against official OpenAI
 documentation:
 
 - [Package your plugin](https://developers.openai.com/plugins/build/plugins)
@@ -89,9 +91,12 @@ normal OAuth scope and is not exposed in this candidate.
 | Current plugin package and skill | READY |
 | Deterministic local package/registry validation | READY |
 | Production topology and trust boundary | DEFINED |
+| Production Render/environment contract | PREPARED — NOT DEPLOYED |
 | Local MCP stdio | IMPLEMENTED |
 | Staging MCP HTTPS | IMPLEMENTED FOR TESTING |
 | Staging OAuth/discovery | IMPLEMENTED FOR TESTING |
+| Staging device pairing | IMPLEMENTED FOR TESTING |
+| Real project E2E | IMPLEMENTED IN STAGING |
 | Production MCP HTTPS | NOT DEPLOYED |
 | Production OAuth | NOT DEPLOYED |
 | OpenAI domain verification | NOT COMPLETED |
@@ -99,13 +104,19 @@ normal OAuth scope and is not exposed in this candidate.
 | Universal submission | NOT CREATED |
 | Public Plugin publication | NOT COMPLETED |
 
+The bounded single-instance Production EAP cannot open until a supported,
+authenticated operator primitive can revoke one device or one project grant.
+The service layer implements those state transitions, but Core `0.18.3` has no
+public `cw remote revoke` command or operator endpoint; direct database edits
+and ad-hoc internal API calls are not supported procedures.
+
 Therefore **production readiness is NOT READY** and **plugin submission is
 BLOCKED**. The milestone is useful because the blockers are now explicit and
 implementation can proceed without revisiting CW Core.
 
 ## Canonical URL status
 
-Checked on 2026-08-21. This table records current behavior; it does not deploy
+Checked on 2026-08-29. This table records current behavior; it does not deploy
 or reserve any external URL.
 
 | Purpose | URL | Classification |
@@ -147,12 +158,8 @@ No final legal policy is published or linked by Plugin 0.1.0.
 
 ## Version boundary
 
-- Core: `0.15.1`
+- Core current/tested: `0.18.3`
 - Plugin: `0.1.0`
 - Remote protocol: `cw.remote.v1`
-- Proposed next Plugin version: `0.2.0`
-- Proposed version status: **NOT AUTHORIZED**
-
-The proposal reflects the immutable published `0.1.0` bytes, tightened schemas,
-and the future change in remote composition. This document does not modify a
-version file or authorize a release.
+- Candidate artifact: `cw-plugin-0.1.0.zip`
+- Publication status: **NOT AUTHORIZED / NOT PUBLISHED**

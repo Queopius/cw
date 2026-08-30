@@ -1,10 +1,10 @@
 # CW Remote gateway
 
 The current `cw.remote.v1` implementation is a hosting-neutral,
-production-oriented gateway candidate introduced in Core 0.13. Core 0.14 adds
-a Render/Auth0 staging deployment contract, but the service is
-not considered deployed until external evidence exists and has not been
-submitted to OpenAI.
+production-oriented gateway candidate introduced in Core 0.13. The Render/Auth0
+staging service is deployed and reports Core `0.18.3` as of 2026-08-29. It has
+not been submitted to OpenAI, and real project E2E remains blocked by the live
+Auth0 browser-pairing client/API assignment.
 
 ```text
 ChatGPT / Codex

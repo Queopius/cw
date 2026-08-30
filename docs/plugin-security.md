@@ -34,9 +34,11 @@ before dispatch.
 The development profile fixes `chatgpt_app` origin, requires explicit project
 grants, and can omit all controlled actions from discovery. Secure MCP Tunnel
 authenticates the development transport but does not make ChatGPT identity the
-local OS identity or satisfy public submission. The staging HTTPS relay, OAuth
-discovery, device pairing, grants, revocation, and audit boundaries are
-implemented for testing. They do not establish production availability; the
+local OS identity or satisfy public submission. The staging HTTPS relay and
+OAuth discovery are implemented for testing. Device-pairing code, grants,
+revocation, and audit boundaries pass local tests, but the live Auth0 pairing
+client is currently blocked from the MCP resource server, so real project E2E
+is not accepted. These do not establish production availability; the
 production service must separately pass rate limiting, isolation, recovery,
 privacy, and operational acceptance while preserving local source ownership.
 

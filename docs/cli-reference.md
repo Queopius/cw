@@ -573,17 +573,21 @@ cw integrations info vercel
 
 ## cw update
 
-**Syntax:** `cw update [rollback] [--check] [--info] [--version VERSION] [--channel stable|beta|dev]`
+**Syntax:** `cw update [rollback] [--check] [--info] [--version VERSION] [--channel stable|beta|dev] [--with-remote]`
 
 - `--check` queries availability without installing.
 - `--info` shows trusted release information.
 - `--version VERSION` selects an explicit version.
 - `--channel stable|beta|dev` changes channel for this invocation.
+- `--with-remote` stages `codex-workflow[remote]` dependencies inside the
+  selected managed runtime before atomic activation. Later updates preserve
+  that runtime feature.
 - `rollback` returns to the retained prior healthy version.
 
 ```bash
 cw update --check
 cw update --info
+cw update --with-remote
 cw update rollback
 ```
 

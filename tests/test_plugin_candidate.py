@@ -91,6 +91,7 @@ class PluginCandidateTests(unittest.TestCase):
             self.capabilities["compatibility"]["plugin_version"],
         )
         self.assertEqual("cw.remote.v1", self.capabilities["compatibility"]["remote_protocol"]["required"])
+        self.assertEqual("0.18.3", self.capabilities["compatibility"]["cw_core"]["current_tested"])
 
     def test_capability_discovery_has_exact_accepted_mcp_surface(self) -> None:
         declared = {

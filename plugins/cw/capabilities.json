@@ -61,6 +61,8 @@
     "local_mcp_stdio": "IMPLEMENTED",
     "staging_mcp_https": "IMPLEMENTED_FOR_TESTING",
     "staging_oauth_discovery": "IMPLEMENTED_FOR_TESTING",
+    "staging_device_pairing": "IMPLEMENTED_FOR_TESTING",
+    "real_project_e2e": "IMPLEMENTED_IN_STAGING",
     "production_mcp_https": "NOT_DEPLOYED",
     "production_oauth": "NOT_DEPLOYED",
     "openai_domain_verification": "NOT_COMPLETED",
@@ -89,12 +91,12 @@
         "operation.read"
       ],
       "EXECUTION": [
-        "validation.run",
-        "review.run"
+        "validation.execute",
+        "review.execute"
       ],
       "CONTROLLED_STATE_MUTATION": [
         "phase.start",
-        "retry.run",
+        "retry.execute",
         "operation.cancel"
       ]
     },
@@ -122,6 +124,7 @@
     "plugin_version": "0.1.0",
     "cw_core": {
       "minimum": "0.14.0",
+      "current_tested": "0.18.3",
       "compatible_policy": ">=0.14.0,<1.0.0"
     },
     "remote_protocol": {

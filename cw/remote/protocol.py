@@ -18,6 +18,11 @@ _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 _HANDLE = re.compile(r"cwp_[A-Za-z0-9_-]{24,96}")
 _TOOL_MAP = {tool.name: tool for tool in TOOLS}
 
+
+def is_safe_internal_id(value: object) -> bool:
+    return isinstance(value, str) and _SAFE_ID.fullmatch(value) is not None
+
+
 CAPABILITY_SCOPES: Mapping[str, str] = {
     "project.read": "project.read",
     "gate.read": "gate.read",
@@ -125,7 +130,7 @@ class RemoteIdentity:
             ("workspace", self.workspace_id),
             ("client", self.client_id),
         ):
-            if not isinstance(value, str) or _SAFE_ID.fullmatch(value) is None:
+            if not is_safe_internal_id(value):
                 raise RemoteError(RemoteErrorCode.TOKEN_INVALID, f"OAuth {label} identity is invalid", http_status=401)
 
 
