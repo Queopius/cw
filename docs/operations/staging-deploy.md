@@ -32,7 +32,14 @@ briefly unavailable; schedule staging acceptance accordingly.
 The live Render service branch setting is provider-managed. After changing the
 repository Blueprint, an operator must separately verify that `cw-staging-mcp`
 tracks `staging`; repository configuration alone does not update an existing
-service automatically.
+service automatically. Render source changes trigger a deployment, so a
+repository-only authorization is insufficient. First set **Auto-Deploy** to
+**Off** in the service Settings without starting a deploy. Merge and promote
+the repository control change through `dev → staging`, then obtain explicit
+staging-deployment authorization before changing the live source to `staging`.
+After the resulting staging deploy passes health, readiness, and exact-SHA
+verification, restore **After CI Checks Pass**. Never use this procedure to
+modify a production service.
 
 ## Rollback
 

@@ -23,7 +23,10 @@ The maintainer accepted the validated commit as a one-time exception only on
 condition that the control gaps are remediated before feature work resumes.
 GitHub `dev` protection now applies to administrators. The canonical staging
 Blueprint source is `staging`; the live Render service must be changed and
-verified separately in Render before operator-revocation work resumes.
+verified separately in Render before operator-revocation work resumes. Because
+Render source changes trigger a deploy, that external remediation requires a
+separate staging-only deployment authorization. Until then, operators must set
+Auto-Deploy to Off before merging further work into `dev`.
 
 The machine-readable evidence is
 [`governance-exception-2026-08-30.json`](../acceptance/governance-exception-2026-08-30.json).

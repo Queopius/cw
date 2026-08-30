@@ -37,6 +37,7 @@
     "dev_enforce_admins": true,
     "canonical_staging_source": "staging",
     "live_render_source_change_required": true,
+    "live_render_source_change_requires_deploy": true,
     "operator_revocation_resumed": false
   }
 }
