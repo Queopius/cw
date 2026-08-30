@@ -58,6 +58,7 @@ nav:
       - Plan Rebaseline Recovery: operations/plan-rebaseline-recovery.md
       - Completion Contracts: completion-contracts.md
       - Release Governance: governance.md
+      - Governance Exceptions: operations/governance-exceptions.md
   - Operations & Recovery:
       - Operations & Recovery: operations-recovery/index.md
       - Updating: updating.md
