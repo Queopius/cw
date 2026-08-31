@@ -10,6 +10,7 @@ import shutil
 from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from cw.agents.reviewer import run_review
 from cw.core.audit import audit_history
@@ -20,7 +21,7 @@ from cw.core.authorization import (
     OperationContext,
     issue_user_authorization,
 )
-from cw.core.errors import CwError, ErrorCode
+from cw.core.errors import CwError, ErrorCode, HumanActionRequired
 from cw.core.gates import validate_gate
 from cw.core.history import history_timeline
 from cw.core.models import WorkflowState
@@ -32,8 +33,11 @@ from cw.core.revisions import (
     audit_revisions,
     authorization_resource,
     create_rebaseline_proposal,
+    persist_revision,
     plan_revision_directory,
     recover_rebaseline_transaction,
+    review_revision,
+    revision_payload,
     supersession_index,
 )
 from cw.core.initialize import backup_metadata
@@ -212,9 +216,30 @@ class LegacyPlanRevisionIndexTests(unittest.TestCase):
 
 
 class RebaselineCase:
-    def __init__(self, *, phases: int = 1, unicode_name: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        phases: int = 1,
+        unicode_name: bool = False,
+        current_revision: bool = False,
+    ) -> None:
         self.repo = TempRepo(name="CW Dashboard São Paulo" if unicode_name else "cw-dashboard", phases=phases)
         self.phase_number = phases
+        if current_revision:
+            document = _read_document(self.repo.root / ".codex/workflow/phases.yaml")
+            revision = revision_payload(
+                self.repo.root,
+                document,
+                parent_revision_id=None,
+                actor_id="test-initializer",
+                actor_origin="internal_supervisor",
+            )
+            persist_revision(self.repo.root, revision)
+            state = self.repo.state()
+            state["active_plan_revision"] = revision["plan_revision_id"]
+            state["active_plan_revision_sha256"] = revision["canonical_workflow_sha256"]
+            state["superseded_plan_revisions"] = []
+            save_state(self.repo.root, state)
         for number in range(1, phases):
             self.repo.artifact(number)
             self.repo.ready(number)
@@ -436,6 +461,149 @@ class PlanRevisionAuthorizationTests(unittest.TestCase):
             self.assertFalse(outcome.idempotent_replay)
         finally:
             application.shutdown()
+
+
+class HistoricalReviewRevisionTests(unittest.TestCase):
+    def _case_with_revise_attempts(
+        self,
+        attempts: int = 2,
+    ) -> tuple[RebaselineCase, str, str]:
+        case = RebaselineCase(current_revision=True)
+        first = str(case.repo.state()["last_review"])
+        for attempt in range(2, attempts + 1):
+            case.repo.ready()
+            validate_current_phase(
+                case.project,
+                f"validation-a-phase-1-attempt-{attempt}",
+            )
+            try:
+                run_review(
+                    case.repo.root,
+                    case.repo.workflow,
+                    case.repo.workflow.phases[0],
+                    case.repo.state(),
+                    FakeAdapter(result(1, "REVISE", "FAIL")),
+                )
+            except HumanActionRequired:
+                if attempt != case.repo.workflow.max_review_attempts:
+                    raise
+        terminal = str(case.repo.state()["last_review"])
+        return case, first, terminal
+
+    def test_unique_revision_supersession_preserves_earlier_attempts(self) -> None:
+        case, first, terminal = self._case_with_revise_attempts(attempts=3)
+        try:
+            before = {
+                path.relative_to(case.repo.root).as_posix(): path.read_bytes()
+                for path in (case.repo.root / ".cw/reviews").glob("*.json")
+            }
+            proposal = case.preview()
+            outcome = case.apply(proposal, operation_id="historical-attempts")
+            workflow = load_workflow(case.repo.root)
+            state = load_state(case.repo.root)
+
+            index = supersession_index(case.repo.root)
+            self.assertNotIn(first, index)
+            self.assertIn(terminal, index)
+            _, first_revision, first_superseded = review_revision(
+                case.repo.root,
+                workflow,
+                state,
+                first,
+                load_json(case.repo.root / first),
+            )
+            _, terminal_revision, terminal_superseded = review_revision(
+                case.repo.root,
+                workflow,
+                state,
+                terminal,
+                load_json(case.repo.root / terminal),
+            )
+            self.assertEqual(outcome["old_plan_revision_id"], first_revision)
+            self.assertEqual(first_revision, terminal_revision)
+            self.assertFalse(first_superseded)
+            self.assertTrue(terminal_superseded)
+            self.assertEqual(3, state["attempt"])
+            self.assertEqual(0, state["revision_attempt"])
+            self.assertEqual(before, {
+                reference: (case.repo.root / reference).read_bytes()
+                for reference in before
+            })
+            self.assertEqual(
+                audit_history(case.repo.root, workflow, state),
+                audit_history(case.repo.root, workflow, state),
+            )
+        finally:
+            case.close()
+
+    def test_historical_review_without_revision_transition_fails_closed(self) -> None:
+        case, first, _ = self._case_with_revise_attempts()
+        try:
+            proposal = case.preview()
+            case.apply(proposal, operation_id="missing-transition")
+            workflow = load_workflow(case.repo.root)
+            state = load_state(case.repo.root)
+            with patch("cw.core.revisions.supersession_index", return_value={}):
+                with self.assertRaises(CwError) as raised:
+                    review_revision(
+                        case.repo.root,
+                        workflow,
+                        state,
+                        first,
+                        load_json(case.repo.root / first),
+                    )
+            self.assertEqual(ErrorCode.SUPERSESSION_INVALID, raised.exception.code)
+            self.assertEqual("Historical review has no supersession", raised.exception.message)
+        finally:
+            case.close()
+
+    def test_ambiguous_revision_transition_fails_closed(self) -> None:
+        case, first, terminal = self._case_with_revise_attempts()
+        try:
+            proposal = case.preview()
+            case.apply(proposal, operation_id="ambiguous-transition")
+            workflow = load_workflow(case.repo.root)
+            state = load_state(case.repo.root)
+            index = supersession_index(case.repo.root)
+            direct = dict(index[terminal])
+            ambiguous = dict(direct)
+            ambiguous["new_plan_revision_id"] = "pr-" + "f" * 64
+            with patch(
+                "cw.core.revisions.supersession_index",
+                return_value={terminal: direct, "other-review": ambiguous},
+            ):
+                with self.assertRaises(CwError) as raised:
+                    review_revision(
+                        case.repo.root,
+                        workflow,
+                        state,
+                        first,
+                        load_json(case.repo.root / first),
+                    )
+            self.assertEqual(ErrorCode.SUPERSESSION_INVALID, raised.exception.code)
+            self.assertEqual(
+                "Historical review revision has ambiguous supersession",
+                raised.exception.message,
+            )
+        finally:
+            case.close()
+
+    def test_active_terminal_review_requires_no_supersession(self) -> None:
+        case = RebaselineCase(current_revision=True)
+        try:
+            reference = str(case.repo.state()["last_review"])
+            _, identifier, superseded = review_revision(
+                case.repo.root,
+                case.repo.workflow,
+                case.repo.state(),
+                reference,
+                load_json(case.repo.root / reference),
+            )
+            self.assertEqual(case.repo.state()["active_plan_revision"], identifier)
+            self.assertFalse(superseded)
+            self.assertEqual({}, supersession_index(case.repo.root))
+        finally:
+            case.close()
 
 
 class PlanRevisionIntegrityTests(unittest.TestCase):

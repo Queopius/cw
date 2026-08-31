@@ -216,6 +216,12 @@ record binds its path and SHA-256 to revision A, proposal/revision B, reason,
 human authorization, operation, nonce, timestamp, CW version, and resulting
 state. Revision B activates as `READY` with no inherited current-phase gate.
 
+The bound review is the terminal `REVISE` that authorizes correcting revision
+A. Earlier review attempts from revision A remain immutable historical records;
+they do not receive fabricated per-review supersessions. Audit resolves them
+against revision A only when exactly one validated revision transition leaves
+that historical revision. A missing or ambiguous transition fails closed.
+
 Global phase and validation attempts remain monotonic. The first review under
 revision B is global attempt 2 when revision A consumed attempt 1; it is
 revision attempt 1. Validation records likewise expose both global and
