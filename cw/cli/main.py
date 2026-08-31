@@ -329,7 +329,7 @@ def command_remote(args: argparse.Namespace, console: Console) -> int:
                 issuer=required(args.issuer_url, "--issuer-url"),
                 resource=required(args.resource_url, "--resource-url"),
                 jwks_uri=required(args.jwks_url, "--jwks-url"),
-                documentation_url="https://docs.cwcli.dev/remote-auth/",
+                documentation_url="https://docs.cwcli.dev/en/stable/remote-auth/",
             )
             database = Path(required(args.database, "--database"))
             store = RemoteStore(database)

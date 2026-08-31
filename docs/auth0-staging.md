@@ -1,7 +1,7 @@
 # Auth0 staging configuration for CW 0.14 remote gateway
 
-This document is the repository-side staging configuration for a real CW 0.14
-public endpoint. It is executable guidance for a human operator; no secrets are
+This document is the repository-side staging configuration for the real CW
+Core `0.18.3` public staging endpoint. It is executable guidance for a human operator; no secrets are
 stored in this repository.
 
 ## Scope
@@ -22,7 +22,17 @@ stored in this repository.
 - <https://auth0.com/docs/get-started/applications/dynamic-client-registration>
 - <https://auth0.com/docs/get-started/authentication-and-authorization-flow/authorization-code-flow-with-pkce>
 
-No material model change invalidated CW 0.13/0.14 assumptions.
+No material model change invalidated the `cw.remote.v1` assumptions.
+
+## Current live blocker (2026-08-29)
+
+Health, readiness, protected-resource metadata, Auth0 OIDC/OAuth discovery,
+DCR advertisement, and PKCE `S256` pass. `/remote/pair` correctly starts OAuth,
+but Auth0 rejects the configured browser pairing client for audience
+`https://staging-mcp.cwcli.dev/mcp`. Device approval, project grant, outbound
+agent, and real-project ChatGPT acceptance are blocked until a human Auth0
+operator grants that application access to the staging API. No client secret is
+required or stored by CW.
 
 ## Auth0 resource server contract (required)
 
