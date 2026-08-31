@@ -156,7 +156,9 @@ cw plan rebaseline recover --phase 02-active --review-ref .cw/reviews/02-active-
 ```
 
 Planner infrastructure failures preserve the pending goal for `cw retry`; an
-invalid or partial plan is never installed.
+invalid or partial plan is never installed. The same command narrowly recovers
+a host-interrupted `PLANNING` state only when the workflow remains
+`NOT_CREATED` and no plan hash, phase, review, or gate exists.
 
 `amend` accepts a repository-relative regular file outside `.cw/`, `.codex/`,
 and `.git/`. JSON and single-document YAML are supported in every normal wheel
@@ -359,6 +361,7 @@ cw retry
 ```
 
 It refuses deterministic configuration errors and completed workflows.
+It also refuses ambiguous or partially persisted planning state.
 
 ## cw history
 

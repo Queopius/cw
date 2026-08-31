@@ -671,6 +671,42 @@ def command_retry(
     _, state, workflow = context(root)
     from cw.core.review_infrastructure_recovery import pending_legacy_authorization
 
+    status = WorkflowState(state["status"])
+    if status is WorkflowState.PLANNING:
+        recoverable = (
+            not workflow.phases
+            and workflow.status == "NOT_CREATED"
+            and state.get("current_phase") is None
+            and state.get("workflow_version") is None
+            and state.get("workflow_sha256") is None
+            and isinstance(state.get("pending_goal"), str)
+            and bool(state["pending_goal"].strip())
+            and state.get("last_review") is None
+            and state.get("last_gate") is None
+        )
+        if not recoverable:
+            raise CwError(
+                "Interrupted planning state is not safe to retry automatically",
+                ErrorCode.INVALID_STATE,
+                "Run: cw repair",
+            )
+        recovered = CwError(
+            "Planning was interrupted before a plan was persisted",
+            ErrorCode.PLANNER_TRANSPORT_ERROR,
+            "Run: cw retry",
+            details="stage=planning_recovery provider=codex mode=stdin retry_safe=true",
+        )
+        with operation_lock(root, "retry-planning-recovery"):
+            state["last_error"] = state_error(recovered)
+            mark_infrastructure_error(state, recovered, operation="planning", phase=None)
+            state.setdefault("history", []).append({
+                "timestamp": utc_now(), "phase": None,
+                "action": "planning_failure_recovered", "operation": "planning",
+                "error_code": recovered.code.value,
+            })
+            transition(root, state, WorkflowState.ERROR, force_error=True)
+        status = WorkflowState.ERROR
+
     legacy_auth = pending_legacy_authorization(root, state)
     metadata: dict[str, Any] | None
     if workflow.phases and derive_effective_workflow_state(root, workflow, state).is_complete:

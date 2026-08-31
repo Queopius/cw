@@ -242,6 +242,7 @@ class StreamingAdapterTests(unittest.TestCase):
         def __init__(self, command, **_kwargs):
             self.command = command
             self.pid = 777
+            self.stdin = io.BytesIO()
             self.stdout = io.StringIO("\n".join((
                 json.dumps({"type": "thread.started", "thread_id": "session-1"}),
                 json.dumps({"type": "turn.started"}),

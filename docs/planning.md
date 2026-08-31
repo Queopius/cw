@@ -47,6 +47,21 @@ Codex authentication environment. CW captures stdout and stderr separately;
 diagnostic MCP startup noise does not override exit code zero and a valid
 structured result.
 
+CW sends planner, reviewer, completion-reviewer, extension-planner, and
+implementer prompts as exact UTF-8 bytes over the child process's standard
+input. Prompt content is not placed in process arguments, environment variables,
+or repository files. The transport accepts at most 4 MiB per prompt and creates
+no prompt temporary files. This bound is well above the planner's bounded
+repository-evidence budget while preventing unbounded process input.
+
+Planning first persists the pending goal and `PLANNING` state, then starts the
+read-only child. A classified launch, transport, process, or timeout failure
+becomes a retryable `ERROR` with no plan or phase. If the host process stops
+after that durable transition but before it can record the failure, `cw retry`
+recognizes only the narrow `PLANNING` + `NOT_CREATED` state with a pending goal
+and no plan hash, phase, review, or gate. It records recovery evidence and
+retries the same goal. Any partially bound plan state fails closed instead.
+
 Plan states are distinct:
 
 - `NOT_CREATED`: initialization completed but no work was inferred.

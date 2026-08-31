@@ -10,12 +10,14 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+EXCEPTION_RECORD = "acceptance/governance-exception-2026-08-30.json"
 REQUIRED_DOCS = (
     "staging-environment.md",
     "auth0-staging.md",
     "acceptance/staging-bootstrap-0.14.md",
     "adr/0010-render-staging-hosting.md",
     "operations/staging-deploy.md",
+    "operations/governance-exceptions.md",
     "operations/gateway-runbook.md",
     "operations/agent-runbook.md",
     "operations/oauth-runbook.md",
@@ -64,6 +66,8 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     if contract.get("schema_version") != 1 or not isinstance(variables, list):
         errors.append("staging environment contract schema is invalid")
         return errors
+    if contract.get("deployment_branch") != "staging":
+        errors.append("public staging must deploy only from the governed staging branch")
     names = {item.get("name") for item in variables if isinstance(item, dict)}
     if not REQUIRED_RENDER_KEYS <= names:
         errors.append("staging environment contract is missing required gateway variables")
@@ -91,7 +95,7 @@ def validation_errors(root: Path = ROOT) -> list[str]:
         for phrase in (
             "runtime: docker", "healthCheckPath: /readyz", "mountPath: /var/lib/cw",
             "numInstances: 1", "autoDeployTrigger: checksPass",
-            "staging-mcp.cwcli.dev", "sync: false",
+            "branch: staging", "staging-mcp.cwcli.dev", "sync: false",
         ):
             if phrase not in render:
                 errors.append(f"render.yaml is missing required staging setting: {phrase}")
@@ -104,7 +108,25 @@ def validation_errors(root: Path = ROOT) -> list[str]:
     for relative in REQUIRED_DOCS:
         if not (root / "docs" / relative).is_file():
             errors.append(f"missing staging documentation: docs/{relative}")
-    scanned = [root / "render.yaml", root / "config/staging-environment.json", root / "config/staging-agent.example.env"]
+    exception_path = root / "docs" / EXCEPTION_RECORD
+    if not exception_path.is_file():
+        errors.append(f"missing governance exception record: docs/{EXCEPTION_RECORD}")
+    else:
+        exception = json.loads(exception_path.read_text(encoding="utf-8"))
+        if exception.get("schema_version") != 1:
+            errors.append("governance exception record schema is invalid")
+        if exception.get("classification") != "GOVERNANCE_ORDERING_EXCEPTION":
+            errors.append("governance exception classification is invalid")
+        if exception.get("commit_sha") != "0b8f0d7a46341629d1167c995ab27400dcc0ea95":
+            errors.append("governance exception record is not bound to the planner fix")
+        if exception.get("production_affected") is not False:
+            errors.append("governance exception must record production as unaffected")
+    scanned = [
+        root / "render.yaml",
+        root / "config/staging-environment.json",
+        root / "config/staging-agent.example.env",
+        exception_path,
+    ]
     scanned.extend(root / "docs" / relative for relative in REQUIRED_DOCS)
     combined = "\n".join(path.read_text(encoding="utf-8") for path in scanned if path.is_file())
     for pattern in SECRET_PATTERNS:

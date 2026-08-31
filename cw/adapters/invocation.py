@@ -51,7 +51,10 @@ def sanitized_invocation(
     command: Sequence[str], environment: Mapping[str, str], *, prompt: str | None = None
 ) -> dict[str, object]:
     argv = list(command)
-    if prompt is not None and argv and argv[-1] == prompt:
+    if prompt is not None and argv and argv[-1] == "-":
+        digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
+        argv[-1] = f"[PROMPT stdin sha256:{digest}]"
+    elif prompt is not None and argv and argv[-1] == prompt:
         digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
         argv[-1] = f"[PROMPT sha256:{digest}]"
     placeholders = {

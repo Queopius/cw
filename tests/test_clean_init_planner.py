@@ -14,7 +14,8 @@ from cw.adapters.codex import CodexAdapter, CodexResult
 from cw.adapters.structured_output import codex_schema, validate_codex_output_schema
 from cw.cli.main import main
 from cw.core.errors import CwError, ErrorCode
-from cw.core.state import load_state
+from cw.core.models import WorkflowState
+from cw.core.state import load_state, save_state, transition
 from cw.core.workflow import load_workflow
 from cw.planning.planner import Planner
 
@@ -286,6 +287,129 @@ class StructuredOutputCompatibilityTests(unittest.TestCase):
             self.assertTrue(state["infrastructure_error"]["retryable"])
         finally:
             repo.close()
+
+    def test_interrupted_planning_records_retryable_failure_and_retry_succeeds(self) -> None:
+        repo = CleanRepository()
+        try:
+            repo.invoke("init")
+            goal = "Build inventory API"
+            with patch("cw.cli.main.CodexAdapter.run_planner", side_effect=KeyboardInterrupt):
+                code, _ = repo.invoke("plan", "--goal", goal)
+            self.assertEqual(130, code)
+            failed = load_state(repo.root)
+            self.assertEqual("ERROR", failed["status"])
+            self.assertEqual("PLANNER_TRANSPORT_ERROR", failed["infrastructure_error"]["error_code"])
+            self.assertEqual(goal, failed["pending_goal"])
+            proposal = Planner().propose_plan(repo.root, "clean-project", goal)
+            with patch(
+                "cw.cli.main.CodexAdapter.run_planner",
+                return_value=CodexResult({"phases": proposal["phases"]}, ""),
+            ):
+                retry_code, _ = repo.invoke("retry")
+            self.assertEqual(0, retry_code)
+            self.assertEqual("PLAN_PROPOSED", load_state(repo.root)["status"])
+        finally:
+            repo.close()
+
+    def test_restart_recovers_stranded_planning_without_manual_state_edit(self) -> None:
+        repo = CleanRepository()
+        try:
+            repo.invoke("init")
+            goal = "Build inventory API"
+            state = load_state(repo.root)
+            state["pending_goal"] = goal
+            save_state(repo.root, state)
+            transition(repo.root, state, WorkflowState.PLANNING)
+            # A fresh CLI invocation models restart after the process died
+            # between the durable PLANNING transition and child launch.
+            proposal = Planner().propose_plan(repo.root, "clean-project", goal)
+            with patch(
+                "cw.cli.main.CodexAdapter.run_planner",
+                return_value=CodexResult({"phases": proposal["phases"]}, ""),
+            ):
+                code, output = repo.invoke("retry")
+            self.assertEqual(0, code, output)
+            recovered = load_state(repo.root)
+            self.assertEqual("PLAN_PROPOSED", recovered["status"])
+            actions = [event["action"] for event in recovered["history"]]
+            self.assertEqual(1, actions.count("planning_failure_recovered"))
+            self.assertEqual(1, actions.count("retry_started"))
+            self.assertEqual("PROPOSED", load_workflow(repo.root).status)
+            retry_again, _ = repo.invoke("retry")
+            self.assertEqual(1, retry_again)
+            self.assertEqual("PLAN_PROPOSED", load_state(repo.root)["status"])
+        finally:
+            repo.close()
+
+    def test_partial_planning_state_is_not_recovered_as_an_empty_plan(self) -> None:
+        repo = CleanRepository()
+        try:
+            repo.invoke("init")
+            state = load_state(repo.root)
+            state["pending_goal"] = "Build inventory API"
+            state["workflow_sha256"] = "sha256:" + "a" * 64
+            save_state(repo.root, state)
+            transition(repo.root, state, WorkflowState.PLANNING)
+            code, output = repo.invoke("retry")
+            self.assertEqual(1, code)
+            self.assertIn("not safe to retry", output)
+            self.assertEqual("PLANNING", load_state(repo.root)["status"])
+            self.assertEqual("NOT_CREATED", load_workflow(repo.root).status)
+        finally:
+            repo.close()
+
+    def test_malformed_planner_output_returns_to_initialized_and_can_be_planned_again(self) -> None:
+        repo = CleanRepository()
+        try:
+            repo.invoke("init")
+            goal = "Build inventory API"
+            malformed = CodexResult({"unexpected": []}, "")
+            with patch("cw.cli.main.CodexAdapter.run_planner", return_value=malformed):
+                code, _ = repo.invoke("plan", "--goal", goal)
+            self.assertEqual(1, code)
+            self.assertEqual("INITIALIZED", load_state(repo.root)["status"])
+            self.assertEqual("NOT_CREATED", load_workflow(repo.root).status)
+            proposal = Planner().propose_plan(repo.root, "clean-project", goal)
+            with patch(
+                "cw.cli.main.CodexAdapter.run_planner",
+                return_value=CodexResult({"phases": proposal["phases"]}, ""),
+            ):
+                retry_code, _ = repo.invoke("plan", "--goal", goal)
+            self.assertEqual(0, retry_code)
+            self.assertEqual("PLAN_PROPOSED", load_state(repo.root)["status"])
+        finally:
+            repo.close()
+
+    def test_retry_succeeds_after_process_transport_and_timeout_failures(self) -> None:
+        failures = (
+            ErrorCode.PLANNER_PROCESS_ERROR,
+            ErrorCode.PLANNER_TRANSPORT_ERROR,
+            ErrorCode.PLAN_TIMEOUT,
+        )
+        for error_code in failures:
+            with self.subTest(error_code=error_code.value):
+                repo = CleanRepository()
+                try:
+                    repo.invoke("init")
+                    goal = "Build inventory API"
+                    failure = CwError(
+                        "Planner failed", error_code, "Run: cw retry",
+                        details="provider=codex mode=stdin retry_safe=true",
+                    )
+                    with patch("cw.cli.main.CodexAdapter.run_planner", side_effect=failure):
+                        first_code, _ = repo.invoke("plan", "--goal", goal)
+                    self.assertEqual(1, first_code)
+                    self.assertEqual("ERROR", load_state(repo.root)["status"])
+                    proposal = Planner().propose_plan(repo.root, "clean-project", goal)
+                    with patch(
+                        "cw.cli.main.CodexAdapter.run_planner",
+                        return_value=CodexResult({"phases": proposal["phases"]}, ""),
+                    ):
+                        retry_code, _ = repo.invoke("retry")
+                    self.assertEqual(0, retry_code)
+                    self.assertEqual("PLAN_PROPOSED", load_state(repo.root)["status"])
+                finally:
+                    repo.close()
 
     def test_planner_is_external_read_only_child_and_not_a_hook(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

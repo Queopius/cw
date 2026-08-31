@@ -86,10 +86,12 @@ workflow errors or diagnostic records. Diagnostic files remain local under
 sensitive. Raw mode means complete redacted diagnostic, not secret bypass.
 
 CW sends no telemetry. Repository content can be sent to Codex when a planner,
-implementer, or reviewer runs. Planning sends a bounded evidence selection over
-stdin, and phase review sends only bounded declared-artifact text and validated
-CW evidence. Do not place secrets in plans, prompts, artifacts, or diagnostic
-logs.
+implementer, or reviewer runs. All managed Codex prompts use bounded binary
+stdin as exact UTF-8 bytes; prompt content is absent from argv and environment
+variables, and no prompt temp file is created. The 4 MiB limit prevents
+unbounded input. Planning sends a smaller bounded evidence selection, and phase
+review sends only bounded declared-artifact text and validated CW evidence. Do
+not place secrets in plans, prompts, artifacts, or diagnostic logs.
 
 Completion review has broader system scope but remains read-only and receives
 normalized gate/contract evidence rather than unlimited runtime logs. Its

@@ -53,6 +53,7 @@
     "operations/agent-runbook.md",
     "operations/backup-restore.md",
     "operations/gateway-runbook.md",
+    "operations/governance-exceptions.md",
     "operations/incident-response.md",
     "operations/key-rotation.md",
     "operations/oauth-runbook.md",
@@ -144,6 +145,7 @@
     "operations/agent-runbook.md",
     "operations/backup-restore.md",
     "operations/gateway-runbook.md",
+    "operations/governance-exceptions.md",
     "operations/incident-response.md",
     "operations/key-rotation.md",
     "operations/oauth-runbook.md",
@@ -263,6 +265,9 @@
         },
         {
           "Release Governance": "governance.md"
+        },
+        {
+          "Governance Exceptions": "operations/governance-exceptions.md"
         }
       ]
     },

@@ -242,7 +242,9 @@ Before opening an interactive implementer CW runs a local Codex configuration
 preflight with the same global arguments. A rejected effective MCP configuration
 becomes non-retryable `CODEX_CONFIG_ERROR`, not a generic implementer crash.
 Sanitized invocation records under `.cw/logs/` retain exact flags and a small
-environment allowlist; prompts are represented by SHA-256 identifiers.
+environment allowlist; prompts are represented by SHA-256 identifiers. Managed
+Codex prompts are bounded to 4 MiB and sent as exact UTF-8 bytes through stdin,
+never argv, environment variables, or prompt temp files.
 
 `CodexRunResult` is the canonical process result shared by planner, reviewer,
 and implementer. It carries exit code, separately captured stdout/stderr,

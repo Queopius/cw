@@ -44,6 +44,13 @@ required status checks before merge, block force pushes, and restrict branch
 deletion. For `staging`, `release`, and `prod`, require both **CI** and
 **Platform Acceptance** before promotion.
 
+When classic branch protection is used, enable **Include administrators**
+(`enforce_admins=true`) for `dev`. Repository administrators must use the same
+pull-request path as normal development; emergency bypass is exceptional,
+explicitly authorized, and recorded rather than treated as routine Codex
+workflow. GitHub Actions retains read-only default workflow permissions and
+does not need a direct-push bypass for CI or pull-request checks.
+
 Rulesets are repository settings, not source-controlled CW behavior. Verify
 them in GitHub and do not describe them as active until that external
 configuration has been confirmed. Public source and external pull requests

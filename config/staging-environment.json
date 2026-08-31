@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "environment": "staging",
+  "deployment_branch": "staging",
   "provider": "Render",
   "identity_provider": "Auth0",
   "variables": [
