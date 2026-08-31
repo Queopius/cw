@@ -297,6 +297,7 @@ silently. Managed installations update explicitly:
 cw update --check
 cw update --info
 cw update
+cw update --with-remote
 cw update rollback
 ```
 

@@ -20,6 +20,7 @@ check:
 	python3 scripts/validate_plugin_production_readiness.py
 	python3 scripts/validate_remote_candidate.py
 	python3 scripts/validate_staging_bootstrap.py
+	python3 scripts/validate_production_deployment.py
 	python3 scripts/build_plugin_candidate.py --check
 
 plugin-check:
@@ -29,6 +30,8 @@ plugin-check:
 	python3 -m unittest tests.test_plugin_candidate tests.test_plugin_installation tests.test_chatgpt_development tests.test_plugin_production_readiness
 
 production-readiness-check: plugin-check
+	python3 scripts/validate_production_deployment.py
+	python3 -m unittest tests.test_production_deployment
 
 docs-check:
 	python3 scripts/check_cli_docs.py

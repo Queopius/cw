@@ -45,3 +45,8 @@ Render staging deployment, rollback, incident, backup/restore, and rotation
 procedures live under [operations](operations/staging-deploy.md). Their mere
 presence is not acceptance evidence; each procedure remains NOT EXERCISED
 until its external result is recorded.
+
+The separate bounded production topology, backup/restore exercise, first-deploy
+rollback, and current operator-revocation blocker are documented in the
+[Production EAP operations runbook](operations/production-eap.md). It makes no
+HA or horizontal-scaling claim.

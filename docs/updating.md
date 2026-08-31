@@ -8,6 +8,7 @@ schemas independently. The default `stable` channel excludes prereleases;
 cw update --check
 cw update --info
 cw update
+cw update --with-remote
 cw update --version X.Y.Z
 cw update rollback
 cw changelog
@@ -29,6 +30,12 @@ downloads to private staging, verifies SHA-256, rejects traversal and links,
 performs a staged smoke test, and atomically changes `current`. Failure leaves
 the running installation selected. The previous healthy version remains for
 rollback and retention is bounded.
+
+`cw update --with-remote` provisions the authoritative
+`codex-workflow[remote]` dependency set under the staged version's own
+`python/` directory. CW verifies that remote imports resolve from that
+directory before activation. The feature marker is version-local, so later
+updates preserve it and rollback still selects the untouched previous runtime.
 
 Core 0.18.3 preserves project schema 1, existing readiness and Verification
 Receipts, historical semantic reviews, and pending legacy retry authorization.

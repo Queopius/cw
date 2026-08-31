@@ -1,11 +1,11 @@
 # Plugin production deployment contract
 
-The current Plugin 0.1.0 does not deploy a production runtime. It retains the
-production contract introduced in Core 0.12 and selected in
-[ADR 0005](adr/0005-production-mcp-relay.md). Core 0.14 implements a deliberately
-non-production Render/Auth0 staging adapter for testing in
-[ADR 0010](adr/0010-render-staging-hosting.md); those vendors are not permanent
-CW architecture dependencies.
+The current Plugin 0.1.0 does not deploy a production runtime. The repository
+now contains a separate, non-deploying Production EAP Blueprint and fail-closed
+environment contract described in the [Production EAP operations
+runbook](operations/production-eap.md). It retains the relay contract selected in
+[ADR 0005](adr/0005-production-mcp-relay.md). The staging adapter in
+[ADR 0010](adr/0010-render-staging-hosting.md) remains isolated and unchanged.
 
 ## Components and ownership
 
@@ -54,7 +54,8 @@ concurrency, rate-limit, audit, key rotation, revocation, package provenance,
 incident rollback, and installed local-agent tests. A public endpoint must not
 be deployed merely to satisfy documentation.
 
-The staging procedure is in [the staging deployment runbook](operations/staging-deploy.md).
-Staging HTTPS MCP and OAuth discovery are deployed for testing. They are not a
-production endpoint or submission target. Production remains not deployed and
-plugin submission remains blocked.
+The staging procedure is in [the staging deployment runbook](operations/staging-deploy.md),
+and production backup/restore/rollback constraints are in the [Production EAP
+operations runbook](operations/production-eap.md). Staging real-project E2E is
+functional for testing. It is not a production endpoint or submission target.
+Production remains not deployed and Plugin submission remains blocked.

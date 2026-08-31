@@ -5,6 +5,12 @@ description: Govern work in an initialized CW project using normalized CW status
 
 # CW Workflow
 
+CW — Codex Workflow is the governance layer for an already initialized CW
+project. Invoke it for project state, phase evidence, blockers, gates,
+Completion Contracts, Program Review, and the narrow controlled actions listed
+below. Do not invoke it as a general shell, filesystem, Git, repair, release,
+deployment, or workflow-editing tool.
+
 Use CW as the source of truth for workflow state. Treat this skill as guidance;
 CW Engine and `CWApplication` enforce every transition and authorization rule.
 The client surface may expose only reads. If CW reports
@@ -37,8 +43,8 @@ Edu. Trust actual tool discovery and the server result.
 - Poll long-running actions with `cw_operation_status`. Keep `FAILED`,
   `BLOCKED`, and `CANCELLED` distinct.
 - Request `cw_request_review` only after validation evidence is ready. The
-  independent read-only CW reviewer decides; never review or approve the phase
-  yourself.
+  independent read-only Program Review decides; never review or approve the
+  phase yourself. Program Review evidence is not a human gate approval.
 - Call `cw_retry` only when CW reports a retryable current failure. Retry is not
   repair, rewind, rebaseline, gate removal, or reopening completion.
 - Call `cw_operation_cancel` only for a queued operation. If CW refuses to
@@ -65,6 +71,12 @@ same request safely; never reuse it for a different project or payload.
   conflict and continue using CW evidence and server policy.
 - ChatGPT confirmation is additional UI safety, not CW authorization. Never
   infer a high-consequence grant from confirmation or conversation text.
+- **Technical capability does not imply governance authority.** OAuth scope,
+  tool availability, repository access, and platform confirmation do not grant
+  human gate approval or another high-consequence authority.
+- **Natural-language consent is not sufficient high-consequence
+  authorization.** A user saying “yes,” “approve,” or similar words cannot
+  replace CW's typed, action-bound human authorization ceremony.
 - Interpret `HUMAN_REVIEW_REQUIRED` as a governance escalation requiring the
   explicitly designated human authority, not an infrastructure error and not
   permission for the model to approve.

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 import os
 import shutil
 import subprocess
@@ -12,7 +13,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cw.core.platform import platform_name
-from cw.update.installation import InstallPaths, RuntimePointer
+from cw.update.installation import (
+    REMOTE_RUNTIME_FEATURE,
+    InstallPaths,
+    RuntimePointer,
+    provision_remote_runtime,
+    runtime_environment,
+    runtime_features,
+    verify_remote_runtime,
+    write_runtime_features,
+)
 
 
 def copy_runtime(source: Path, destination: Path) -> None:
@@ -20,7 +30,7 @@ def copy_runtime(source: Path, destination: Path) -> None:
         source / "cw", destination / "cw",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
-    for name in ("VERSION", "LICENSE", "NOTICE", "CHANGELOG.md"):
+    for name in ("VERSION", "LICENSE", "NOTICE", "CHANGELOG.md", "pyproject.toml"):
         shutil.copy2(source / name, destination / name)
     completed = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=source, text=True, encoding="utf-8", errors="replace",
@@ -45,12 +55,9 @@ def copy_runtime(source: Path, destination: Path) -> None:
 
 
 def smoke(directory: Path, version: str) -> None:
-    environment = os.environ.copy()
-    environment.pop("PYTHONPATH", None)
-    environment["CW_NO_UPDATE_CHECK"] = "1"
     result = subprocess.run(
         [sys.executable, str(directory / "entrypoint.py"), "version", "--json"],
-        cwd=directory, env=environment, text=True, encoding="utf-8", errors="replace", capture_output=True,
+        cwd=directory, env=runtime_environment(directory), text=True, encoding="utf-8", errors="replace", capture_output=True,
         timeout=20, check=False,
     )
     if result.returncode != 0:
@@ -58,6 +65,8 @@ def smoke(directory: Path, version: str) -> None:
     payload = json.loads(result.stdout)
     if payload.get("version") != version:
         raise RuntimeError(f"staged version mismatch: {payload.get('version')} != {version}")
+    if REMOTE_RUNTIME_FEATURE in runtime_features(directory):
+        verify_remote_runtime(directory)
 
 
 def migrate_legacy(share: Path, versions: Path) -> str | None:
@@ -102,6 +111,9 @@ else:
 entrypoint = runtime / "entrypoint.py"
 if not entrypoint.is_file():
     raise SystemExit("CW managed runtime is unavailable; reinstall CW")
+dependencies = runtime / "python"
+if dependencies.is_dir():
+    sys.path.insert(0, str(dependencies))
 sys.path.insert(0, str(runtime))
 sys.argv = ["cw", *sys.argv[1:]]
 runpy.run_path(str(entrypoint), run_name="__main__")
@@ -134,6 +146,8 @@ def _install_launcher(paths: InstallPaths, platform: str) -> Path:
 
 def install(
     source: Path, *, paths: InstallPaths | None = None, platform: str | None = None,
+    with_remote: bool = False,
+    remote_installer=provision_remote_runtime,
 ) -> None:
     home = Path.home()
     selected_platform = platform_name(platform)
@@ -158,6 +172,13 @@ def install(
     try:
         stage.mkdir(mode=0o700)
         copy_runtime(source, stage)
+        previous_features = runtime_features(versions / previous) if previous else frozenset()
+        selected_features = set(previous_features)
+        if with_remote:
+            selected_features.add(REMOTE_RUNTIME_FEATURE)
+        if REMOTE_RUNTIME_FEATURE in selected_features:
+            remote_installer(stage)
+        write_runtime_features(stage, selected_features)
         smoke(stage, version)
         if not final.exists():
             os.replace(stage, final)
@@ -202,7 +223,7 @@ def install(
 
     launcher = _install_launcher(install_paths, selected_platform)
 
-    if selected_platform == "posix" and not os.environ.get("CW_BIN_DIR"):
+    if selected_platform == "posix" and paths is None and not os.environ.get("CW_BIN_DIR"):
         path_line = 'export PATH="$HOME/.local/bin:$PATH"'
         for rc in (home / ".profile", home / ".zshrc"):
             rc.touch()
@@ -213,6 +234,8 @@ def install(
 
     print(f"Installed CW by Queopius {version}")
     print(f"Executable: {launcher}")
+    if REMOTE_RUNTIME_FEATURE in runtime_features(final):
+        print("Managed runtime feature: remote")
     if str(bin_dir) not in os.environ.get("PATH", "").split(os.pathsep):
         if selected_platform == "nt":
             print("Open a new PowerShell session after adding the CW bin directory to your user PATH.")
@@ -221,6 +244,8 @@ def install(
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: install.py SOURCE_ROOT")
-    install(Path(sys.argv[1]).resolve())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("source_root", type=Path)
+    parser.add_argument("--with-remote", action="store_true")
+    arguments = parser.parse_args()
+    install(arguments.source_root.resolve(), with_remote=arguments.with_remote)

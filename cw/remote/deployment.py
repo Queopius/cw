@@ -27,11 +27,83 @@ from .server import (
 )
 
 
+_PRODUCTION_REQUIRED_VARIABLES = (
+    "CW_PLUGIN_VERSION",
+    "CW_GATEWAY_RESOURCE_URL",
+    "CW_GATEWAY_DATABASE",
+    "CW_GATEWAY_HOST",
+    "CW_GATEWAY_ALLOWED_HOSTS",
+    "CW_GATEWAY_DOCUMENTATION_URL",
+    "CW_OAUTH_ISSUER_URL",
+    "CW_OAUTH_JWKS_URL",
+    "CW_OAUTH_WORKSPACE_CLAIM",
+    "CW_OAUTH_ALGORITHMS",
+    "CW_PAIRING_WEB_CLIENT_ID",
+    "CW_PAIRING_WEB_REDIRECT_URI",
+    "CW_PAIRING_SESSION_SECRET",
+    "CW_LIMIT_REQUESTS_PER_MINUTE",
+    "CW_LIMIT_DEVICE_REQUESTS_PER_MINUTE",
+    "CW_LIMIT_PAIRING_REQUESTS_PER_MINUTE",
+    "CW_LIMIT_CONCURRENT_PER_DEVICE",
+    "CW_LIMIT_REQUEST_BYTES",
+    "CW_LIMIT_AGENT_MESSAGE_BYTES",
+    "CW_LIMIT_OPERATION_TIMEOUT_SECONDS",
+    "CW_LIMIT_AGENT_IDLE_SECONDS",
+    "CW_LIMIT_COMPLETED_CACHE",
+)
+
+_PRODUCTION_VALUES = {
+    "CW_PLUGIN_VERSION": "0.1.0",
+    "CW_GATEWAY_RESOURCE_URL": "https://mcp.cwcli.dev/mcp",
+    "CW_GATEWAY_DATABASE": "/var/lib/cw/gateway.sqlite3",
+    "CW_GATEWAY_HOST": "0.0.0.0",
+    "CW_GATEWAY_DOCUMENTATION_URL": "https://docs.cwcli.dev/en/stable/remote-auth/",
+    "CW_OAUTH_ISSUER_URL": "https://auth.cwcli.dev/",
+    "CW_OAUTH_JWKS_URL": "https://auth.cwcli.dev/.well-known/jwks.json",
+    "CW_OAUTH_WORKSPACE_CLAIM": "https://cwcli.dev/claims/workspace",
+    "CW_OAUTH_ALGORITHMS": "RS256",
+    "CW_PAIRING_WEB_REDIRECT_URI": "https://mcp.cwcli.dev/remote/pair/callback",
+    "CW_LIMIT_REQUESTS_PER_MINUTE": "120",
+    "CW_LIMIT_DEVICE_REQUESTS_PER_MINUTE": "240",
+    "CW_LIMIT_PAIRING_REQUESTS_PER_MINUTE": "20",
+    "CW_LIMIT_CONCURRENT_PER_DEVICE": "4",
+    "CW_LIMIT_REQUEST_BYTES": "65536",
+    "CW_LIMIT_AGENT_MESSAGE_BYTES": "524288",
+    "CW_LIMIT_OPERATION_TIMEOUT_SECONDS": "30",
+    "CW_LIMIT_AGENT_IDLE_SECONDS": "45",
+    "CW_LIMIT_COMPLETED_CACHE": "1024",
+}
+
+
 def _required(environment: Mapping[str, str], name: str) -> str:
     value = environment.get(name, "").strip()
     if not value:
-        raise ValueError(f"Required staging environment variable is missing: {name}")
+        raise ValueError(f"Required deployment environment variable is missing: {name}")
     return value
+
+
+def _validate_production_environment(environment: Mapping[str, str]) -> None:
+    """Fail closed when the canonical production deployment contract drifts."""
+
+    for name in _PRODUCTION_REQUIRED_VARIABLES:
+        _required(environment, name)
+    for name, expected in _PRODUCTION_VALUES.items():
+        if environment.get(name, "").strip() != expected:
+            raise ValueError(f"Production deployment variable does not match the canonical contract: {name}")
+
+    hosts = tuple(
+        item.strip().lower()
+        for item in environment["CW_GATEWAY_ALLOWED_HOSTS"].split(",")
+        if item.strip()
+    )
+    if "mcp.cwcli.dev" not in hosts:
+        raise ValueError("Production allowed hosts must include mcp.cwcli.dev")
+    render_hosts = [
+        item for item in hosts
+        if re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.onrender\.com", item)
+    ]
+    if len(hosts) != 2 or len(render_hosts) != 1 or any("staging" in item for item in hosts):
+        raise ValueError("Production allowed hosts must include one exact non-staging Render hostname")
 
 
 def _positive_int(environment: Mapping[str, str], name: str, default: int) -> int:
@@ -86,6 +158,8 @@ class GatewayDeploymentConfig:
         deployment_environment = _required(values, "CW_DEPLOYMENT_ENV")
         if re.fullmatch(r"[a-z][a-z0-9-]{0,31}", deployment_environment) is None:
             raise ValueError("CW_DEPLOYMENT_ENV is invalid")
+        if deployment_environment == "production":
+            _validate_production_environment(values)
         build_sha = (values.get("CW_BUILD_SHA") or values.get("RENDER_GIT_COMMIT") or "").strip()
         if re.fullmatch(r"[0-9a-f]{40}", build_sha) is None:
             raise ValueError("CW_BUILD_SHA or RENDER_GIT_COMMIT must be a full lowercase Git SHA")
@@ -94,7 +168,10 @@ class GatewayDeploymentConfig:
         resource = _https("CW_GATEWAY_RESOURCE_URL", _required(values, "CW_GATEWAY_RESOURCE_URL"))
         issuer = _https("CW_OAUTH_ISSUER_URL", _required(values, "CW_OAUTH_ISSUER_URL"))
         jwks = _https("CW_OAUTH_JWKS_URL", _required(values, "CW_OAUTH_JWKS_URL"))
-        documentation = values.get("CW_GATEWAY_DOCUMENTATION_URL", "https://docs.cwcli.dev/remote-auth/").strip()
+        documentation = values.get(
+            "CW_GATEWAY_DOCUMENTATION_URL",
+            "https://docs.cwcli.dev/en/stable/remote-auth/",
+        ).strip()
         _https("CW_GATEWAY_DOCUMENTATION_URL", documentation)
         database = Path(_required(values, "CW_GATEWAY_DATABASE"))
         if not database.is_absolute():

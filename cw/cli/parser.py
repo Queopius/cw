@@ -174,6 +174,10 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--info", action="store_true", help="Show release information without installing")
     update.add_argument("--version", help="Install an explicit version from the configured channel")
     update.add_argument("--channel", choices=("stable", "beta", "dev"), help="Use a channel for this invocation")
+    update.add_argument(
+        "--with-remote", action="store_true",
+        help="Provision the managed runtime with codex-workflow[remote] dependencies",
+    )
     integrations = subcommands.add_parser("integrations", add_help=True)
     _common(integrations, suppress_defaults=True)
     integrations.add_argument("action", nargs="?", choices=("status", "check", "info"), default="status")
@@ -250,4 +254,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         selected = sum(bool(value) for value in (args.rollback, args.check, args.info, args.version))
         if selected > 1:
             build_parser().error("cw update accepts only one action")
+        if args.with_remote and (args.rollback or args.check or args.info):
+            build_parser().error("cw update --with-remote is available only while installing")
     return args

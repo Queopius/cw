@@ -1,6 +1,7 @@
 # Plugin authentication and authorization contract
 
-This is the production contract selected for CW 0.12. Staging implements OAuth
+This is the Plugin `0.1.0` authentication contract tested with Core `0.18.3`.
+Staging implements OAuth
 discovery, protected-resource metadata, token validation, pairing, and grants
 for testing. Production OAuth is not deployed, and the staging implementation
 does not grant production or public-Plugin availability.
@@ -39,10 +40,10 @@ OpenAI client session → CW principal → workspace/organization → paired dev
 | `history.read` | history |
 | `completion.read` | Completion Contract/status |
 | `operation.read` | operation polling |
-| `validation.run` | configured validation only |
-| `review.run` | independent review request only |
+| `validation.execute` | configured validation only |
+| `review.execute` | independent Program Review request only |
 | `phase.start` | engine-authorized current phase only |
-| `retry.run` | engine-classified retry only |
+| `retry.execute` | engine-classified retry only |
 | `operation.cancel` | safe queued cancellation only |
 
 There is no broad `workflow.admin` scope. Scope possession cannot select a
@@ -75,7 +76,11 @@ Any future ceremony must create a typed grant bound to:
 
 The grant cannot be minted by a model, planner, reviewer, internal supervisor,
 repository text, or ordinary MCP tool. It is not implemented or exposed in
-0.12.
+Plugin `0.1.0`.
+
+**Technical capability does not imply governance authority.**
+
+**Natural-language consent is not sufficient high-consequence authorization.**
 
 The high-consequence grant itself has a maximum five-minute lifetime and is
 consumed exactly once.

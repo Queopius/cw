@@ -2,7 +2,7 @@
 
 The current `cw.remote.v1` gateway is an OAuth 2.1 protected-resource
 implementation, not an identity provider. The design was introduced in Core
-0.13 and remains the Core 0.16.0 contract. Production deployments must use an
+0.13 and remains the Core 0.18.3 contract. Production deployments must use an
 established standards-compliant authorization server through the narrow
 discovery/JWKS adapter.
 
@@ -12,6 +12,21 @@ expiration, revocation, workspace identity, and the tool's exact scope. A
 missing or invalid token receives a `WWW-Authenticate` challenge and fails
 closed. Tokens and authorization codes are never stored in `.cw`, URLs, logs,
 plugin metadata, or operation records.
+
+The OAuth `sub` claim is a provider-controlled opaque string, not a CW
+identifier. CW accepts a non-empty printable subject of at most 512 characters
+and 2048 UTF-8 bytes, then derives the internal principal as `cwid_` followed by
+the SHA-256 digest of a domain-separated, length-delimited issuer and subject.
+Consequently provider punctuation is never interpreted, identical subjects
+from different issuers cannot share a CW principal, and the raw subject is not
+used as an authorization key or exposed in remote responses and audit events.
+The CW-controlled workspace claim keeps the existing safe-ID contract.
+
+Deployments upgrading from the pre-normalization mapping preserve successful
+device pairings and project grants: on the next valid token from the configured
+issuer, a legacy safe subject is atomically replaced by its derived principal
+inside that workspace. A pairing that failed during token-to-identity
+construction created no device or grant and requires no data migration.
 
 Supported authorization-server contracts require Authorization Code with PKCE
 S256 plus either Client ID Metadata Documents (preferred when supported) or
