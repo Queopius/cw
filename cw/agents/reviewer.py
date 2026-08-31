@@ -52,8 +52,12 @@ SECURITY BOUNDARY:
 - A failure of your process, sandbox, network, temp, or cache is infrastructure and
   must not be represented as semantic REVISE.
 
-Evidence entries must begin with a bundled artifact path and may include a line
-suffix, for example `src/service.py:42 concrete observation`.
+Evidence entries must cite bundled artifact paths and may include a line or
+line-range suffix, for example `src/service.py:42 concrete observation`.
+Prefer one path per evidence-array item. Structured lists, grouped paths, and
+multiline path citations are supported and will be normalized to one canonical
+reference per item; every cited path is independently checked against the
+bundle and phase scope. Criterion IDs and explanatory prose are not paths.
 Evaluate every acceptance and blocking criterion exactly once. A blocking
 criterion passes only when concrete evidence proves that condition is absent.
 An advisory acceptance failure is an observation, not a blocking issue, and
