@@ -1333,7 +1333,27 @@ def review_revision(root: Path, workflow: Workflow, state: dict[str, Any], refer
             for gate in [load_json(path)]
         )
         if not gated:
-            raise CwError("Historical review has no supersession", ErrorCode.SUPERSESSION_INVALID)
+            historical = state.get("superseded_plan_revisions", [])
+            transitions = [
+                record for record in index.values()
+                if record.get("old_plan_revision_id") == identifier
+            ]
+            if (
+                not isinstance(historical, list)
+                or identifier not in historical
+                or not transitions
+            ):
+                raise CwError("Historical review has no supersession", ErrorCode.SUPERSESSION_INVALID)
+            if len(transitions) != 1:
+                raise CwError(
+                    "Historical review revision has ambiguous supersession",
+                    ErrorCode.SUPERSESSION_INVALID,
+                )
+            # A rebaseline supersedes the terminal REVISE review that justified
+            # the contract change. Earlier immutable attempts from the same plan
+            # revision remain historical rather than receiving fabricated
+            # per-review supersessions. The unique validated revision transition
+            # proves which immutable snapshot governs those attempts.
         return workflow_for_revision(root, identifier), identifier, False
     if not revision_path(root, identifier).exists() and identifier == active_id:
         return workflow, identifier, False
