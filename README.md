@@ -10,9 +10,6 @@
 
 **by Queopius**
 
-Queopius is a technology brand operated by Fantomid LLC,
-a New Mexico limited liability company.
-
 [Website](https://cwcli.dev) · [Documentation](https://docs.cwcli.dev) · [GitHub](https://github.com/Queopius/cw)
 
 [![Tests](https://github.com/Queopius/cw/actions/workflows/ci.yml/badge.svg?branch=prod)](https://github.com/Queopius/cw/actions/workflows/ci.yml)
